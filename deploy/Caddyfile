@@ -1,0 +1,25 @@
+(secure_headers) {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+        -Server
+    }
+}
+backend.ting.teamofsilicons.com {
+    import secure_headers
+    reverse_proxy 127.0.0.1:8080
+}
+ting.teamofsilicons.com {
+    import secure_headers
+    @api path /v1/*
+    handle @api {
+        reverse_proxy 127.0.0.1:8080
+    }
+    handle {
+        reverse_proxy https://silicon-ting.vercel.app {
+            header_up Host silicon-ting.vercel.app
+        }
+    }
+}

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Silicon Ting durable notification service on AWS with native Rust and Caddy HTTPS
+Parameters:
+  Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  Vpc:
+    Type: AWS::EC2::VPC::Id
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+Resources:
+  Artifacts:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      VersioningConfiguration: {Status: Enabled}
+      LifecycleConfiguration:
+        Rules:
+          - Id: ShortLivedRecoverySnapshots
+            Status: Enabled
+            Prefix: backups/
+            ExpirationInDays: 7
+            NoncurrentVersionExpiration: {NoncurrentDays: 1}
+
+  Runtime:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    Properties:
+      Name: silicon-ting/production/runtime
+      Description: Encrypted runtime credentials and configuration for Ting
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: TingRuntime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub '${Artifacts.Arn}/releases/*'}
+              - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${Artifacts.Arn}/backups/*'}
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref Runtime}
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Role]
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Ting HTTP/HTTPS; administrative access only through SSM
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+  Instance:
+    Type: AWS::EC2::Instance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: t4g.small
+      IamInstanceProfile: !Ref Profile
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: !Ref Subnet
+          AssociatePublicIpAddress: true
+          GroupSet: [!Ref SecurityGroup]
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 30, VolumeType: gp3, Encrypted: true, DeleteOnTermination: false}
+      Tags:
+        - {Key: Name, Value: silicon-ting-production}
+        - {Key: Service, Value: silicon-ting}
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y python3 sqlite
+          useradd --system --home-dir /var/lib/ting --shell /sbin/nologin ting
+          useradd --system --home-dir /var/lib/caddy --shell /sbin/nologin caddy
+          install -d -o ting -g ting -m 0700 /var/lib/ting
+          install -d -o caddy -g caddy -m 0700 /var/lib/caddy
+          install -d -m 0700 /etc/ting
+          install -d -m 0755 /opt/ting/releases /etc/caddy /etc/systemd/journald.conf.d
+          printf '[Journal]\nStorage=persistent\nSystemMaxUse=256M\n' > /etc/systemd/journald.conf.d/ting.conf
+          systemctl restart systemd-journald
+          systemctl enable --now amazon-ssm-agent
+  Address:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags: [{Key: Service, Value: silicon-ting}]
+Outputs:
+  InstanceId: {Value: !Ref Instance}
+  PublicIp: {Value: !Ref Address}
+  ArtifactBucket: {Value: !Ref Artifacts}
+  RuntimeSecret: {Value: !Ref Runtime}

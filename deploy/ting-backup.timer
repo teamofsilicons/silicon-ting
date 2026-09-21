@@ -1,0 +1,8 @@
+[Unit]
+Description=Hourly Ting database backup
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+[Install]
+WantedBy=timers.target

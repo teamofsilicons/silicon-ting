@@ -1,0 +1,70 @@
+{
+  "org_id": "tos",
+  "local_app_id": "ting",
+  "name": "Silicon Ting",
+  "description": "Silicon Ting is the notification service for people and software agents in the Silicon ecosystem. Applications register event types and obtain explicit IAM consent before notifying a recipient. Ting durably retains notifications, applies recipient preferences, and delivers independent copies to registered local webhooks through one system daemon. The command line supports inbox access, subscriptions, preferences, delivery setup, and bug reports. A SolidJS web application provides a companion inbox and configuration interface. All application sends use single-use IAM proofs bound to the exact request. Silent notifications remain available in the inbox without automatic delivery.",
+  "website_url": "https://ting.teamofsilicons.com",
+  "docs_url": "https://ting.teamofsilicons.com/docs",
+  "base_url": "https://backend.ting.teamofsilicons.com",
+  "webhook_url": "https://backend.ting.teamofsilicons.com/v1/iam/webhook",
+  "webhook_scope": [
+    "full"
+  ],
+  "app_scope": {
+    "iam": [
+      "self.identity.read",
+      "self.organizations.read",
+      "self.membership.read"
+    ],
+    "external": [
+      {
+        "app_id": "tos>honeycomb",
+        "endpoint_id": "honeycomb.apps.list"
+      }
+    ]
+  },
+  "obo_endpoints": [
+    {
+      "endpoint_id": "tings.send",
+      "path": "/v1/tings",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    },
+    {
+      "endpoint_id": "subscriptions.register",
+      "path": "/v1/subscriptions",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    },
+    {
+      "endpoint_id": "subscriptions.query",
+      "path": "/v1/subscriptions/query",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    },
+    {
+      "endpoint_id": "subscriptions.revoke",
+      "path": "/v1/subscriptions/revoke",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    },
+    {
+      "endpoint_id": "sent.query",
+      "path": "/v1/sent/query",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    }
+  ],
+  "obo_review_message": "Applications must notify only recipients who explicitly granted consent. Register the represented recipient through subscriptions.register, send only your own registered event types with unique idempotency keys, and query or revoke only your own grants and sent notifications. Every endpoint requires a single-use IAM proof bound to the exact method, path, organization and body.",
+  "testing_idle_days": 30
+}

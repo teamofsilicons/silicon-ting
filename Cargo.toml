@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/ting-server", "crates/ting-client", "crates/ting-cli", "crates/ting-daemon"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/teamofsilicons/silicon-ting"
+
+[profile.release]
+lto = "thin"
+strip = true

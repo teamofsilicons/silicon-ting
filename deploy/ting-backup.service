@@ -1,0 +1,7 @@
+[Unit]
+Description=Snapshot Ting durable data to encrypted S3
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ting/runtime.env
+ExecStart=/usr/bin/python3 /opt/ting/current/backup.py
+UMask=0077

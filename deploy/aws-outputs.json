@@ -1,0 +1,18 @@
+[
+    {
+        "OutputKey": "ArtifactBucket",
+        "OutputValue": "silicon-ting-production-artifacts-dnhhu0vcfcdt"
+    },
+    {
+        "OutputKey": "RuntimeSecret",
+        "OutputValue": "arn:aws:secretsmanager:us-east-1:234951665042:secret:silicon-ting/production/runtime-xltNGd"
+    },
+    {
+        "OutputKey": "InstanceId",
+        "OutputValue": "i-0559f9a77b4c1ca43"
+    },
+    {
+        "OutputKey": "PublicIp",
+        "OutputValue": "100.51.81.236"
+    }
+]

@@ -1,0 +1,25 @@
+[package]
+name = "silicon-ting-daemon"
+version = "0.1.0"
+edition = "2024"
+description = "One durable Ting receiver daemon per system"
+license = "MIT"
+repository = "https://github.com/teamofsilicons/silicon-ting"
+homepage = "https://ting.teamofsilicons.com"
+readme = "../../README.md"
+[[bin]]
+name = "ting-daemon"
+path = "src/main.rs"
+[dependencies]
+silicon-ting-client = { path = "../ting-client", version = "0.1.0" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
+sha2 = "0.10"
+chrono = "0.4"
