@@ -36,6 +36,9 @@ jobs:
       - name: Test Honeycomb archive handling
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: python3 scripts/test-package-honeycomb.py
+      - name: Test Unix installer directory boundary
+        if: runner.os != 'Windows'
+        run: python3 scripts/test-unix-installer.py
       - name: Test client, CLI, queue and transport
         run: cargo test --locked -p silicon-ting-client -p silicon-ting-cli -p silicon-ting-daemon --target ${{ matrix.target }}
       - name: Build release

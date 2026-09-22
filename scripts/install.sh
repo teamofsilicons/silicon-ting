@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the published CLI and one system service. No IAM login is performed.
 set -eu
-VERSION=${TING_VERSION:-v0.1.1}
+VERSION=${TING_VERSION:-v0.1.2}
 REPOSITORY=https://github.com/teamofsilicons/silicon-ting
 PREFIX=${TING_INSTALL_PREFIX:-/usr/local}
 case "$(uname -s)" in Darwin) OS=apple-darwin;; Linux) OS=unknown-linux-gnu;; *) echo 'Use the PowerShell installer on Windows; this shell installer supports macOS and Linux.' >&2; exit 1;; esac
@@ -10,6 +10,18 @@ OWNER=${SUDO_USER:-$(id -un)}
 if [ "$OWNER" = root ]; then echo 'Run as the account that owns your Ting profiles (sudo is requested for installation).' >&2; exit 1; fi
 if [ "$OS" = apple-darwin ]; then OWNER_HOME=$(dscl . -read "/Users/$OWNER" NFSHomeDirectory | sed 's/^NFSHomeDirectory: //'); else OWNER_HOME=$(getent passwd "$OWNER" | cut -d: -f6); fi
 case "$PREFIX" in /*) ;; *) echo 'TING_INSTALL_PREFIX must be absolute.' >&2; exit 1;; esac
+# Validate the fixed IPC directory before any privileged mutation. /var/tmp is sticky.
+IPC_DIR=/var/tmp/silicon-ting
+CREATE_IPC_DIR=0
+if [ -L "$IPC_DIR" ]; then
+  echo 'The Ting socket directory must not be a symbolic link.' >&2; exit 1
+elif [ -e "$IPC_DIR" ]; then
+  [ -d "$IPC_DIR" ] || { echo 'The Ting socket path must be a directory.' >&2; exit 1; }
+  if [ "$OS" = apple-darwin ]; then IPC_OWNER=$(stat -f %u "$IPC_DIR"); else IPC_OWNER=$(stat -c %u "$IPC_DIR"); fi
+  [ "$IPC_OWNER" = "$(id -u "$OWNER")" ] || { echo 'The Ting socket directory belongs to another account.' >&2; exit 1; }
+else
+  CREATE_IPC_DIR=1
+fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ "${TING_INSTALL_FROM_SOURCE:-0}" = 1 ]; then
@@ -28,10 +40,10 @@ else
   [ "$EXPECTED" = "$ACTUAL" ] || { echo 'Release checksum verification failed.' >&2; exit 1; }
   tar -xzf "$TMP/$ARCHIVE" -C "$TMP" ting ting-daemon
 fi
-sudo install -d -m 755 "$PREFIX/bin" /var/tmp/silicon-ting
+# A competing creation fails closed. Never follow this path with privileged chown/chmod.
+if [ "$CREATE_IPC_DIR" = 1 ]; then sudo -u "$OWNER" mkdir -m 700 "$IPC_DIR"; fi
+sudo install -d -m 755 "$PREFIX/bin"
 sudo install -m 755 "$TMP/ting" "$TMP/ting-daemon" "$PREFIX/bin/"
-sudo chown "$OWNER" /var/tmp/silicon-ting
-sudo chmod 700 /var/tmp/silicon-ting
 if [ "$OS" = apple-darwin ]; then
   cat > "$TMP/com.silicon.ting.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

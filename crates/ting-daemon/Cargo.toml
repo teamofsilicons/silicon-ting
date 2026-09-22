@@ -1,6 +1,6 @@
 [package]
 name = "silicon-ting-daemon"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "One durable Ting receiver daemon per system"
 license = "MIT"
@@ -11,7 +11,7 @@ readme = "../../README.md"
 name = "ting-daemon"
 path = "src/main.rs"
 [dependencies]
-silicon-ting-client = { path = "../ting-client", version = "0.1.1" }
+silicon-ting-client = { path = "../ting-client", version = "0.1.2" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"

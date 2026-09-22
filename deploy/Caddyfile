@@ -15,16 +15,7 @@
 }
 backend.ting.teamofsilicons.com {
     import secure_headers
-    @integration_probe {
-        path /internal/honeycomb/*
-        header Authorization "Bearer {$TING_PROBE_CONTROL_TOKEN}"
-    }
-    handle @integration_probe {
-        reverse_proxy 127.0.0.1:8099
-    }
-    handle {
-        reverse_proxy 127.0.0.1:8080
-    }
+    reverse_proxy 127.0.0.1:8080
 }
 ting.teamofsilicons.com {
     import secure_headers

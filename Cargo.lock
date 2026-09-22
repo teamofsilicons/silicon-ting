@@ -2006,7 +2006,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libc",
  "percent-encoding",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-daemon"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "futures-util",

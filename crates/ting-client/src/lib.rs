@@ -565,8 +565,18 @@ pub fn private_dir(path: &Path) -> Result<()> {
     fs::create_dir_all(path).map_err(|_| Error::io())?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|_| Error::io())?;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|_| Error::io())?;
+        if directory.metadata().map_err(|_| Error::io())?.uid() != unsafe { libc::geteuid() } {
+            return Err(Error::io());
+        }
+        directory
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .map_err(|_| Error::io())?;
     }
     #[cfg(windows)]
     windows::private_path(path, true)?;
@@ -704,6 +714,18 @@ pub fn daemon_socket() -> PathBuf {
         PathBuf::from(r"\\.\pipe\silicon-ting")
     }
 }
+#[cfg(unix)]
+fn verify_unix_server(socket: &tokio::net::UnixStream, owner: u32) -> Result<()> {
+    if socket.peer_cred().map_err(|_| Error::io())?.uid() != owner {
+        return Err(Error::new(
+            "daemon_identity_mismatch",
+            "The local Ting service belongs to another operating-system user.",
+            "Run the installer as the owner of this Ting profile.",
+            false,
+        ));
+    }
+    Ok(())
+}
 pub async fn ipc(request: Value) -> Result<Value> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let task = async {
@@ -719,6 +741,8 @@ pub async fn ipc(request: Value) -> Result<Value> {
         let mut socket = tokio::net::UnixStream::connect(daemon_socket())
             .await
             .map_err(|_| missing())?;
+        #[cfg(unix)]
+        verify_unix_server(&socket, unsafe { libc::geteuid() })?;
         #[cfg(windows)]
         let mut socket = {
             let mut attempts = 0;
@@ -775,6 +799,45 @@ pub fn unique_ids(ids: Vec<String>) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn private_directory_rejects_symlinks_without_changing_the_target() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("ting-private-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let target = root.join("target");
+        fs::create_dir(&target).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(target.join("sentinel"), b"unchanged").unwrap();
+        let link = root.join("socket-directory");
+        symlink(&target, &link).unwrap();
+        assert!(private_dir(&link).is_err());
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(fs::read(target.join("sentinel")).unwrap(), b"unchanged");
+        private_dir(&target).unwrap();
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_daemon_identity_is_checked_against_kernel_credentials() {
+        let (client, peer) = tokio::net::UnixStream::pair().unwrap();
+        let owner = unsafe { libc::geteuid() };
+        assert_eq!(client.peer_cred().unwrap().uid(), owner);
+        verify_unix_server(&client, owner).unwrap();
+        let error = verify_unix_server(&client, owner.wrapping_add(1)).unwrap_err();
+        assert_eq!(error.code, "daemon_identity_mismatch");
+        assert_eq!(
+            peer.try_read(&mut [0; 1]).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
     #[test]
     fn strict_and_proof() {
         assert!(strict_json(br#"{"a":1,"a":2}"#).is_err());

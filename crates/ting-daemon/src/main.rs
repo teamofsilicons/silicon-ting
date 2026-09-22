@@ -45,6 +45,7 @@ impl LocalListener {
                     false,
                 ));
             }
+            private_dir(path.parent().unwrap())?;
             let lock = fs::OpenOptions::new()
                 .create(true)
                 .truncate(false)

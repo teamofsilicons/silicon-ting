@@ -1,6 +1,6 @@
 [package]
 name = "silicon-ting-client"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Stateless Ting v1 API client with exact-byte app-proof preparation"
 license = "MIT"
