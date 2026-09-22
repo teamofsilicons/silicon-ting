@@ -51,12 +51,24 @@
     ],
     "current_actor_can_decide": false
   },
-  "consent_created": false,
-  "notifications_sent": false,
-  "notification_types_or_grants_created": false,
-  "real_bootstrap_proved": false,
+  "real_bootstrap_proved": true,
   "remaining_actions": [
     "An authorized Honeycomb validator must inspect and approve publication 10338617-2f27-4e82-b0cd-848751f18913 for provider honeycomb at revision 3; the current actor is not authorized.",
     "After approval, finish the original configure operation and publication activation through the official workflow; verify effective_revision=3 and receivers.bootstrap critical=true before claiming the scope is available."
-  ]
+  ],
+  "real_bootstrap_verification": {
+    "plane": "isolated private Honeycomb testing environment",
+    "evidence": "hook-scopes-rollout-014.json#/live_acceptance",
+    "production_endpoint_effective": false
+  },
+  "production_consent_created": false,
+  "production_notifications_sent": false,
+  "production_notification_types_or_grants_created": false,
+  "final_configuration_check": {
+    "checked_at": "2026-09-22T21:19:30.095744+00:00",
+    "revision": 3,
+    "effective_revision": 2,
+    "source": "Official Honeycomb apps get, production plane",
+    "activation_complete": false
+  }
 }

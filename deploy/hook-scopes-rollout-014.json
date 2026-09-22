@@ -52,10 +52,7 @@
     "error": "IAM review planning is unavailable",
     "gates": []
   },
-  "consent_created": false,
-  "notifications_sent": false,
-  "notification_types_or_grants_created": false,
-  "real_bootstrap_proved": false,
+  "real_bootstrap_proved": true,
   "provider_review": {
     "provider": "tos>ting",
     "available": false,
@@ -67,7 +64,7 @@
     "After Ting receivers.bootstrap becomes effective, retry the Hook review plan for publication e1bbe1d8-9f50-4140-a327-0533940bf065 revision 2, and inspect its gates. Current IAM review-planning failure is recorded without assuming its cause.",
     "Approve the exact Ting provider scope set only when the authenticated provider administrator can_decide is true; an eligible Honeycomb validator must independently approve the public revision.",
     "Finish configure operation a3812b06-544e-4058-8bbc-b19d81a737c0 and publication activation after review, then verify all four external scopes are effective.",
-    "Each intended actor must explicitly consent to the accepted scopes through IAM. Required delivery additionally needs an existing recipient registration and separate recipient opt-in; none was created during this rollout."
+    "Each production actor must explicitly consent to the accepted scopes through IAM. Required delivery additionally needs an existing recipient registration and separate recipient opt-in. Only isolated test registrations and opt-ins were created during acceptance checks; no production grants or preferences were changed."
   ],
   "lifecycle_preflight": {
     "services": {
@@ -186,6 +183,175 @@
     },
     "credential_transport": "RSA-3072 OAEP SHA-256; SSM received ciphertext only; ephemeral host key removed",
     "shared_existing_environments_modified": false,
-    "new_environment_created": false
+    "new_environment_created": true
+  },
+  "production_consent_created": false,
+  "production_notifications_sent": false,
+  "production_notification_types_or_grants_created": false,
+  "real_bootstrap_verification_plane": "One isolated private Honeycomb test environment; production publication gates remain pending.",
+  "live_acceptance": {
+    "environment_id": "93fd7498-d060-4623-9568-60c182e501c5",
+    "generation": 2,
+    "production_notifications_sent": false,
+    "complete": true,
+    "checks": [
+      "Operator fixture setup uses Ting authority in isolated environment only",
+      "carbon: fresh grant required, mandatory delivery requires explicit opt-in, notification mute preserved",
+      "carbon: Hook-only selector and IAM audience headers bootstrap scoped receiver; fresh-proof retry identical; ordinary session access denied",
+      "carbon: ordinary muted send stays silent; required muted send reaches hook and scoped watch; receipt/read ACK remain distinct; producer retry deduplicates",
+      "carbon: opt-out suppresses pending automatic delivery and new required sends; revocation rejects receiver; re-enrollment does not renew mandatory consent",
+      "silicon: fresh grant required, mandatory delivery requires explicit opt-in, notification mute preserved",
+      "silicon: Hook-only selector and IAM audience headers bootstrap scoped receiver; fresh-proof retry identical; ordinary session access denied",
+      "silicon: ordinary muted send stays silent; required muted send reaches hook and scoped watch; receipt/read ACK remain distinct; producer retry deduplicates",
+      "silicon: opt-out suppresses pending automatic delivery and new required sends; revocation rejects receiver; re-enrollment does not renew mandatory consent"
+    ],
+    "accepted_test_tings": 6,
+    "completed_at": "2026-09-22T21:15:22Z",
+    "backend_version": "0.1.4",
+    "source_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+    "transport": "Public HTTPS and WebSocket protocol checks using real IAM OBO proofs; not a browser UI or Hook worker end-to-end run.",
+    "receiver_authority": "Hook app selector and subject token only; each Ting request forwards the testing_context returned by fresh IAM OBO exchange. No setup Ting credential is used to acquire receiver capabilities.",
+    "operator_setup": "Separate Ting authority creates only the isolated test type, own sessions, webhooks, notification mute and explicit required-delivery opt-ins.",
+    "scope_configuration": {
+      "visibility": "private",
+      "ting": {
+        "effective_revision": 2,
+        "iam_revision": 4,
+        "operation_id": "7de259f8-15ec-4b9e-9f52-44d8bb867f97"
+      },
+      "hook": {
+        "effective_revision": 2,
+        "iam_revision": 3,
+        "operation_id": "9b49a426-3c08-453e-a1d5-c93a088eb7b1",
+        "external_scope_count": 4
+      },
+      "public_validator_bypassed": false
+    },
+    "test_actors": {
+      "carbon": "ting-hook-fourteen",
+      "silicon": "ting-hook-fourteen:tos"
+    },
+    "limitations": [
+      "Only the requested producer/receiver/delivery path was exercised; no production Hook publication or downstream Hook worker dispatch was performed.",
+      "Lifecycle causality was tested through coordinated clean before both receiver expiries; key rotation and restore were not additionally exercised live."
+    ],
+    "cleanup": {
+      "environment_id": "93fd7498-d060-4623-9568-60c182e501c5",
+      "only_task_owned_environment_modified": true,
+      "steps": [
+        {
+          "check": "old carbon receiver after coordinated clean",
+          "status": 401,
+          "code": "receiver_expired",
+          "checked_before_original_expiry": true
+        },
+        {
+          "check": "old silicon receiver after coordinated clean",
+          "status": 401,
+          "code": "receiver_expired",
+          "checked_before_original_expiry": true
+        }
+      ],
+      "clean": {
+        "environment_id": "93fd7498-d060-4623-9568-60c182e501c5",
+        "generation": 3,
+        "key_version": 1,
+        "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+        "operation_state": "accepted",
+        "revision": 9,
+        "state": "ready"
+      },
+      "clean_services": [
+        {
+          "app_id": "tos>briefcase",
+          "error": null,
+          "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>honeycomb",
+          "error": null,
+          "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>hook",
+          "error": null,
+          "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>iam",
+          "error": null,
+          "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>ting",
+          "error": null,
+          "operation_id": "9f11abdc-cc85-406f-a0fd-76007b365687",
+          "state": "ready"
+        }
+      ],
+      "delete": {
+        "environment_id": "93fd7498-d060-4623-9568-60c182e501c5",
+        "generation": 3,
+        "key_version": 1,
+        "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+        "operation_state": "accepted",
+        "revision": 10,
+        "state": "deleted"
+      },
+      "final": {
+        "state": "deleted",
+        "generation": 3,
+        "revision": 10,
+        "key_version": 1,
+        "operation_pending": false,
+        "services": [
+          {
+            "app_id": "tos>briefcase",
+            "error": null,
+            "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+            "state": "ready"
+          },
+          {
+            "app_id": "tos>honeycomb",
+            "error": null,
+            "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+            "state": "ready"
+          },
+          {
+            "app_id": "tos>hook",
+            "error": null,
+            "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+            "state": "ready"
+          },
+          {
+            "app_id": "tos>iam",
+            "error": null,
+            "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+            "state": "ready"
+          },
+          {
+            "app_id": "tos>ting",
+            "error": null,
+            "operation_id": "aa20a9aa-3097-4540-8a75-ee9b25eeca48",
+            "state": "ready"
+          }
+        ],
+        "purge_after": 1792703756
+      },
+      "complete": true,
+      "checked_at": "2026-09-22T21:15:58.847292+00:00"
+    },
+    "private_credential_staging_removed": true
+  },
+  "final_configuration_check": {
+    "checked_at": "2026-09-22T21:19:30.095744+00:00",
+    "revision": 2,
+    "effective_revision": 1,
+    "source": "Official Honeycomb apps get, production plane",
+    "activation_complete": false
   }
 }
