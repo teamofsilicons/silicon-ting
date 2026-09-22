@@ -1,0 +1,65 @@
+{
+  "complete": true,
+  "checks": [
+    "durable local queue precedes delivery ACK; delivery ACK keeps server unread",
+    "restart retries lost read ACK from durable acceptance without duplicate forwarding",
+    "unresponsive webhook retries independently while healthy hook completes",
+    "30 real direct-public WebSocket sends reach native daemon webhook"
+  ],
+  "samples_ms": [
+    498.077,
+    496.942,
+    473.948,
+    481.054,
+    455.326,
+    513.132,
+    485.991,
+    496.377,
+    481.522,
+    618.296,
+    660.789,
+    483.569,
+    760.482,
+    468.361,
+    467.612,
+    463.879,
+    692.103,
+    448.211,
+    494.555,
+    657.516,
+    494.751,
+    761.555,
+    478.243,
+    463.133,
+    513.602,
+    490.297,
+    489.565,
+    462.779,
+    490.69,
+    513.911
+  ],
+  "api_url": "https://backend.ting.teamofsilicons.com",
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "client_location": "Developer macOS host; city/country unverified",
+  "server_location": "AWS us-east-1, Northern Virginia, United States",
+  "callback_location": "127.0.0.1 on the same macOS host as the sending WebSocket",
+  "cli_version": "0.1.0",
+  "binary_sha256": {
+    "ting": "205013b24da22b92bf5029a7440348e79740b65e281224b9989fab8efeadafed",
+    "ting-daemon": "0a665706f7c2482d633653237e00c0ebea580a5a8091028a5ea1fc16d07a4d5c"
+  },
+  "unresponsive_hook": {
+    "attempts": 2,
+    "first_retry_seconds": 70.041,
+    "healthy_delivery_ms": 456.9
+  },
+  "latency": {
+    "samples": 30,
+    "p50_ms": 490.297,
+    "p95_ms": 760.482,
+    "min_ms": 448.211,
+    "max_ms": 761.555,
+    "conditions": "Monotonic proof-ready WebSocket send through public TLS AWS backend to installed native daemon and local HTTP callback arrival; existing sockets; small sequential payloads; proof minting and callback ACK excluded; no relay or mocked responses in this phase."
+  },
+  "completed_at": "2026-09-22T08:15:50Z"
+}

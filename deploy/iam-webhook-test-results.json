@@ -1,0 +1,7 @@
+{
+  "completed_at": "2026-09-22T08:04:49.018941+00:00",
+  "valid_current_key_status": 200,
+  "altered_body_status": 401,
+  "unsigned_status": 401,
+  "conditions": "Locally signed synthetic testing envelope checked through the public production route using the official SDK wire contract; does not claim an IAM-originated delivery."
+}

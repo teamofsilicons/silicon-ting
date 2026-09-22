@@ -1,0 +1,1 @@
+{"rows":[{"records":"630","source":"tingbackend"},{"records":"1","source":"tingfrontendanalytics"},{"records":"0","source":"tingclidaemon"},{"records":"4","source":"tingfrontendevents"}],"watermarks":{"tingbackend":630,"tingclidaemon":0,"tingfrontendanalytics":1,"tingfrontendevents":4}}

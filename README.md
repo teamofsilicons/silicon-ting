@@ -56,7 +56,7 @@ The local daemon is installed through [platform installers](installers/README.md
 
 ## Deployment
 
-AWS CloudFormation provisions a dedicated ARM64 EC2 host, encrypted retained EBS, private encrypted S3 and Secrets Manager. `deploy/deploy.py` uploads a checksum-verified native release through S3 and SSM; systemd supervises the service and restores the previous release if health checks fail. No SSH port is exposed.
+AWS CloudFormation provisions a dedicated ARM64 EC2 host, encrypted retained EBS, private encrypted S3 and Secrets Manager. GitHub tests and builds releases on Amazon Linux 2023. `deploy/github-release.py` installs a checksum-verified release through SSM; systemd supervises the service and failed health checks restore the previous release. See [deployment instructions](deploy/README.md). No SSH port is exposed.
 
 Vercel hosts the built frontend. Caddy serves `ting.teamofsilicons.com`, proxies static frontend requests to Vercel and `/v1` to Rust. `backend.ting.teamofsilicons.com` exposes the backend directly. This keeps the browser's HttpOnly, host-only session cookie and WebSocket on one origin. Namecheap manages both DNS records.
 

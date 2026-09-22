@@ -1,0 +1,57 @@
+{
+  "completed_at": "2026-09-22T08:08:22.630057+00:00",
+  "checks": [
+    {
+      "check": "discovery",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "unauthenticated session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "foreign browser origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "browser mutation without origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "duplicate JSON keys",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "unknown telemetry table",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "telemetry byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "HTTP body byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "untrusted session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "unknown route",
+      "status": 404,
+      "passed": true
+    }
+  ],
+  "passed": 10,
+  "url": "https://backend.ting.teamofsilicons.com"
+}

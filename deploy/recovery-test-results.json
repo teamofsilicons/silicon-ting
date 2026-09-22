@@ -1,0 +1,30 @@
+{
+  "api_url": "https://backend.ting.teamofsilicons.com",
+  "commit": "c96cb93c3068f3577875e7bfd97f5d5601a76827",
+  "ssm_command_id": "e4731dfb-4339-4712-ade6-1987c2054a7f",
+  "completed_at": "2026-09-22T08:10:39Z",
+  "checks": [
+    "Production service restart and HTTPS health",
+    "Encrypted session survives restart",
+    "Isolated inbox unchanged after restart",
+    "Online backup service succeeds",
+    "Restored encrypted S3 snapshots pass full SQLite integrity check"
+  ],
+  "passed": 5,
+  "backup_prefix": "backups/2026/09/22/081022",
+  "snapshots": [
+    {
+      "database": "ting.sqlite",
+      "encryption": "AES256",
+      "bytes": 114688,
+      "restored_snapshot_integrity": "ok"
+    },
+    {
+      "database": "ting.sqlite.auth",
+      "encryption": "AES256",
+      "bytes": 28672,
+      "restored_snapshot_integrity": "ok"
+    }
+  ],
+  "scope": "A controlled live process restart and SQLite snapshot restoration to isolated temporary files; no production restore or host-loss simulation."
+}
