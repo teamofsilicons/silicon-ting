@@ -1,0 +1,103 @@
+name: Build backend deployment
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backend.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/ting-server/**'
+      - 'deploy/**'
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test on the production Linux distribution
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src public.ecr.aws/amazonlinux/amazonlinux:2023 bash -euc '
+            dnf install -y gcc gcc-c++ make perl tar gzip git findutils
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            source "$HOME/.cargo/env"
+            export CARGO_TARGET_DIR=/src/target/backend-al2023
+            cargo test --locked -p silicon-ting-server
+            cargo build --locked --release -p silicon-ting-server
+            mkdir -p /src/backend-build
+            install -m 0755 "$CARGO_TARGET_DIR/release/ting-server" /src/backend-build/ting-server
+            ldd /src/backend-build/ting-server
+            rustc --version > /src/backend-build/rust-version.txt
+            ldd --version | head -n 1 > /src/backend-build/glibc-version.txt
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-server
+          path: backend-build/*
+          if-no-files-found: error
+  caddy:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - id: source
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          pin = json.load(open('deploy/caddy-build.json'))
+          print('commit=' + pin['commit'])
+          print('go=' + pin['go_version'].removeprefix('go'))
+          PY
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.source.outputs.go }}
+          cache: false
+      - uses: actions/checkout@v4
+        with:
+          repository: caddyserver/caddy
+          ref: ${{ steps.source.outputs.commit }}
+          path: caddy-source
+      - name: Build pinned Caddy and validate production configuration
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          mkdir -p backend-build
+          (cd caddy-source && go build -trimpath -o ../backend-build/caddy ./cmd/caddy)
+          cp caddy-source/LICENSE backend-build/CADDY-LICENSE
+          if [[ -f caddy-source/NOTICE ]]; then cp caddy-source/NOTICE backend-build/CADDY-NOTICE; fi
+          backend-build/caddy validate --config deploy/Caddyfile --adapter caddyfile
+          backend-build/caddy version > backend-build/caddy-version.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-caddy
+          path: backend-build/*
+          if-no-files-found: error
+  publish:
+    needs: [server, caddy]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: backend-*
+          path: backend-build
+          merge-multiple: true
+      - name: Package and publish the tested deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp deploy/{install.sh,ting-server.service,Caddyfile,caddy.service,backup.py,ting-backup.service,ting-backup.timer,caddy-build.json} backend-build/
+          cp LICENSE backend-build/LICENSE
+          printf '%s\n' "$GITHUB_SHA" > backend-build/BUILD_COMMIT
+          chmod 755 backend-build/{ting-server,caddy,install.sh}
+          mkdir -p dist
+          tar -czf "dist/ting-server-$GITHUB_SHA.tar.gz" -C backend-build .
+          (cd dist && sha256sum ting-server-*.tar.gz > SHA256SUMS)
+          tag="server-$GITHUB_SHA"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "Backend $GITHUB_SHA" --prerelease --latest=false --notes "Linux ARM64 backend tested and built on Amazon Linux 2023, with pinned Caddy. Source and build tools are recorded inside the archive."
+          gh release upload "$tag" dist/* --clobber

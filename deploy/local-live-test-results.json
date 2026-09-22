@@ -1,0 +1,287 @@
+{
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "api_url": "http://127.0.0.1:8880",
+  "checks": [
+    "unauthenticated calls, duplicate keys and incomplete test context fail closed",
+    "test login, encrypted session reuse and idempotent SLT exchange",
+    "Honeycomb management permission and immutable type identity",
+    "proof actor binds recipient grant",
+    "HTTP and WebSocket proofs reject altered bytes and reuse",
+    "fresh-proof retries and concurrent producer keys create exactly one ting",
+    "receipt ACK does not mark read; independent hook completion is preserved",
+    "dead-receiver creation recovery and unfinished-copy replay after reconnect",
+    "preference history, cursor binding and atomic read ownership",
+    "revoked grants block new sends while preserving authenticated original results",
+    "explicit bug report waits for Space Station durable ACK",
+    "logout revokes the local and upstream application session"
+  ],
+  "passed": 12,
+  "latency_samples": [
+    {
+      "method": "GET",
+      "path": "/v1/iam",
+      "status": 200,
+      "milliseconds": 7.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 401,
+      "milliseconds": 979.6
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 400,
+      "milliseconds": 4.0
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 401,
+      "milliseconds": 238.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/session",
+      "status": 201,
+      "milliseconds": 1095.6
+    },
+    {
+      "method": "POST",
+      "path": "/v1/session",
+      "status": 200,
+      "milliseconds": 258.6
+    },
+    {
+      "method": "POST",
+      "path": "/v1/session",
+      "status": 409,
+      "milliseconds": 255.6
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "status": 200,
+      "milliseconds": 595.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/apps/tos%3Eting-probe/types",
+      "status": 201,
+      "milliseconds": 3597.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/apps/tos%3Eting-probe/types",
+      "status": 200,
+      "milliseconds": 3541.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/apps/tos%3Eting-probe/types",
+      "status": 409,
+      "milliseconds": 3625.9
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/apps/tos%3Eting-probe/types",
+      "status": 400,
+      "milliseconds": 3616.2
+    },
+    {
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "status": 201,
+      "milliseconds": 724.1
+    },
+    {
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "status": 403,
+      "milliseconds": 693.9
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/webhooks",
+      "status": 201,
+      "milliseconds": 1319.2
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/webhooks",
+      "status": 201,
+      "milliseconds": 1441.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 401,
+      "milliseconds": 512.3
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 657.0
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 401,
+      "milliseconds": 510.4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 981.3
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 200,
+      "milliseconds": 2227.7
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 409,
+      "milliseconds": 676.2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox/msg_a7c5c15e34c54996897fd36bae0e41a2",
+      "status": 200,
+      "milliseconds": 2570.6
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sent/query",
+      "status": 200,
+      "milliseconds": 628.4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/webhooks",
+      "status": 200,
+      "milliseconds": 1376.4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/webhooks",
+      "status": 200,
+      "milliseconds": 1294.9
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/orgs/tos/preferences",
+      "status": 200,
+      "milliseconds": 1857.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 665.7
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/orgs/tos/preferences",
+      "status": 200,
+      "milliseconds": 1322.2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox/msg_a59a2c1d67e14598935a9ce3dc575b57",
+      "status": 200,
+      "milliseconds": 1300.2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox",
+      "status": 200,
+      "milliseconds": 1308.9
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox",
+      "status": 200,
+      "milliseconds": 1384.5
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox",
+      "status": 400,
+      "milliseconds": 1313.0
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/tos/inbox/read",
+      "status": 404,
+      "milliseconds": 1884.1
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/tos/inbox/msg_a59a2c1d67e14598935a9ce3dc575b57",
+      "status": 200,
+      "milliseconds": 1301.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/subscriptions/revoke",
+      "status": 200,
+      "milliseconds": 644.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 403,
+      "milliseconds": 646.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 200,
+      "milliseconds": 1181.9
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/orgs/tos/webhooks/hook_e723db28b1424b42ae08843c42661926",
+      "status": 200,
+      "milliseconds": 1324.7
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/orgs/tos/webhooks/hook_3ceee68cb7ee483d8191df42a9eec105",
+      "status": 200,
+      "milliseconds": 1316.6
+    },
+    {
+      "method": "POST",
+      "path": "/v1/bugs",
+      "status": 201,
+      "milliseconds": 4270.3
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/session",
+      "status": 200,
+      "milliseconds": 1052.8
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "status": 401,
+      "milliseconds": 2.5
+    }
+  ],
+  "completed_at": "2026-09-22T00:15:04Z",
+  "complete": true,
+  "http_send_latency": {
+    "samples": 5,
+    "p50_ms": 981.3,
+    "p95_ms": 2227.7,
+    "conditions": "Proof ready; client on developer machine; fresh HTTP connection per request; includes IAM verification and durable acceptance. Small integration sample, not a load test."
+  }
+}

@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } f
 import { createSpaceStationWeb, type SpaceStationWeb } from '@teamofsilicons/space-station-web';
 import { api, ApiError, type Identity, type Org, type TingApp, type TingType, type Ting, type Preference, type Subscription, type Hook, type List } from './api';
 import { enc, orgPath, query, safeLink, timeLabel, typeError, watchDelay } from './utils';
+import { telemetryTransport } from './telemetry';
 
 type Page = 'inbox' | 'apps' | 'preferences' | 'connections' | 'docs' | 'settings';
 const pages: { id: Page; name: string; icon: string }[] = [
@@ -145,7 +146,7 @@ export default function App() {
   createEffect(() => { if (!selectedApp() && apps.items().length) setSelectedApp(apps.items()[0].app_id); });
   onMount(() => {
     if (import.meta.env.VITE_SS_ANALYTICS_TABLE && import.meta.env.VITE_SS_EVENTS_TABLE) {
-      diagnostics = createSpaceStationWeb({ analyticsTable: import.meta.env.VITE_SS_ANALYTICS_TABLE, eventsTable: import.meta.env.VITE_SS_EVENTS_TABLE, endpoint: '/v1/telemetry', enabled: telemetry() });
+      diagnostics = createSpaceStationWeb({ analyticsTable: import.meta.env.VITE_SS_ANALYTICS_TABLE, eventsTable: import.meta.env.VITE_SS_EVENTS_TABLE, endpoint: '/v1/telemetry', fetch: telemetryTransport(window.fetch.bind(window), location.origin), enabled: telemetry() });
       diagnostics.track('workspace_opened', { page: page() });
       onCleanup(() => { void diagnostics?.destroy(); });
     }

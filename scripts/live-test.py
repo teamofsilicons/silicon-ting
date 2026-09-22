@@ -12,6 +12,7 @@ Only test context records are created; credentials and proofs are never printed.
 import argparse
 import concurrent.futures
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -41,6 +42,7 @@ class Checks:
                      "X-Testing-Environment-Key": fixture["testing_key"]}
         self.session = None
         self.passed = []
+        self.latency_ms = []
         self.org = fixture["org_id"]
         self.app = fixture["sender_app_id"]
         self.actor = fixture["actor_id"]
@@ -75,9 +77,13 @@ class Checks:
         if token or self.session:
             headers["Authorization"] = "Bearer " + (token or self.session)
         headers.update(extra or {})
+        started = time.monotonic()
         response = requests.request(method, self.api + path, headers=headers,
                                     data=raw if raw is not None else encode(body) if body is not None else None,
                                     timeout=35)
+        self.latency_ms.append({"method": method, "path": path.split("?")[0],
+                                "status": response.status_code,
+                                "milliseconds": round((time.monotonic() - started) * 1000, 1)})
         try:
             value = response.json()
         except ValueError:
@@ -220,13 +226,21 @@ class Checks:
             self.mark("revoked grants block new sends while preserving authenticated original results")
             for hook in hooks:
                 self.http("DELETE", self.prefix + "/webhooks/" + hook)
+            _, report = self.http("POST", "/v1/bugs", {
+                "title": "Isolated release verification: acknowledged report",
+                "body": "Intentional test-only report; verifies exact UTF-8, attachment content and durable ingest acknowledgement.",
+                "attachments": [{"name": "proof.txt", "encoding": "base64", "content": "dGluZyBsaXZlIHRlc3Q="}],
+            }, expected=(200, 201, 202))
+            assert report.get("id") or report.get("report_id")
+            self.mark("explicit bug report waits for Space Station durable ACK")
             self.http("DELETE", "/v1/session")
             self.http("GET", "/v1/me", expected=401)
             self.mark("logout revokes the local and upstream application session")
         finally:
             sock.close()
         return {"environment_id": self.f["environment_id"], "api_url": self.api,
-                "checks": self.passed, "passed": len(self.passed), "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                "checks": self.passed, "passed": len(self.passed), "latency_samples": self.latency_ms,
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
 
 class Socket:
@@ -236,8 +250,9 @@ class Socket:
     def call(self, op, *, error=False, **body):
         request = key()
         self.sock.send(encode({"op": op, "request_id": request, **body}).decode())
+        deadline = time.monotonic() + 35
         while True:
-            message = json.loads(self.sock.recv())
+            message = self.receive(deadline)
             if message.get("request_id") == request:
                 assert (message["op"] == "error") == error, (op, message.get("error", {}).get("code"))
                 return message
@@ -249,11 +264,19 @@ class Socket:
         for message in self.pending:
             if matches(message):
                 return message
+        deadline = time.monotonic() + 35
         while True:
-            message = json.loads(self.sock.recv())
+            message = self.receive(deadline)
             self.pending.append(message)
             if matches(message):
                 return message
+
+    def receive(self, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Expected WebSocket response did not arrive within 35 seconds")
+        self.sock.settimeout(remaining)
+        return json.loads(self.sock.recv())
 
     def close(self):
         self.sock.close()
@@ -265,7 +288,26 @@ def main():
     parser.add_argument("--report", type=pathlib.Path, default=pathlib.Path("deploy/live-test-results.json"))
     args = parser.parse_args()
     fixture = json.loads(args.fixture.read_text())
-    report = Checks(fixture).run_checks()
+    checks = Checks(fixture)
+    try:
+        report = checks.run_checks()
+    except Exception as error:
+        args.report.write_text(json.dumps({
+            "environment_id": fixture["environment_id"], "api_url": checks.api,
+            "checks": checks.passed, "passed": len(checks.passed),
+            "latency_samples": checks.latency_ms, "complete": False,
+            "failure_type": type(error).__name__,
+        }, indent=2) + "\n")
+        raise
+    report["complete"] = True
+    samples = sorted(x["milliseconds"] for x in checks.latency_ms
+                     if x["method"] == "POST" and x["path"] == "/v1/tings" and x["status"] in (200, 202))
+    if samples:
+        report["http_send_latency"] = {
+            "samples": len(samples), "p50_ms": samples[math.ceil(len(samples) * .5) - 1],
+            "p95_ms": samples[math.ceil(len(samples) * .95) - 1],
+            "conditions": "Proof ready; client on developer machine; fresh HTTP connection per request; includes IAM verification and durable acceptance. Small integration sample, not a load test.",
+        }
     args.report.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Completed {report['passed']} isolated integration checks. Report: {args.report}")
 

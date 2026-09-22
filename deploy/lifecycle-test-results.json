@@ -1,0 +1,14 @@
+{
+  "api_url": "http://127.0.0.1:8880",
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "checks": [
+    "dedicated lifecycle token and exact replay/conflicting-operation enforcement",
+    "disable revokes sessions and pauses active receiver before reply",
+    "restore requires fresh login and never resurrects revoked credentials",
+    "clean removes only isolated-context data and invalidates sessions",
+    "purged context cannot be resurrected by a later import"
+  ],
+  "passed": 5,
+  "scope": "Local participant HTTP and WebSocket integration, real IAM test credentials; Honeycomb coordinator not invoked.",
+  "completed_at": "2026-09-22T00:41:21Z"
+}

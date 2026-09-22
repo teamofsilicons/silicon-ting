@@ -7,21 +7,22 @@ exec 9>/var/lock/ting-deploy.lock
 flock -n 9
 previous=$(readlink -e /opt/ting/current || true)
 backup=$(mktemp -d)
-for target in /etc/ting/runtime.env /etc/systemd/system/ting-server.service /etc/caddy/Caddyfile; do
+targets=(/etc/ting/runtime.env /etc/systemd/system/ting-server.service /etc/caddy/Caddyfile /usr/local/bin/caddy /etc/systemd/system/caddy.service /etc/systemd/system/ting-backup.service /etc/systemd/system/ting-backup.timer)
+for target in "${targets[@]}"; do
   [[ ! -f "$target" ]] || cp -p "$target" "$backup/$(basename "$target")"
 done
 rollback() {
   result=$?
   trap - EXIT
   if [[ "$result" != 0 && -n "$previous" ]]; then
-    for target in /etc/ting/runtime.env /etc/systemd/system/ting-server.service /etc/caddy/Caddyfile; do
+    for target in "${targets[@]}"; do
       [[ ! -f "$backup/$(basename "$target")" ]] || cp -p "$backup/$(basename "$target")" "$target"
     done
     ln -sfn "$previous" /opt/ting/current.next
     mv -Tf /opt/ting/current.next /opt/ting/current
     systemctl daemon-reload
     systemctl restart ting-server || true
-    systemctl reload caddy || true
+    systemctl restart caddy || true
   fi
   rm -rf "$backup"
   exit "$result"
@@ -42,6 +43,11 @@ install -m 0644 "$release/ting-server.service" /etc/systemd/system/ting-server.s
 install -m 0644 "$release/caddy.service" /etc/systemd/system/caddy.service
 install -m 0644 "$release/ting-backup.service" /etc/systemd/system/ting-backup.service
 install -m 0644 "$release/ting-backup.timer" /etc/systemd/system/ting-backup.timer
+if [[ -f /etc/ting/probe.env ]]; then
+  set -a
+  source /etc/ting/probe.env
+  set +a
+fi
 /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ln -sfn "$release" /opt/ting/current.next
 mv -Tf /opt/ting/current.next /opt/ting/current
@@ -51,9 +57,15 @@ systemctl restart ting-server
 for attempt in {1..30}; do
  if curl -fsS http://127.0.0.1:8080/healthz; then
    systemctl restart caddy
-   systemctl start ting-backup.timer
-   printf '\nInstalled %s\n' "$release"
-   exit 0
+   for gateway_attempt in {1..15}; do
+     if curl -fsS --connect-timeout 2 --max-time 5 --resolve backend.ting.teamofsilicons.com:443:127.0.0.1 https://backend.ting.teamofsilicons.com/healthz; then
+       systemctl start ting-backup.timer
+       printf '\nInstalled %s\n' "$release"
+       exit 0
+     fi
+     sleep 2
+   done
+   break
  fi
  sleep 2
 done

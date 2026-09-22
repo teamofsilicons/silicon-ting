@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "app_id": "tos>ting",
+  "version": "0.1.0",
+  "bin": { "ting": "main", "ting-daemon": "daemon" },
+  "targets": {
+    "linux-x86_64": { "root": "targets/linux-x86_64", "executables": { "main": "ting", "daemon": "ting-daemon" } },
+    "linux-aarch64": { "root": "targets/linux-aarch64", "executables": { "main": "ting", "daemon": "ting-daemon" } },
+    "macos-x86_64": { "root": "targets/macos-x86_64", "executables": { "main": "ting", "daemon": "ting-daemon" } },
+    "macos-aarch64": { "root": "targets/macos-aarch64", "executables": { "main": "ting", "daemon": "ting-daemon" } },
+    "windows-x86_64": { "root": "targets/windows-x86_64", "executables": { "main": "ting.exe", "daemon": "ting-daemon.exe" } },
+    "windows-aarch64": { "root": "targets/windows-aarch64", "executables": { "main": "ting.exe", "daemon": "ting-daemon.exe" } }
+  }
+}

@@ -1,3 +1,9 @@
+{
+    servers {
+        expected_underscore_headers IAM_TEST_APP_SECRET
+    }
+}
+
 (secure_headers) {
     header {
         Strict-Transport-Security "max-age=31536000"
@@ -9,7 +15,16 @@
 }
 backend.ting.teamofsilicons.com {
     import secure_headers
-    reverse_proxy 127.0.0.1:8080
+    @integration_probe {
+        path /internal/honeycomb/*
+        header Authorization "Bearer {$TING_PROBE_CONTROL_TOKEN}"
+    }
+    handle @integration_probe {
+        reverse_proxy 127.0.0.1:8099
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
 }
 ting.teamofsilicons.com {
     import secure_headers

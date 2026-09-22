@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SQLite online snapshots, uploaded encrypted; notifications have no age-based deletion."""
+"""Encrypted SQLite online snapshots; restoring applies current Ting retention."""
 import datetime, os, pathlib, sqlite3, subprocess, tempfile
 bucket = os.environ['TING_BACKUP_BUCKET']
 with tempfile.TemporaryDirectory() as tmp:

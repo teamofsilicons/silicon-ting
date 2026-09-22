@@ -43,6 +43,7 @@ pub async fn ingest(app: &Shared, body: Value) -> Result<Value> {
     static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
     let http = HTTP.get_or_init(|| {
         reqwest::Client::builder()
+            .user_agent(concat!("silicon-ting/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -58,6 +59,10 @@ pub async fn ingest(app: &Shared, body: Value) -> Result<Value> {
         .await
         .map_err(|_| Error::unavailable("Telemetry storage could not be reached."))?;
     if !res.status().is_success() {
+        tracing::warn!(
+            status = res.status().as_u16(),
+            "Space Station telemetry ingestion refused"
+        );
         return Err(Error::unavailable(
             "Telemetry storage did not accept the batch.",
         ));

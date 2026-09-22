@@ -147,6 +147,9 @@ fn bearer(headers: &HeaderMap) -> Result<&str> {
 
 impl Auth {
     pub fn new(config: &crate::Config) -> anyhow::Result<Self> {
+        // IAM and telemetry enable different rustls providers; select one before
+        // either client starts a background connection.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let key = hex::decode(&config.encryption_key).map_err(|_| {
             anyhow::anyhow!("TING_ENCRYPTION_KEY must be 64 hexadecimal characters")
         })?;
@@ -208,6 +211,7 @@ impl Auth {
             station_key: config.spacestation_key.clone(),
             station_table: config.spacestation_table.clone(),
             http: reqwest::Client::builder()
+                .user_agent(concat!("silicon-ting-server/", env!("CARGO_PKG_VERSION")))
                 .timeout(Duration::from_secs(20))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
@@ -934,7 +938,15 @@ impl Auth {
                 .replacen("http://", "ws://", 1)
         );
         tokio::time::timeout(Duration::from_secs(20), async {
-            let (mut socket, _) = tokio_tungstenite::connect_async(url)
+            use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+            let mut request = url.into_client_request().map_err(|_| report_error())?;
+            request.headers_mut().insert(
+                "User-Agent",
+                concat!("silicon-ting-server/", env!("CARGO_PKG_VERSION"))
+                    .parse()
+                    .map_err(|_| report_error())?,
+            );
+            let (mut socket, _) = tokio_tungstenite::connect_async(request)
                 .await
                 .map_err(|_| report_error())?;
             socket

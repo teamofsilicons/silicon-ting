@@ -2065,6 +2065,7 @@ dependencies = [
  "rand 0.9.5",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",

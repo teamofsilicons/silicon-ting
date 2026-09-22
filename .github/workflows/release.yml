@@ -28,6 +28,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Check bundled CLI documentation
+        shell: bash
+        run: |
+          cmp udd/cli.md crates/ting-cli/docs/cli.md
+          cmp udd/api.md crates/ting-cli/docs/api.md
+      - name: Test Honeycomb archive handling
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: python3 scripts/test-package-honeycomb.py
       - name: Test client, CLI, queue and transport
         run: cargo test --locked -p silicon-ting-client -p silicon-ting-cli -p silicon-ting-daemon --target ${{ matrix.target }}
       - name: Build release
@@ -42,13 +50,18 @@ jobs:
         shell: bash
         run: |
           version=$(target/${{ matrix.target }}/release/ting --version --json | python3 -c 'import json,sys; print("v"+json.load(sys.stdin)["version"])')
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$version" ]]; then
+            echo 'Release tag must match the Cargo version.' >&2
+            exit 1
+          fi
           mkdir -p dist
-          tar -czf "dist/ting-$version-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release ting ting-daemon
+          COPYFILE_DISABLE=1 tar -czf "dist/ting-$version-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release ting ting-daemon
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = 'v' + ((& target/${{ matrix.target }}/release/ting.exe --version --json | ConvertFrom-Json).version)
+          if ($env:GITHUB_REF.StartsWith('refs/tags/') -and $env:GITHUB_REF_NAME -ne $version) { throw 'Release tag must match the Cargo version.' }
           New-Item -ItemType Directory -Path dist | Out-Null
           Compress-Archive -Path target/${{ matrix.target }}/release/ting.exe,target/${{ matrix.target }}/release/ting-daemon.exe -DestinationPath "dist/ting-$version-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4

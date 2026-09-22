@@ -278,8 +278,20 @@ async fn http(
     RawQuery(raw): RawQuery,
     method: Method,
     headers: HeaderMap,
-    bytes: Bytes,
+    bytes: std::result::Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Response> {
+    let bytes = bytes.map_err(|rejection| {
+        Error::new(
+            rejection.status().as_u16(),
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                "payload_too_large"
+            } else {
+                "invalid_input"
+            },
+            "The request body could not be read within the 1 MiB limit.",
+            "Send a complete request no larger than 1 MiB.",
+        )
+    })?;
     origin(&app, &headers)?;
     if path == "iam/webhook" && method == Method::POST {
         return Ok(response(200, app.auth.webhook(&headers, &bytes)?));

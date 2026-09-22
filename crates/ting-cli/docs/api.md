@@ -286,7 +286,7 @@ Ting session required; all operations affect only its recipient.
 
 Writes require `app_id`. Set neither service nor type for an app-wide override; never set both. A type must belong to the named app. `enabled` is a boolean. Repeated reset succeeds even if no override exists.
 
-Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent tings remain silent forever and never auto-replay. Muting does not revoke the app's grant.
+Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent tings remain silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
 
 ## Webhook registrations
 
