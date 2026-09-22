@@ -13,28 +13,43 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, watch};
+
+const CONTROL_QUEUE_CAPACITY: usize = 64;
+const WRITE_DEADLINE: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Hub {
     receivers: RwLock<HashMap<String, Receiver>>,
 }
 struct Receiver {
-    tx: mpsc::UnboundedSender<Value>,
+    tx: mpsc::Sender<Value>,
+    disconnect: watch::Sender<bool>,
     auth: Vec<(Principal, String)>,
     watch: Option<(Principal, String)>,
+}
+impl Receiver {
+    fn send(&self, value: Value) {
+        if !*self.disconnect.borrow() && self.tx.try_send(value).is_err() {
+            // A missed pause must terminate the connection, never leave it forwarding.
+            self.disconnect.send_replace(true);
+        }
+    }
 }
 impl Hub {
     pub async fn authorized(&self, r: &str, p: &Principal, org: &str) -> Result<()> {
         let map = self.receivers.read().await;
-        let receiver = map.get(r).ok_or_else(|| {
-            Error::new(
-                409,
-                "receiver_gone",
-                "The receiver connection is no longer available.",
-                "Authenticate on the current connection before creating or reattaching a hook.",
-            )
-        })?;
+        let receiver = map
+            .get(r)
+            .filter(|r| !*r.disconnect.borrow())
+            .ok_or_else(|| {
+                Error::new(
+                    409,
+                    "receiver_gone",
+                    "The receiver connection is no longer available.",
+                    "Authenticate on the current connection before creating or reattaching a hook.",
+                )
+            })?;
         if !receiver.auth.iter().any(|(a, o)| {
             a.session == p.session && a.context == p.context && a.id == p.id && o == org
         }) {
@@ -56,9 +71,7 @@ impl Hub {
         for (r, hooks) in grouped {
             if let Some(r) = map.get(&r) {
                 for chunk in hooks.chunks(100) {
-                    let _ = r.tx.send(
-                        json!({"op":"paused","org_id":org,"webhook_ids":chunk,"reason":reason}),
-                    );
+                    r.send(json!({"op":"paused","org_id":org,"webhook_ids":chunk,"reason":reason}));
                 }
             }
         }
@@ -98,8 +111,7 @@ impl Hub {
             r.auth.retain(|(p, _)| p.session != session);
             if r.watch.as_ref().is_some_and(|(p, _)| p.session == session) {
                 let (_, org) = r.watch.take().unwrap();
-                let _ =
-                    r.tx.send(json!({"op":"paused","org_id":org,"webhook_ids":[],"reason":reason}));
+                r.send(json!({"op":"paused","org_id":org,"webhook_ids":[],"reason":reason}));
             }
         }
         Ok(())
@@ -111,7 +123,7 @@ impl Hub {
                 .as_ref()
                 .is_some_and(|(p, o)| p.context == ctx && p.id == recipient && o == org)
             {
-                let _ = r.tx.send(json!({"op":"inbox_changed","org_id":org}));
+                r.send(json!({"op":"inbox_changed","org_id":org}));
             }
         }
     }
@@ -338,9 +350,7 @@ async fn validate_authority(app: &Shared, rid: &str) -> Result<()> {
                     .is_some_and(|(q, o)| q.session == p.session && o == org)
                 {
                     r.watch = None;
-                    let _ = r
-                        .tx
-                        .send(json!({"op":"paused","org_id":org,"webhook_ids":[],"reason":reason}));
+                    r.send(json!({"op":"paused","org_id":org,"webhook_ids":[],"reason":reason}));
                 }
             }
         }
@@ -357,50 +367,139 @@ async fn offer(app: &Shared, rid: &str) -> Result<Vec<Value>> {
     }
     Ok(out)
 }
+async fn send(socket: &mut WebSocket, message: Message) -> bool {
+    matches!(
+        tokio::time::timeout(WRITE_DEADLINE, socket.send(message)).await,
+        Ok(Ok(()))
+    )
+}
 pub async fn connection(app: Shared, mut socket: WebSocket, browser: Option<Principal>) {
     let rid = store::id("recv");
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
+    let (disconnect, mut disconnected) = watch::channel(false);
     app.hub.receivers.write().await.insert(
         rid.clone(),
         Receiver {
             tx,
+            disconnect,
             auth: vec![],
             watch: None,
         },
     );
-    let greeting = json!({"op":"ready","receiver_id":rid,"protocol":"v1"});
-    if socket
-        .send(Message::Text(greeting.to_string().into()))
-        .await
-        .is_err()
-    {
-        app.hub.receivers.write().await.remove(&rid);
-        return;
+    tokio::select! {
+        biased;
+        _ = disconnected.changed() => {},
+        _ = async {
+            let greeting = json!({"op":"ready","receiver_id":rid,"protocol":"v1"});
+            if !send(&mut socket, Message::Text(greeting.to_string().into())).await {
+                return;
+            }
+            let mut delivery = tokio::time::interval(Duration::from_secs(1));
+            delivery.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut revalidate = tokio::time::interval(Duration::from_secs(30));
+            revalidate.tick().await;
+            let mut ping = tokio::time::interval(Duration::from_secs(1));
+            let mut last_ping = Instant::now();
+            let mut awaiting: Option<Instant> = None;
+            'connected: loop {
+                tokio::select! {
+                    incoming = socket.recv() => match incoming {
+                        Some(Ok(Message::Text(text))) => {
+                            let reply = match v::parse(text.as_bytes(), 1024 * 1024) {
+                                Ok(b) => {
+                                    let request = b["request_id"].as_str();
+                                    match tokio::time::timeout(Duration::from_secs(30), handle(&app, &rid, &b, browser.as_ref())).await {
+                                        Ok(Ok(reply)) => reply,
+                                        Ok(Err(e)) => err(request, e),
+                                        Err(_) => err(request, Error::unavailable("The operation timed out; its result may be uncertain.")),
+                                    }
+                                }
+                                Err(e) => err(None, e),
+                            };
+                            if !send(&mut socket, Message::Text(reply.to_string().into())).await { break; }
+                        }
+                        Some(Ok(Message::Ping(b))) => {
+                            if !send(&mut socket, Message::Pong(b)).await { break; }
+                        }
+                        Some(Ok(Message::Pong(_))) => awaiting = None,
+                        Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                        Some(Ok(Message::Binary(_))) => {
+                            send(&mut socket, Message::Close(Some(axum::extract::ws::CloseFrame {
+                                code: 1003, reason: "JSON text frames required".into(),
+                            }))).await;
+                            break;
+                        }
+                    },
+                    Some(value) = rx.recv() => {
+                        if !send(&mut socket, Message::Text(value.to_string().into())).await { break; }
+                    }
+                    _ = app.changed.notified() => {
+                        match offer(&app, &rid).await {
+                            Ok(values) => for value in values {
+                                if !send(&mut socket, Message::Text(value.to_string().into())).await { break 'connected; }
+                            },
+                            Err(_) => break,
+                        }
+                    }
+                    _ = delivery.tick() => {
+                        match offer(&app, &rid).await {
+                            Ok(values) => for value in values {
+                                if !send(&mut socket, Message::Text(value.to_string().into())).await { break 'connected; }
+                            },
+                            Err(_) => break,
+                        }
+                    }
+                    _ = revalidate.tick() => {
+                        if validate_authority(&app, &rid).await.is_err() { break; }
+                    }
+                    _ = ping.tick() => {
+                        if awaiting.is_some_and(|t| t.elapsed() > Duration::from_secs(10)) { break; }
+                        if last_ping.elapsed() >= Duration::from_secs(30) && awaiting.is_none() {
+                            if !send(&mut socket, Message::Ping(vec![1].into())).await { break; }
+                            let now = Instant::now();
+                            last_ping = now;
+                            awaiting = Some(now);
+                        }
+                    }
+                }
+            }
+        } => {},
     }
-    let mut delivery = tokio::time::interval(Duration::from_secs(1));
-    delivery.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut revalidate = tokio::time::interval(Duration::from_secs(30));
-    revalidate.tick().await;
-    let mut ping = tokio::time::interval(Duration::from_secs(1));
-    let mut last_ping = Instant::now();
-    let mut awaiting: Option<Instant> = None;
-    loop {
-        tokio::select! {
-        incoming=socket.recv()=>match incoming{
-        Some(Ok(Message::Text(text)))=>{let reply=match v::parse(text.as_bytes(),1024*1024){Ok(b)=>{let request=b["request_id"].as_str();match tokio::time::timeout(Duration::from_secs(30),handle(&app,&rid,&b,browser.as_ref())).await{Ok(Ok(reply))=>reply,Ok(Err(e))=>err(request,e),Err(_)=>err(request,Error::unavailable("The operation timed out; its result may be uncertain."))}},Err(e)=>err(None,e)};if socket.send(Message::Text(reply.to_string().into())).await.is_err(){break}},
-        Some(Ok(Message::Ping(b)))=>{if socket.send(Message::Pong(b)).await.is_err(){break}},
-        Some(Ok(Message::Pong(_)))=>awaiting=None,
-        Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,
-        Some(Ok(Message::Binary(_)))=>{let _=socket.send(Message::Close(Some(axum::extract::ws::CloseFrame{code:1003,reason:"JSON text frames required".into()}))).await;break}
-        },
-        Some(value)=rx.recv()=>{if socket.send(Message::Text(value.to_string().into())).await.is_err(){break}},
-        _=app.changed.notified()=>{match offer(&app,&rid).await {Ok(values)=>for value in values{if socket.send(Message::Text(value.to_string().into())).await.is_err(){break}},Err(_)=>break}},
-        _=delivery.tick()=>{match offer(&app,&rid).await {Ok(values)=>for value in values{if socket.send(Message::Text(value.to_string().into())).await.is_err(){break}},Err(_)=>break}},
-        _=revalidate.tick()=>{if validate_authority(&app,&rid).await.is_err(){break}},
-        _=ping.tick()=>{if awaiting.is_some_and(|t|t.elapsed()>Duration::from_secs(10)){break}if last_ping.elapsed()>=Duration::from_secs(30)&&awaiting.is_none(){if socket.send(Message::Ping(vec![1].into())).await.is_err(){break}let now=Instant::now();last_ping=now;awaiting=Some(now);}}
-        }
-    }
+    // Drop transport before waiting on shared state; a lost pause closes promptly.
+    drop(socket);
     let _gate = app.mutations.lock().await;
     app.hub.receivers.write().await.remove(&rid);
     let _ = app.store.release_receiver(&rid);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn full_control_queue_closes_instead_of_losing_a_pause() {
+        let (tx, mut rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
+        let (disconnect, mut disconnected) = watch::channel(false);
+        let receiver = Receiver {
+            tx,
+            disconnect,
+            auth: vec![],
+            watch: None,
+        };
+        for i in 0..CONTROL_QUEUE_CAPACITY {
+            receiver.send(json!({"op":"inbox_changed","sequence":i}));
+        }
+        assert!(!*disconnected.borrow());
+        receiver.send(json!({"op":"paused","reason":"permission_changed"}));
+        tokio::time::timeout(Duration::from_millis(100), disconnected.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*disconnected.borrow());
+        assert_eq!(rx.len(), CONTROL_QUEUE_CAPACITY);
+        assert_eq!(rx.recv().await.unwrap()["sequence"], 0);
+        // Once overflow makes a connection terminal, freeing capacity cannot resume it.
+        receiver.send(json!({"op":"inbox_changed"}));
+        assert_eq!(rx.len(), CONTROL_QUEUE_CAPACITY - 1);
+    }
 }

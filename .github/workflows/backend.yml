@@ -93,6 +93,13 @@ jobs:
         run: |
           cp deploy/{install.sh,ting-server.service,Caddyfile,caddy.service,backup.py,ting-backup.service,ting-backup.timer,caddy-build.json} backend-build/
           cp LICENSE backend-build/LICENSE
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          record = pathlib.Path('backend-build/caddy-build.json')
+          pin = json.loads(record.read_text())
+          pin['sha256'] = hashlib.sha256(pathlib.Path('backend-build/caddy').read_bytes()).hexdigest()
+          record.write_text(json.dumps(pin, indent=2) + '\n')
+          PY
           printf '%s\n' "$GITHUB_SHA" > backend-build/BUILD_COMMIT
           chmod 755 backend-build/{ting-server,caddy,install.sh}
           mkdir -p dist
