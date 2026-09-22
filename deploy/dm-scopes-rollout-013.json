@@ -1,0 +1,113 @@
+{
+  "checked_at": "2026-09-22T19:52:01.922698+00:00",
+  "app_id": "tos>dm",
+  "actor": {
+    "principal_id": "shubham",
+    "actor_type": "carbon",
+    "tos_role": "org_admin",
+    "honeycomb_validator": false
+  },
+  "source": {
+    "repository": "https://github.com/teamofsilicons/silicon-dm",
+    "base_revision": "9f66fa3157b5adcf83aec64902f43ab407823590",
+    "manifest": "releases/honeycomb-application.json",
+    "local_patch_path": "/tmp/silicon-dm-scopes-013/releases/honeycomb-application.json",
+    "committed": true,
+    "pushed": true,
+    "revision": "46c3b644cc8873b7475d706ed90887b87ae9c8a0",
+    "remote_branch": "main",
+    "remote_head_verified": "46c3b644cc8873b7475d706ed90887b87ae9c8a0",
+    "remote_verified_at": "2026-09-22T19:52:01.922698+00:00",
+    "commit_url": "https://github.com/teamofsilicons/silicon-dm/commit/46c3b644cc8873b7475d706ed90887b87ae9c8a0"
+  },
+  "configuration": {
+    "before_revision": 1,
+    "requested_revision": 2,
+    "effective_revision": 1,
+    "iam_revision": 15,
+    "state": "active",
+    "visibility": "public",
+    "only_requested_change": "app_scope.external",
+    "preserved_iam_scopes": [
+      "self.identity.read",
+      "self.profile.read",
+      "self.organizations.read",
+      "self.membership.read",
+      "self.tags.read"
+    ],
+    "requested_external_scopes": [
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "subscriptions.register"
+      },
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "tings.send"
+      }
+    ],
+    "effective_external_scopes": [],
+    "payload_sha256": "fb832e38126079b0f8c6de696dfcd2ce5adf43e62234528d647a2b6c3264125b",
+    "all_other_config_fields_preserved": true
+  },
+  "configure_operation": {
+    "error": "IAM has not accepted this configuration",
+    "id": "6c3c5a5f-de11-4e00-97a6-6002a7ae555a",
+    "publication": {
+      "id": "e13529a1-ee3d-451a-82e8-4391e74408ec",
+      "state": "awaiting_validator"
+    },
+    "resource": "tos>dm",
+    "revision": 2,
+    "state": "pending"
+  },
+  "provider_review": {
+    "request_id": "e13529a1-ee3d-451a-82e8-4391e74408ec",
+    "provider": "tos>ting",
+    "can_decide": true,
+    "state": "approved",
+    "revision": 2,
+    "scopes": [
+      "obo:tos>ting:subscriptions.register",
+      "obo:tos>ting:tings.send"
+    ],
+    "decision_receipt": {
+      "id": "e2091f6f-2af6-4418-9a8a-887f805f590e",
+      "publication_error": null,
+      "publication_state": "awaiting_validator",
+      "state": "accepted"
+    }
+  },
+  "publication": {
+    "request_id": "e13529a1-ee3d-451a-82e8-4391e74408ec",
+    "state": "awaiting_validator",
+    "revision": 2,
+    "gates": [
+      {
+        "provider": "honeycomb",
+        "scopes": [],
+        "state": "pending"
+      },
+      {
+        "provider": "tos>ting",
+        "scopes": [
+          "obo:tos>ting:subscriptions.register",
+          "obo:tos>ting:tings.send"
+        ],
+        "state": "approved"
+      }
+    ],
+    "remaining_provider": "honeycomb",
+    "current_actor_can_decide": false
+  },
+  "remaining_actions": [
+    "An authorized Honeycomb validator must inspect and approve request e13529a1-ee3d-451a-82e8-4391e74408ec for provider honeycomb; current actor is not authorized.",
+    "After approval, reconcile/finish configuration operation 6c3c5a5f-de11-4e00-97a6-6002a7ae555a and publication activation, then confirm effective_revision=2 and both external scopes are effective.",
+    "Each intended recipient/initiating actor still needs explicit fresh IAM consent to the current approved DM scopes; no existing token was treated as gaining consent."
+  ],
+  "consent_created": false,
+  "notifications_sent": false,
+  "notification_types_or_grants_created": false,
+  "shared_environment_modified": false,
+  "runtime_secrets_accessed": false,
+  "real_delivery_proved": false
+}

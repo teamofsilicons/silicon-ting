@@ -1,0 +1,83 @@
+{
+  "checked_at": "2026-09-22T19:48:09.989890+00:00",
+  "release": "0.1.3",
+  "source_commit": "115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_9vGXoqHpt285HmEvSUJBA8ruqAyP",
+    "url": "https://silicon-ting-h1oe441zq-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/9vGXoqHpt285HmEvSUJBA8ruqAyP",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "project_and_domains_preserved": true
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "source_mirrors": "passed",
+    "production_telemetry_tables_preserved": true
+  },
+  "public_home": {
+    "status": 200,
+    "javascript": [
+      {
+        "url": "https://ting.teamofsilicons.com/assets/index-CVjo_Mtl.js",
+        "sha256": "867d8141bd1543c1e04741531863d93ed7d0e07c45b020dc2a22cb78f3f16156",
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ],
+        "matches_local_production_build": true
+      }
+    ]
+  },
+  "public_resources": {
+    "/docs/api.md": {
+      "url": "https://ting.teamofsilicons.com/docs/api.md",
+      "status": 200,
+      "matches_source": true,
+      "sha256": "a805febe35a7da7486c14f15e2dc1055369365ec5d84ffeccaf90d68ad2f8e5b",
+      "source": "udd/api.md"
+    },
+    "/docs/cli.md": {
+      "url": "https://ting.teamofsilicons.com/docs/cli.md",
+      "status": 200,
+      "matches_source": true,
+      "sha256": "7638b03a6d3dc832daea067a6be3aea59eacc1246fd6da4241a0ad626865dfa8",
+      "source": "udd/cli.md"
+    },
+    "/docs/understanding.md": {
+      "url": "https://ting.teamofsilicons.com/docs/understanding.md",
+      "status": 200,
+      "matches_source": true,
+      "sha256": "656ad3e31d51251ccf9f7b8f269bc59537c52b82e7bdfab01ff81466f1e76a90",
+      "source": "udd/understanding.md"
+    },
+    "/install.sh": {
+      "url": "https://ting.teamofsilicons.com/install.sh",
+      "status": 200,
+      "matches_source": true,
+      "sha256": "63b9732509fe392500c818bf421ea7f22c4845ae29655274e8856244709cdf74",
+      "source": "scripts/install.sh",
+      "default_version": "0.1.3"
+    },
+    "/install.ps1": {
+      "url": "https://ting.teamofsilicons.com/install.ps1",
+      "status": 200,
+      "matches_source": true,
+      "sha256": "536c353faf6e10d2c996c861f47c673acd7093b2e4963d3c07441b5b24be8dcd",
+      "source": "scripts/install.ps1",
+      "default_version": "0.1.3"
+    }
+  },
+  "limitations": [
+    "Public asset and contract verification only; this does not establish DM or Interface authenticated end-to-end delivery."
+  ]
+}

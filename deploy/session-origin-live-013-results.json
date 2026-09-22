@@ -1,0 +1,54 @@
+{
+  "checked_at": "2026-09-22T19:48:31.777373+00:00",
+  "api": "https://backend.ting.teamofsilicons.com",
+  "login_status": 201,
+  "websocket": [
+    {
+      "origin": "https://dm.teamofsilicons.com",
+      "authenticated_upgrade": true,
+      "watching_inbox": true
+    },
+    {
+      "origin": "https://interface.teamofsilicons.com",
+      "authenticated_upgrade": true,
+      "watching_inbox": true
+    },
+    {
+      "origin": "https://dm.teamofsilicons.com",
+      "no_cookie_status": 401
+    },
+    {
+      "origin": "https://interface.teamofsilicons.com",
+      "no_cookie_status": 401
+    },
+    {
+      "origin": "https://untrusted.example",
+      "no_cookie_status": 403
+    }
+  ],
+  "me_status": 200,
+  "me": {
+    "authenticated": true,
+    "environment": {
+      "kind": "production"
+    },
+    "id": "shubham",
+    "kind": "carbon"
+  },
+  "dm_type_setup": {
+    "organization": "tos",
+    "environment": "production",
+    "status": 201,
+    "type": "tos>dm.sync.changed",
+    "result": {
+      "defaults": {
+        "carbon": true,
+        "silicon": true
+      },
+      "description": "A DM message or receipt changed; fetch its current authorized state from DM.",
+      "type": "tos>dm.sync.changed"
+    }
+  },
+  "probe_session_logout_status": 200,
+  "scope": "Fresh official IAM SLT login and live HTTP/WebSocket protocol checks; no actual browser navigation or DM message delivery exercised. Only the new probe session was logged out."
+}

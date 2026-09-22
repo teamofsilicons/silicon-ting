@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--url', default='https://backend.ting.teamofsilicons.com')
+parser.add_argument('--browser-origin', action='append', default=[], help='Expected permitted browser origin; repeat for each integration')
+parser.add_argument('--api-only', action='store_true', help='Skip routes outside /v1 when checking a frontend proxy')
 args = parser.parse_args()
 origin = urlsplit(args.url)
 assert origin.scheme == 'https' and not origin.username and not origin.query
@@ -23,21 +25,37 @@ checks = [
     ('untrusted session', 'GET', '/v1/me', None, {'Authorization': 'Bearer invalid'}, 401, 'session_expired'),
     ('unknown route', 'GET', '/not-a-ting-route', None, {}, 404, 'not_found'),
 ]
+for browser_origin in args.browser_origin:
+    checks.extend([
+        (f'{browser_origin} discovery CORS', 'GET', '/v1/iam', None, {'Origin': browser_origin}, 200, None),
+        (f'{browser_origin} error CORS', 'GET', '/v1/me', None, {'Origin': browser_origin}, 401, 'authentication_required'),
+        (f'{browser_origin} preflight CORS', 'OPTIONS', '/v1/me', None, {'Origin': browser_origin, 'Access-Control-Request-Method': 'GET'}, 204, None),
+    ])
 for name, method, path, body, headers, status, code in checks:
+    if args.api_only and not path.startswith('/v1/'):
+        continue
     connection = http.client.HTTPSConnection(origin.hostname, origin.port or 443, timeout=30)
     try:
         connection.request(method, path, body, {'User-Agent': 'silicon-ting-smoke/1', 'Content-Type': 'application/json', **headers})
         response = connection.getresponse()
-        payload = json.loads(response.read())
+        raw = response.read()
         assert response.status == status, (name, response.status, status)
+        payload = json.loads(raw) if raw else None
         assert response.getheader('Ting-Request-Id'), (name, 'missing request ID')
-        assert response.getheader('Content-Type', '').startswith('application/json'), name
+        if status != 204:
+            assert response.getheader('Content-Type', '').startswith('application/json'), name
+        if headers.get('Origin') in args.browser_origin:
+            assert response.getheader('Access-Control-Allow-Origin') == headers['Origin'], name
+            assert response.getheader('Access-Control-Allow-Credentials') == 'true', name
+            assert 'origin' in response.getheader('Vary', '').lower(), name
+        elif headers.get('Origin'):
+            assert response.getheader('Access-Control-Allow-Origin') is None, name
         if code:
             assert payload.get('error', {}).get('code') == code, (name, payload)
             assert isinstance(payload['error'].get('retryable'), bool), name
-        else:
+        elif status != 204:
             assert payload['app_id'] == 'tos>ting' and payload['api_version'] == 'v1', name
         print(json.dumps({'check': name, 'status': response.status, 'passed': True}))
     finally:
         connection.close()
-print(json.dumps({'passed': len(checks), 'url': args.url}))
+print(json.dumps({'passed': sum(not args.api_only or check[2].startswith('/v1/') for check in checks), 'url': args.url}))

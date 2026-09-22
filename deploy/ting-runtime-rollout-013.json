@@ -12,5 +12,8 @@
   ],
   "public_origin": "https://ting.teamofsilicons.com",
   "frontend_origin": "https://ting.teamofsilicons.com",
-  "server_reload": "pending verified backend deployment"
+  "server_reload": "completed",
+  "release": "115954f074a9dfd4-2153cfc50dc8",
+  "deployment_evidence": "backend-013-deployment-results.json",
+  "public_origin_checks": "public-browser-smoke-013-results.json"
 }

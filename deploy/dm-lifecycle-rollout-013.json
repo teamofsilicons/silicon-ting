@@ -1,0 +1,201 @@
+{
+  "completed_at": "2026-09-22T19:50:18.202989+00:00",
+  "status": "completed",
+  "scope": "Production DM/Honeycomb lifecycle connection and original shared-environment import recovery",
+  "dm": {
+    "cloudformation_stack": "silicon-dm-production",
+    "region": "us-east-1",
+    "stack_status": "UPDATE_COMPLETE",
+    "change_set": "arn:aws:cloudformation:us-east-1:234951665042:changeSet/dm-honeycomb-lifecycle-013-20260922194108/cd7c1abe-f5f4-4fe2-9739-ea0e08ce041e",
+    "changes_limited_to": [
+      "ApiTaskDefinition",
+      "ApiService",
+      "WorkerTaskDefinition",
+      "WorkerService"
+    ],
+    "services": [
+      {
+        "name": "silicon-dm-api",
+        "task_definition": "arn:aws:ecs:us-east-1:234951665042:task-definition/silicon-dm-api:19",
+        "running": 1,
+        "pending": 0,
+        "rollout_state": "COMPLETED",
+        "image": "234951665042.dkr.ecr.us-east-1.amazonaws.com/silicon-dm-production@sha256:0b1ed1a133594a518c44d6206835efa743aaa9447cbff6a3d8a42cb841997b36",
+        "image_and_existing_configuration_preserved": true,
+        "added_secret_references": [
+          "DM_HONEYCOMB_SERVICE_TOKEN",
+          "DM_HONEYCOMB_BASE_URL"
+        ]
+      },
+      {
+        "name": "silicon-dm-worker",
+        "task_definition": "arn:aws:ecs:us-east-1:234951665042:task-definition/silicon-dm-worker:19",
+        "running": 1,
+        "pending": 0,
+        "rollout_state": "COMPLETED",
+        "image": "234951665042.dkr.ecr.us-east-1.amazonaws.com/silicon-dm-production@sha256:0b1ed1a133594a518c44d6206835efa743aaa9447cbff6a3d8a42cb841997b36",
+        "image_and_existing_configuration_preserved": true,
+        "added_secret_references": [
+          "DM_HONEYCOMB_SERVICE_TOKEN",
+          "DM_HONEYCOMB_BASE_URL"
+        ]
+      }
+    ],
+    "migration_0022_tables_already_present": true,
+    "production_migrations_run_by_this_rollout": false,
+    "inspection_task": "silicon-dm-lifecycle-inspection-013:1",
+    "inspection_task_exit_code": 0,
+    "inspection_task_definition_deregistered": true
+  },
+  "honeycomb": {
+    "status": "success",
+    "image_preserved": true,
+    "image": "sha256:39d80c8ef7f52cfd4c797bf94a4d991f5deff7f6ea1c82e5ec8f2e0d70b80cf0",
+    "container": "64d1762b5c6d04d6d8d6eedbb1671467cb94d3051fe7c01ee4f7efa60a6064af",
+    "health": 200,
+    "participant_apps": [
+      "tos>briefcase",
+      "tos>remind",
+      "tos>commit",
+      "tos>ting",
+      "tos>dm"
+    ],
+    "credential_loaded": true,
+    "secret_version": "8c276269-c6a1-4427-8e50-8a43b892398b",
+    "data_mount_preserved": true,
+    "ssm_command_id": "c0de5075-1f63-4fd3-83ba-89bb30be8669"
+  },
+  "secret_updates": {
+    "completed_at": "2026-09-22T19:40:10.413880+00:00",
+    "dedicated_token_created": true,
+    "updates": [
+      {
+        "region": "us-east-1",
+        "secret": "silicon-dm/production",
+        "previous_version": "47c398a1-502c-4877-9f5f-44b49f570b47",
+        "current_version": "7b657ba3-bb7e-4ef2-9d5b-b6a4b24e327a",
+        "changed_keys": [
+          "DM_HONEYCOMB_BASE_URL",
+          "DM_HONEYCOMB_SERVICE_TOKEN"
+        ]
+      },
+      {
+        "region": "us-east-1",
+        "secret": "silicon-dm/runtime-production",
+        "previous_version": "e4af02cd-c52c-4ea8-b8d7-a19b1d6472a0",
+        "current_version": "1a70b97e-0a0e-4985-9bfc-cf68de886573",
+        "changed_keys": [
+          "DM_HONEYCOMB_BASE_URL",
+          "DM_HONEYCOMB_SERVICE_TOKEN"
+        ]
+      },
+      {
+        "region": "us-east-2",
+        "secret": "silicon-honeycomb/production/runtime",
+        "previous_version": "ting-012-probe-cleanup-20260922-0001",
+        "current_version": "8c276269-c6a1-4427-8e50-8a43b892398b",
+        "changed_keys": [
+          "DM_HONEYCOMB_SERVICE_TOKEN",
+          "HONEYCOMB_LIFECYCLE_PARTICIPANTS"
+        ]
+      }
+    ]
+  },
+  "environment_retry": {
+    "environment_id": "d70c8674-6d2e-41d4-bf8d-96ddd882edbd",
+    "operation_id": "bfefc652-12cb-42da-a579-7b0005bfebc2",
+    "operation_state": "accepted",
+    "revision": 4,
+    "state": "ready",
+    "requested_revision": 4,
+    "retry_key": "dm-lifecycle-013-retry-5c2da7e8a3724bbfbd66e3c0da2e298f",
+    "at": "2026-09-22T19:48:14.028888+00:00"
+  },
+  "environment": {
+    "environment_id": "d70c8674-6d2e-41d4-bf8d-96ddd882edbd",
+    "org_id": "tos",
+    "revision": 4,
+    "generation": 1,
+    "key_version": 1,
+    "state": "ready",
+    "operation_pending": false,
+    "imports": [
+      {
+        "app_id": "tos>briefcase",
+        "selected_release": "1.1.2",
+        "source_revision": 2
+      },
+      {
+        "app_id": "tos>dm",
+        "selected_release": "0.9.6",
+        "source_revision": 1
+      },
+      {
+        "app_id": "tos>honeycomb",
+        "selected_release": "0.3.2",
+        "source_revision": 1
+      },
+      {
+        "app_id": "tos>ting",
+        "selected_release": "0.1.2",
+        "source_revision": 2
+      }
+    ],
+    "services": [
+      {
+        "app_id": "tos>briefcase",
+        "error": null,
+        "operation_id": "5f2807fc-3277-4f49-a5ee-bfaeb67e5181",
+        "state": "ready"
+      },
+      {
+        "app_id": "tos>dm",
+        "error": null,
+        "operation_id": "bfefc652-12cb-42da-a579-7b0005bfebc2",
+        "state": "ready"
+      },
+      {
+        "app_id": "tos>honeycomb",
+        "error": null,
+        "operation_id": "bfefc652-12cb-42da-a579-7b0005bfebc2",
+        "state": "ready"
+      },
+      {
+        "app_id": "tos>iam",
+        "error": null,
+        "operation_id": "bfefc652-12cb-42da-a579-7b0005bfebc2",
+        "state": "ready"
+      },
+      {
+        "app_id": "tos>ting",
+        "error": null,
+        "operation_id": "6e994d3e-f52d-413b-9b27-2b2dad2daf09",
+        "state": "ready"
+      }
+    ]
+  },
+  "dm_protected_receipt": {
+    "operation_id": "bfefc652-12cb-42da-a579-7b0005bfebc2",
+    "environment_id": "d70c8674-6d2e-41d4-bf8d-96ddd882edbd",
+    "app_id": "tos>dm",
+    "environment_revision": 4,
+    "generation": 1,
+    "key_version": 1,
+    "state": "completed"
+  },
+  "public_health_checks": [
+    {
+      "url": "https://backend.dm.teamofsilicons.com/ready",
+      "status": 204
+    },
+    {
+      "url": "https://backend.honeycomb.teamofsilicons.com/health",
+      "status": 200
+    }
+  ],
+  "notification_messages_sent": 0,
+  "limitations": [
+    "Notification scope approval and recipient consent are separate from lifecycle connectivity.",
+    "This rollout did not validate real DM message delivery, browser delivery, clean/rotation recovery or recipient type/grant/hook setup."
+  ]
+}

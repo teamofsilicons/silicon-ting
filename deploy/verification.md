@@ -1,6 +1,25 @@
 # Deployment verification
 
-Recorded 2026-09-22 UTC. Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com). Backend **0.1.2**, commit `a86971a08089bd212810b2df49f3f13bd41e83ac`, is [deployed and healthy](backend-012-deployment-results.json). Earlier recovery and latency reports used backend `c96cb93c3068f3577875e7bfd97f5d5601a76827` and native client/daemon 0.1.0; final-release checks are distinguished below.
+Updated 2026-09-22 UTC (2026-09-23 Asia/Kolkata). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com). Backend **0.1.3**, commit `115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5`, is [deployed and healthy](backend-013-deployment-results.json).
+
+## Current 0.1.3 release
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | 43 workspace unit/protocol tests and one compiling doctest passed. Workspace build, CLI smoke, formatting and documentation mirrors passed; Clippy completed with existing warnings. Five packaging tests, one Unix installer regression and two frontend tests/build also passed. |
+| Publication | [Both crates are published and non-yanked](crates-release-013-results.json). [All six native platform builds and Honeycomb publication succeeded](native-honeycomb-release-013-results.json); the production Honeycomb archive is 0.1.3. Older versions remain available. |
+| Running services | [Backend release](backend-013-deployment-results.json) passed workflow and installer health checks. [Vercel frontend](frontend-release-013-results.json) is READY, retains its telemetry configuration and serves source-matching 0.1.3 docs/installers. |
+| Browser boundaries | [31 live public checks](public-browser-smoke-013-results.json) passed across both hosts. [Fresh IAM login and WebSocket checks](session-origin-live-013-results.json) verified production session context, DM/Interface authenticated inbox watch, and missing-cookie/unrelated-origin rejection. These were protocol checks, not an actual browser or DM end-to-end run. |
+| DM setup and lifecycle | Production `tos>dm.sync.changed` type is registered in `tos`. [DM/Honeycomb rollout](dm-lifecycle-rollout-013.json) loaded dedicated lifecycle authority and completed the original shared import; all receipts are ready and no operation is pending. No clean/rotation or message-delivery acceptance claim follows. |
+| Remaining external gate | [DM configuration revision 2](dm-scopes-rollout-013.json) has Ting's scope approval and awaits Honeycomb validator approval. Effective revision remains 1. Fresh recipient/initiator consent and the real cross-app acceptance checks in the [runbook](dm-integration.md) remain outstanding. |
+
+## Historical 0.1.2 and earlier verification
+
+The following measurements and checks retain their original version scope.
+Backend 0.1.2 used commit `a86971a08089bd212810b2df49f3f13bd41e83ac`.
+Earlier recovery and latency reports used backend
+`c96cb93c3068f3577875e7bfd97f5d5601a76827` and native client/daemon 0.1.0;
+these are not substituted for fresh 0.1.3 delivery or performance evidence.
 
 | Check | Evidence and scope |
 | --- | --- |

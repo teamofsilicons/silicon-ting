@@ -1,0 +1,199 @@
+{
+  "checked_at": "2026-09-22T19:42:30.175573+00:00",
+  "audit_kind": "Independent read-only public crates.io registry and archive verification",
+  "expected_commit": "115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5",
+  "all_checks_passed": true,
+  "packages": [
+    {
+      "name": "silicon-ting-client",
+      "version": "0.1.3",
+      "index_url": "https://index.crates.io/si/li/silicon-ting-client",
+      "archive_url": "https://static.crates.io/crates/silicon-ting-client/silicon-ting-client-0.1.3.crate",
+      "archive_bytes": 32820,
+      "registry_checksum": "2cc4cd4168033958f1546f821e28139d686f28f9c62c00a3b67ad7e3b059eae3",
+      "download_sha256": "2cc4cd4168033958f1546f821e28139d686f28f9c62c00a3b67ad7e3b059eae3",
+      "checksum_matches": true,
+      "yanked": false,
+      "cargo_vcs_info": {
+        "git": {
+          "sha1": "115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5"
+        },
+        "path_in_vcs": "crates/ting-client"
+      },
+      "package_metadata_verified": true,
+      "files_verified_against_commit": [
+        {
+          "archive_path": "Cargo.toml.orig",
+          "repository_path": "crates/ting-client/Cargo.toml",
+          "sha256": "ce7f45dece1e183abfdb074fdf68adf7e21d3e8b2fd912d04fc78ff3b007a3e0",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "README.md",
+          "repository_path": "README.md",
+          "sha256": "7284570c36b58b737b2711772b177eef7223d2f235707492351a72283521b4ff",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "src/lib.rs",
+          "repository_path": "crates/ting-client/src/lib.rs",
+          "sha256": "de269b5ec7967750b4c8a0819e10c82b647d11256c8ab76cc8bf363a0aa29b47",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "src/websocket.rs",
+          "repository_path": "crates/ting-client/src/websocket.rs",
+          "sha256": "b1249ee8e214e3770907ee5dadd627dd1295bc85c499b437f15cf529c2a78aeb",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "src/windows.rs",
+          "repository_path": "crates/ting-client/src/windows.rs",
+          "sha256": "9d177df01670505aa8b3955b68e527c6ccbcc94ce22aee2683e1b8222870aad2",
+          "exact_commit_match": true
+        }
+      ],
+      "contract_checks": {
+        "public_module": "ting_client::websocket",
+        "public_types": [
+          "WebSocket",
+          "Event"
+        ],
+        "public_functions": [
+          "connect",
+          "receiver_id",
+          "is_connected",
+          "send",
+          "subscribe",
+          "watch_inbox",
+          "unsubscribe",
+          "ack",
+          "next_event",
+          "reconnect_delay"
+        ],
+        "module_contains_usage_example": true,
+        "websocket_source_matches_release_commit": true
+      },
+      "previous_releases": [
+        {
+          "version": "0.1.0",
+          "yanked": false,
+          "registry_checksum": "c3d6585a145399242c2ebf79d0ede97ea353bff995cb4649c30c045b185d37c2",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-client/silicon-ting-client-0.1.0.crate",
+          "archive_http_status": 200
+        },
+        {
+          "version": "0.1.1",
+          "yanked": false,
+          "registry_checksum": "81687019f54604c6ceb4f7b49590e88bb00a18c6e34e2ffa4c9674e056c5eb4d",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-client/silicon-ting-client-0.1.1.crate",
+          "archive_http_status": 200
+        },
+        {
+          "version": "0.1.2",
+          "yanked": false,
+          "registry_checksum": "0c25022eef4e3c41b23ceb9b8136329338a8ad02c89e62771f5faa5603953354",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-client/silicon-ting-client-0.1.2.crate",
+          "archive_http_status": 200
+        }
+      ],
+      "previous_releases_preserved_and_not_yanked": true
+    },
+    {
+      "name": "silicon-ting-cli",
+      "version": "0.1.3",
+      "index_url": "https://index.crates.io/si/li/silicon-ting-cli",
+      "archive_url": "https://static.crates.io/crates/silicon-ting-cli/silicon-ting-cli-0.1.3.crate",
+      "archive_bytes": 55161,
+      "registry_checksum": "11baa8b3ff3c92be6b190e76dbad3ed4753aed6307ac7791998411f401b78e3c",
+      "download_sha256": "11baa8b3ff3c92be6b190e76dbad3ed4753aed6307ac7791998411f401b78e3c",
+      "checksum_matches": true,
+      "yanked": false,
+      "cargo_vcs_info": {
+        "git": {
+          "sha1": "115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5"
+        },
+        "path_in_vcs": "crates/ting-cli"
+      },
+      "package_metadata_verified": true,
+      "files_verified_against_commit": [
+        {
+          "archive_path": "Cargo.toml.orig",
+          "repository_path": "crates/ting-cli/Cargo.toml",
+          "sha256": "40b935640f18ec0a56741c4388e57724acc38e96d53442e0c0a5173d2f0d5257",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "README.md",
+          "repository_path": "README.md",
+          "sha256": "7284570c36b58b737b2711772b177eef7223d2f235707492351a72283521b4ff",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "docs/api.md",
+          "repository_path": "crates/ting-cli/docs/api.md",
+          "sha256": "a805febe35a7da7486c14f15e2dc1055369365ec5d84ffeccaf90d68ad2f8e5b",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "docs/cli.md",
+          "repository_path": "crates/ting-cli/docs/cli.md",
+          "sha256": "7638b03a6d3dc832daea067a6be3aea59eacc1246fd6da4241a0ad626865dfa8",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "src/main.rs",
+          "repository_path": "crates/ting-cli/src/main.rs",
+          "sha256": "fdebef672ce59c7feb4734e190c9cdffc444c7785898fae5880dd018738e5e81",
+          "exact_commit_match": true
+        },
+        {
+          "archive_path": "tests/smoke.py",
+          "repository_path": "crates/ting-cli/tests/smoke.py",
+          "sha256": "0e4d9b01df890e42066d5d055a2fa7e5b583a1b5dc8b8fe0f6efa718d50f11d9",
+          "exact_commit_match": true
+        }
+      ],
+      "contract_checks": {
+        "registry_client_dependency": "0.1.3",
+        "published_manifest_uses_registry_dependency": true,
+        "embeds_api_documentation": true,
+        "api_docs_cover": [
+          "Reusable WebSocket client",
+          "Explicit session environment/generation",
+          "Credentialed CORS and allowed browser origins"
+        ],
+        "api_docs_match_release_commit": true
+      },
+      "previous_releases": [
+        {
+          "version": "0.1.0",
+          "yanked": false,
+          "registry_checksum": "4944917c151044b3a2b0d472292f8bf712885317eaf86d162bbed2428ebb39b8",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-cli/silicon-ting-cli-0.1.0.crate",
+          "archive_http_status": 200
+        },
+        {
+          "version": "0.1.1",
+          "yanked": false,
+          "registry_checksum": "60a76a10fcc00687dc0015a12050e8eb6822cd6b8a9857530da5aa86e02cb640",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-cli/silicon-ting-cli-0.1.1.crate",
+          "archive_http_status": 200
+        },
+        {
+          "version": "0.1.2",
+          "yanked": false,
+          "registry_checksum": "27d96609c970becd207b276b85924eec38cacf8b5b13bc12353211f9fe88c661",
+          "archive_url": "https://static.crates.io/crates/silicon-ting-cli/silicon-ting-cli-0.1.2.crate",
+          "archive_http_status": 200
+        }
+      ],
+      "previous_releases_preserved_and_not_yanked": true
+    }
+  ],
+  "scope_limits": [
+    "Source and packaged documentation were verified byte-for-byte against the release commit.",
+    "No registry mutation, crate execution, compilation, or live notification delivery was performed by this audit."
+  ],
+  "temporary_download_directory": "/tmp/ting-crates-release-013-audit"
+}

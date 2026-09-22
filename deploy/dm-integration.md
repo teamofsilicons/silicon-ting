@@ -1,7 +1,45 @@
 # DM integration deployment and verification
 
-Checked 2026-09-23 (Asia/Kolkata). This records the fixes and remaining deployment
-work from `ting-integration-issues.md`. Local tests do not establish real DM delivery.
+Checked 2026-09-23 (Asia/Kolkata). Ting **0.1.3 is published and deployed** from
+`115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5`. This records the fixes and rollout for
+`ting-integration-issues.md`. Real DM delivery remains a separate acceptance check.
+
+## Completed rollout and remaining gate
+
+- [Backend deployment](backend-013-deployment-results.json) and
+  [frontend deployment](frontend-release-013-results.json) succeeded. The public
+  site, API documentation and installers serve 0.1.3. Both
+  [Rust crates](crates-release-013-results.json), the six-platform native release
+  and [Honeycomb production package](native-honeycomb-release-013-results.json)
+  are published.
+- [Runtime origins](ting-runtime-rollout-013.json) include DM and Interface.
+  [31 public HTTP checks](public-browser-smoke-013-results.json) passed across
+  the backend and frontend proxy, including actual-response credentialed CORS,
+  preflight and unrelated-origin rejection.
+- A [fresh official IAM login](session-origin-live-013-results.json) verified
+  production session context and authenticated WebSocket `watch_inbox` from both
+  allowed origins. Missing cookies returned 401 and an unrelated origin returned
+  403. These are live protocol checks, not browser-navigation or DM-message tests.
+  The same authorized manager registered `tos>dm.sync.changed` in production
+  organization `tos`, then logged out only the new probe session.
+- [DM and Honeycomb lifecycle configuration](dm-lifecycle-rollout-013.json) is
+  loaded in running services. The original import completed, DM is in accepted
+  imports, all five service receipts are ready, and environment
+  `d70c8674-6d2e-41d4-bf8d-96ddd882edbd` has `operation_pending: false` at revision
+  4/generation 1. Its pinned Ting package remains 0.1.2; publishing 0.1.3 did not
+  silently change that selection. Existing DM/Honeycomb images were preserved.
+- [DM's scope manifest](dm-scopes-rollout-013.json) was committed and pushed to
+  DM main at `46c3b644cc8873b7475d706ed90887b87ae9c8a0`. Revision 2 was submitted
+  and Ting approved both scopes. Publication
+  `e13529a1-ee3d-451a-82e8-4391e74408ec` still awaits an eligible **Honeycomb
+  validator**; the signed-in account cannot decide this gate. Effective DM
+  revision remains 1 with no external scopes. After validator approval, finish
+  configuration operation `6c3c5a5f-de11-4e00-97a6-6002a7ae555a` if still pending,
+  verify revision 2 is effective, and obtain each intended actor's fresh consent.
+
+No recipient was enrolled and no DM message or Ting notification was sent during
+this rollout. The candidate DM/Interface delivery migrations were not deployed
+by this Ting release. The cross-app acceptance checks below remain unproved.
 
 ## Changes in this checkout
 
@@ -26,9 +64,9 @@ work from `ting-integration-issues.md`. Local tests do not establish real DM del
   notification state. An IAM request that overlaps a clean cannot write using the
   old generation after cleanup.
 
-These changes require a Ting backend deployment and a client release before remote
-consumers can use them. Publish a new client version; the published 0.1.2 archive
-does not contain this SDK. See [backend deployment](README.md).
+These changes are available in the deployed backend and published 0.1.3 client.
+The 0.1.2 client archive does not contain this SDK. See
+[backend deployment](README.md).
 
 Local verification: `cargo test --locked --workspace` passed 43 unit/protocol tests
 and one compiling doctest; workspace build, CLI smoke, formatting, documentation
@@ -37,9 +75,9 @@ The regressions cover exact proof bytes, canceled/lost replies, heartbeats, queu
 overflow, browser CORS/origin boundaries and lifecycle generation races. No remote
 acceptance claim follows from these checks.
 
-## Verified live prerequisites
+## Before-rollout findings
 
-Read-only checks on 2026-09-22 UTC established:
+Read-only checks on 2026-09-22 UTC, before the rollout above, established:
 
 - Both Ting hosts still reject DM and Interface origins with HTTP 403. Permitted
   Ting-origin GET responses still lack credentialed CORS. Production has not loaded
@@ -60,7 +98,12 @@ Read-only checks on 2026-09-22 UTC established:
   Remind, Commit and Ting, but no DM entry or DM service token. Only presence and
   destination metadata were recorded; no credential values are included here.
 
-## Deployment sequence
+## Rollout procedure
+
+Steps 1–3 are complete. Step 4 awaits the validator gate above. Step 5's production
+type setup is complete for `tos`; recipient and testing-environment setup remains
+explicit. These commands document the procedure, not instructions to repeat
+completed changes.
 
 1. Deploy the reviewed Ting backend through the existing release workflow. Add
    this setting to its runtime secret, preserving all existing settings:
@@ -173,6 +216,7 @@ replace reconnect/HTTP catch-up or authorize automatic inbox acknowledgments.
   setup permits fresh delivery. Rotate credentials and reject retired/stale contexts
   without production fallback.
 
-No production configuration was changed and no real DM message was sent by this
-audit. The remaining deployment and remote checks above are not passed by local
-compilation, fixtures, health responses or the older Ting-only lifecycle evidence.
+The rollout above changed production configuration and recovered the shared
+environment import. It did not send a real DM message. These remote acceptance
+checks are not passed by local compilation, fixtures, health responses or older
+Ting-only lifecycle evidence.
