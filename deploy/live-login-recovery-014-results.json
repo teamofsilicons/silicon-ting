@@ -1,0 +1,27 @@
+{
+  "test": "login_recovery_after_slt_expiry",
+  "started_at": "2026-09-22T21:02:42.074139+00:00",
+  "verification": "captured_response_oracle",
+  "packet_loss_injected": false,
+  "requested_delay_seconds": 125,
+  "statuses": {
+    "health": 200,
+    "login": 201,
+    "immediate_recovery": 200,
+    "changed_body": 409,
+    "delayed_recovery": 200,
+    "original_session_me": 200,
+    "logout": 200,
+    "revoked_session_me": 401
+  },
+  "checks": {
+    "immediate_result_identical": true,
+    "delayed_result_identical": true,
+    "created_session_revoked": true
+  },
+  "cleanup_attempted": true,
+  "passed": true,
+  "url": "https://backend.ting.teamofsilicons.com",
+  "server_version": "0.1.4",
+  "elapsed_since_login_seconds": 125.001
+}

@@ -25,5 +25,13 @@
     "matches": 0,
     "scope": "common credential shapes, not an exhaustive secret audit"
   },
-  "live_checks": "Recorded separately after deployment"
+  "live_checks": "Recorded separately after deployment",
+  "source_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+  "workspace_build": true,
+  "cli_smoke": "passed exact proof bytes, required-delivery command, uncertain login recovery, private files, origin isolation",
+  "clippy": {
+    "completed": true,
+    "warnings": true,
+    "note": "Style suggestions and a test-only guard/drop warning remain; no warning-free claim."
+  }
 }

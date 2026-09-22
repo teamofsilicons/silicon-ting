@@ -1,0 +1,256 @@
+{
+  "checked_at": "2026-09-22T21:08:50.943012+00:00",
+  "version": "0.1.4",
+  "source_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+  "scope": "Native GitHub distribution download and digest verification; local six-target Honeycomb assembly/validation; authorized normal production upload and anonymous listing verification.",
+  "github": {
+    "release_url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4",
+    "tag": "v0.1.4",
+    "tag_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+    "published_at": "2026-09-22T21:03:18Z",
+    "draft": false,
+    "prerelease": false,
+    "workflow": {
+      "conclusion": "success",
+      "headSha": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+      "jobs": [
+        {
+          "conclusion": "success",
+          "name": "build (macos-15, aarch64-apple-darwin)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934658809"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (windows-11-arm, aarch64-pc-windows-msvc)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934659074"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (macos-15-intel, x86_64-apple-darwin)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934659089"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (windows-2025, x86_64-pc-windows-msvc)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934659139"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (ubuntu-24.04, x86_64-unknown-linux-gnu)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934659337"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (ubuntu-24.04-arm, aarch64-unknown-linux-gnu)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106934659361"
+        },
+        {
+          "conclusion": "success",
+          "name": "publish",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887/job/106936873220"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35783539887"
+    },
+    "all_six_native_archives_and_checksums_downloaded": true,
+    "all_archive_checksums_match_SHA256SUMS": true,
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "size": 643,
+        "sha256": "887912982b5774b37ee49db34e41291c2cf13d1d9a64626ef814a58a291f54e0",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/SHA256SUMS"
+      },
+      {
+        "name": "ting-v0.1.4-aarch64-apple-darwin.tar.gz",
+        "size": 5047714,
+        "sha256": "6866bd1b5a22893f91075ad303a63e39d4fdaaa58f0bde8a702a6c7bbb095f7f",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-aarch64-apple-darwin.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.4-aarch64-pc-windows-msvc.zip",
+        "size": 5027726,
+        "sha256": "0b569a1560a6dcd96087a241fc1023dc749cae899c280a6b17093423711e9482",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-aarch64-pc-windows-msvc.zip"
+      },
+      {
+        "name": "ting-v0.1.4-aarch64-unknown-linux-gnu.tar.gz",
+        "size": 5269937,
+        "sha256": "ae26f0e852e799b81f2c833ac0ff5d85e96e7b883d9921f6e8fb69c3888ec59e",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-aarch64-unknown-linux-gnu.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.4-x86_64-apple-darwin.tar.gz",
+        "size": 5325391,
+        "sha256": "dbc3b0d12bec32a27567fcde480c2fbb425a1914d5c9ca4701d542fb1a427608",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-x86_64-apple-darwin.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.4-x86_64-pc-windows-msvc.zip",
+        "size": 5413902,
+        "sha256": "e45563413d6b7fe1dbae3cf71147018ef5a34d467658ac1a4db40e862d347776",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-x86_64-pc-windows-msvc.zip"
+      },
+      {
+        "name": "ting-v0.1.4-x86_64-unknown-linux-gnu.tar.gz",
+        "size": 5558854,
+        "sha256": "7062f4d5c61f3e5724831afdd0ca884a3a319f5b5e51649ee2d261351254cd44",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.4/ting-v0.1.4-x86_64-unknown-linux-gnu.tar.gz"
+      }
+    ],
+    "older_releases_preserved": [
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T19:46:18Z",
+        "tagName": "v0.1.3"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T09:17:37Z",
+        "tagName": "v0.1.2"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T08:54:37Z",
+        "tagName": "v0.1.1"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T00:14:10Z",
+        "tagName": "v0.1.0"
+      }
+    ]
+  },
+  "package": {
+    "path": "dist/ting-honeycomb-0.1.4.tar.gz",
+    "sha256": "7dad6fccf7d92b50137dfa437926c4d54d30402d616b17b7b3c9d73bef69c9bd",
+    "size": 31270174,
+    "source_inputs_match_release_commit": true,
+    "assembly_command": "python3 scripts/package-honeycomb.py --assets dist/releases/v0.1.4 --output dist/ting-honeycomb-0.1.4.tar.gz",
+    "validation_command": "honeycomb validate dist/ting-honeycomb-0.1.4.tar.gz --json",
+    "valid": true,
+    "validation_errors": [],
+    "platforms": [
+      "linux-aarch64",
+      "linux-x86_64",
+      "macos-aarch64",
+      "macos-x86_64",
+      "windows-aarch64",
+      "windows-x86_64"
+    ],
+    "bin": {
+      "ting": "main",
+      "ting-daemon": "daemon"
+    },
+    "licenses_and_service_instructions_verified": true
+  },
+  "honeycomb": {
+    "app_id": "tos>ting",
+    "api": "https://backend.honeycomb.teamofsilicons.com",
+    "channel": "prod",
+    "production_revision_fetched_immediately_before_upload": 3,
+    "effective_revision_before": 2,
+    "upload_idempotency_key_persisted_privately": true,
+    "upload_attempts": 1,
+    "upload_exit_code": 0,
+    "release_receipt": {
+      "app_id": "tos>ting",
+      "channel": "prod",
+      "id": "cccba2f0-ba8e-4132-be5d-fe395e676126",
+      "version": "0.1.4",
+      "state": "accepted",
+      "sha256": "7dad6fccf7d92b50137dfa437926c4d54d30402d616b17b7b3c9d73bef69c9bd",
+      "size": 31270174,
+      "publication": {
+        "id": "10338617-2f27-4e82-b0cd-848751f18913",
+        "state": "awaiting_validator"
+      }
+    },
+    "anonymous_app_status": 200,
+    "anonymous_releases_status": 200,
+    "anonymous_latest_version": "0.1.4",
+    "public_release_matches_upload_receipt": true,
+    "public_releases": [
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790111175,
+        "sha256": "7dad6fccf7d92b50137dfa437926c4d54d30402d616b17b7b3c9d73bef69c9bd",
+        "size": 31270174,
+        "version": "0.1.4"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790106556,
+        "sha256": "a2d8e22f66114a6a8595da8e68c8f864f569fede4b7efda3bbc6c42c44645d93",
+        "size": 31193461,
+        "version": "0.1.3"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790073592,
+        "sha256": "13cb185e429fa234eb9f6a09e6ca767fa072783411abc0b24731317144a87031",
+        "size": 31059794,
+        "version": "0.1.2"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790036337,
+        "sha256": "1d3a5329f2796197c5174fa34f2f5bf9b24b285eadf4b93e174d9ffd4db0d751",
+        "size": 31059118,
+        "version": "0.1.0"
+      }
+    ],
+    "older_releases_preserved": [
+      "0.1.3",
+      "0.1.2",
+      "0.1.0"
+    ],
+    "revision_after": 3,
+    "effective_revision_after": 2,
+    "configuration_publication": {
+      "id": "10338617-2f27-4e82-b0cd-848751f18913",
+      "revision": 3,
+      "state": "awaiting_validator",
+      "error": null,
+      "gates": [
+        {
+          "provider": "honeycomb",
+          "scopes": [],
+          "state": "pending"
+        }
+      ]
+    },
+    "configuration_review_bypassed": false
+  },
+  "limitations": [
+    "Native asset checksums and public release listings do not establish live Hook-to-Ting end-to-end receiving.",
+    "Honeycomb configuration revision 3 remains awaiting an eligible external validator; effective revision 2 does not publish the new receivers.bootstrap scope.",
+    "This run verified anonymous release metadata, not installation or execution of every platform archive locally."
+  ],
+  "remaining_actions": [
+    "An eligible Honeycomb validator must approve configuration publication 10338617-2f27-4e82-b0cd-848751f18913 revision 3; finish the original configure/activation workflow and verify the new endpoint is effective."
+  ]
+}

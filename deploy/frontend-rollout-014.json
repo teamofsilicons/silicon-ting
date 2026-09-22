@@ -1,0 +1,131 @@
+{
+  "checked_at": "2026-09-22T21:06:29.577409+00:00",
+  "release": "0.1.4",
+  "source_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_2G2XHxAf9jkTvekYKkVH8bnhYZV4",
+    "url": "https://silicon-ting-aghm996la-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/2G2XHxAf9jkTvekYKkVH8bnhYZV4",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "promoted": true,
+    "project_and_domains_preserved": true,
+    "promotion_waited_for_native_release": true
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "chrome_browser_checks_with_mocked_api": "passed",
+    "production_telemetry_tables_preserved": true
+  },
+  "public_home": {
+    "https://ting.teamofsilicons.com": {
+      "status": 200,
+      "javascript": [
+        "/assets/index-DqnvGxk1.js"
+      ]
+    },
+    "https://silicon-ting.vercel.app": {
+      "status": 200,
+      "javascript": [
+        "/assets/index-DqnvGxk1.js"
+      ]
+    }
+  },
+  "public_resources": {
+    "/docs/api.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "f0bcf1837eca806f6300233ed7cbb30c4c800080bea11980c22fe2a8b21c7f43",
+      "source": "udd/api.md"
+    },
+    "/docs/cli.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "b6e47c86cbf2846d259e09aef0072d59ac06c4abeed67abf0c912d3d6ace0977",
+      "source": "udd/cli.md"
+    },
+    "/docs/understanding.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "656ad3e31d51251ccf9f7b8f269bc59537c52b82e7bdfab01ff81466f1e76a90",
+      "source": "udd/understanding.md"
+    },
+    "/install.sh": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "7f08e30c0364392bea349521833148f61c56d2a7804c41f301334df052b50f92",
+      "source": "scripts/install.sh",
+      "default_version": "0.1.4"
+    },
+    "/install.ps1": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "c1c2c151e3ff9b166c438517c9ee89eb0af46c64fd36c35a7be8fcb74efd5548",
+      "source": "scripts/install.ps1",
+      "default_version": "0.1.4"
+    }
+  },
+  "api_checks": {
+    "https://ting.teamofsilicons.com/v1/iam": {
+      "status": 200,
+      "content_type": "application/json",
+      "app_id": "tos>ting",
+      "api_version": "v1"
+    },
+    "https://ting.teamofsilicons.com/api/health": {
+      "status": 404,
+      "content_type": "text/plain; charset=utf-8"
+    },
+    "https://backend.ting.teamofsilicons.com/healthz": {
+      "content_type": "application/json",
+      "version": "0.1.4",
+      "service": "ting",
+      "service_status": "ok",
+      "status": 200
+    }
+  },
+  "public_asset": {
+    "url": "https://ting.teamofsilicons.com/assets/index-DqnvGxk1.js",
+    "status": 200,
+    "sha256": "a9b51c9966f07707d5994eb563c3c4df0def059c7a62df49e9283654eacc5055",
+    "matches_tested_production_build": true,
+    "required_delivery_consent_ui_present": true,
+    "telemetry_tables": [
+      "tingfrontendanalytics",
+      "tingfrontendevents"
+    ]
+  },
+  "limitations": [
+    "Browser interaction checks use mocked API and WebSocket responses; they do not establish a live authenticated IAM delivery flow.",
+    "The canonical /api/health route returned 404 before and after rollout; public /v1/iam and backend /healthz are the verified supported discovery/health routes."
+  ],
+  "production_browser_checks": {
+    "origin": "https://ting.teamofsilicons.com",
+    "browser": "Chrome",
+    "passed": true,
+    "api_and_websocket_responses": "mocked",
+    "checks": [
+      "Public desktop and mobile layout",
+      "Documentation navigation",
+      "Inbox fetching does not mark read",
+      "Opening a visible notification marks read once",
+      "Unsafe payload links do not render",
+      "Silent inbox filtering",
+      "Type ownership validation",
+      "Required-delivery consent defaults off and writes only on explicit actions",
+      "Required-delivery enable/disable targets the original subscription",
+      "Failed consent updates preserve the confirmed setting",
+      "Connections layout fits 390px and 320px viewports",
+      "No browser runtime errors"
+    ]
+  }
+}

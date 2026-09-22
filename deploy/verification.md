@@ -1,8 +1,21 @@
 # Deployment verification
 
-Updated 2026-09-22 UTC (2026-09-23 Asia/Kolkata). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com). Backend **0.1.3**, commit `115954f074a9dfd48e3f14b39a70ecaf8cc7a6c5`, is [deployed and healthy](backend-013-deployment-results.json).
+Updated 2026-09-22 UTC (2026-09-23 Asia/Kolkata). Backend **0.1.4**, release source `3253ea193c9fc244e6ef7e5fd818240ae0ad4782`, is [deployed and healthy](backend-014-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.1.3 release
+## Current 0.1.4 release
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [60 workspace tests and one compiling doctest passed](release-validation-014.json), including 12 auth tests, six receiver tests and 13 store tests. Workspace build, CLI smoke, five packaging tests, one installer test, two frontend tests, build and mocked Chrome checks passed. Clippy completed with warnings. |
+| Native and Honeycomb | [All six native platform builds and publication passed](native-honeycomb-release-014-results.json). Every downloaded asset matched its checksum; the validated Honeycomb package is anonymously available as production 0.1.4. Older releases remain available. |
+| Crates | [Client and CLI 0.1.4 are published and non-yanked](crates-release-014-results.json). Downloaded archive checksums and embedded source commit match the clean release commit. |
+| Frontend | [Vercel production promotion and public asset checks passed](frontend-rollout-014.json). Both existing domains serve the tested JavaScript, docs and 0.1.4 installers. Required-delivery UI checks use mocked APIs; telemetry configuration is preserved. |
+| Backend | [All three backend workflow jobs and deployment health checks passed](backend-014-deployment-results.json). The installer fetched the latest runtime configuration and verified archive checksum/provenance. |
+| Login recovery | [Real production replay after 125.001 seconds returned the identical opaque credential](live-login-recovery-014-results.json) with HTTP 200; the original session remained valid. Changed input returned 409. Cleanup returned 200 and the revoked session returned 401. The original response was privately captured as an oracle; packet loss was not injected. |
+| Public boundaries | [45 live HTTP/CORS checks passed](public-browser-smoke-014-results.json) across backend and frontend proxy, including separate full-session/receiver token boundaries and exact DM, Interface and Hook browser origins. These are protocol checks, not browser or Hook adapter end-to-end evidence. |
+| Approval gates | [Ting's new production endpoint definition](ting-config-rollout-014.json) awaits Honeycomb validator approval; [Hook's external scopes and lifecycle setup](hook-scopes-rollout-014.json) track the dependent rollout. The current Carbon is not an eligible validator. See [the Hook runbook](hook-integration.md). |
+
+## Historical 0.1.3 release
 
 | Check | Evidence and scope |
 | --- | --- |

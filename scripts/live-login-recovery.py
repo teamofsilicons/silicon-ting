@@ -3,8 +3,9 @@
 
 Uses the official IAM CLI's current production login unless --slt-file supplies a
 fresh tos>ting SLT (plain text or IAM's {"slt": ..., "expires_in": ...} JSON).
-Credentials stay in memory and captured subprocess output; reports contain no
-tokens, idempotency keys, request bodies, or actor IDs. This captures the original
+Credentials stay in captured subprocess output, memory, and a private recovery
+file deleted only after confirmed logout; reports contain no tokens, idempotency
+keys, request bodies, or actor IDs. This captures the original
 response privately as a comparison/cleanup oracle; it does not inject packet loss.
 """
 import argparse
@@ -12,10 +13,12 @@ import datetime
 import http.client
 import ipaddress
 import json
+import os
 import pathlib
 import re
 import stat
 import subprocess
+import tempfile
 import time
 import uuid
 from urllib.parse import urlsplit
@@ -94,6 +97,28 @@ def request(target, method, path, body=None, headers=None):
         connection.close()
 
 
+def persist_recovery(path, attempt):
+    """Atomically replace a mode-600 file inside its private mode-700 directory."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".pending-", delete=False) as output:
+            temporary = pathlib.Path(output.name)
+            os.fchmod(output.fileno(), 0o600)
+            json.dump(attempt, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def run(args):
     report = {
         "test": "login_recovery_after_slt_expiry",
@@ -107,6 +132,16 @@ def run(args):
     recovery_headers = None
     raw = None
     target = None
+    recovery_file = None
+    attempt = None
+    login_attempted = False
+
+    def capture_session(payload):
+        nonlocal session
+        if isinstance(payload, dict) and isinstance(payload.get("session_token"), str):
+            session = payload["session_token"]
+            attempt["session_token"] = session
+            persist_recovery(recovery_file, attempt)
 
     def call(label, method, path, body=None, headers=None):
         status, payload = request(target, method, path, body, headers)
@@ -130,9 +165,16 @@ def run(args):
         slt = load_slt(args.slt_file)
         raw = json.dumps({"slt": slt}, separators=(",", ":")).encode()
         recovery_headers = {"Idempotency-Key": str(uuid.uuid4())}
+        recovery_directory = pathlib.Path(tempfile.mkdtemp(prefix="ting-login-recovery-"))
+        os.chmod(recovery_directory, 0o700)
+        recovery_file = recovery_directory / "attempt.json"
+        attempt = {"url": report["url"], "created_at": report["started_at"],
+                   "method": "POST", "path": "/v1/session", "body_utf8": raw.decode(),
+                   "idempotency_key": recovery_headers["Idempotency-Key"]}
+        persist_recovery(recovery_file, attempt)
+        login_attempted = True
         status, original = call("login", "POST", "/v1/session", raw, recovery_headers)
-        if isinstance(original, dict):
-            session = original.get("session_token")
+        capture_session(original)
         require(status == 201, "login_not_created")
         require(isinstance(session, str) and session.startswith("ting_"), "login_missing_session")
         accepted_at = time.monotonic()
@@ -163,11 +205,11 @@ def run(args):
         report["failure"] = "dependency_or_input_error"
     finally:
         try:
-            if session is None and raw is not None and recovery_headers is not None:
+            if session is None and login_attempted:
                 # A transport failure might have hidden the first response. Recover only the same operation for cleanup.
                 status, recovered = call("cleanup_recovery", "POST", "/v1/session", raw, recovery_headers)
-                if status in (200, 201) and isinstance(recovered, dict):
-                    session = recovered.get("session_token")
+                if status in (200, 201):
+                    capture_session(recovered)
             if isinstance(session, str):
                 report["cleanup_attempted"] = True
                 auth = {"Authorization": "Bearer " + session}
@@ -176,12 +218,19 @@ def run(args):
                 status, _ = call("revoked_session_me", "GET", "/v1/me", headers=auth)
                 require(status == 401, "cleanup_session_still_active")
                 report["checks"]["created_session_revoked"] = True
-            elif raw is not None:
+                recovery_file.unlink()
+                recovery_file.parent.rmdir()
+            elif login_attempted:
                 report["cleanup_unconfirmed"] = True
                 report["passed"] = False
         except Exception:
             report["cleanup_unconfirmed"] = True
             report["passed"] = False
+        if recovery_file is not None:
+            if recovery_file.exists():
+                report["private_recovery_file"] = str(recovery_file)
+            elif recovery_file.parent.exists():
+                report["private_recovery_directory"] = str(recovery_file.parent)
     return report
 
 

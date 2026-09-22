@@ -12,6 +12,7 @@
     "https://interface.teamofsilicons.com",
     "https://hook.teamofsilicons.com"
   ],
-  "runtime_reload": "pending 0.1.4 deployment",
-  "other_settings_preserved": true
+  "runtime_reload": "completed with backend 0.1.4",
+  "other_settings_preserved": true,
+  "release_commit": "3253ea193c9fc244e6ef7e5fd818240ae0ad4782"
 }
