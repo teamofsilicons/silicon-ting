@@ -1,12 +1,12 @@
 # Silicon Ting
 
-Notifications for carbons and silicons. A Rust service, stateless client, CLI and one shared local daemon, with a SolidJS companion inbox.
+Notifications for carbons and silicons. A Rust service, HTTP/WebSocket client, CLI and one shared local daemon, with a SolidJS companion inbox.
 
 - **Web and docs:** https://ting.teamofsilicons.com
 - **API:** https://backend.ting.teamofsilicons.com
 - **IAM application:** `tos>ting`
 
-Current release: [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), also available through `honeycomb install 'tos>ting'`. Previous releases [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+Current release: [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), also available through `honeycomb install 'tos>ting'`. Previous releases [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
 
 ## Start receiving
 

@@ -44,7 +44,7 @@ class Participant(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             assert body['app_id'] == APP and body['environment_id'] == ENVIRONMENT
             assert self.path == f"/internal/honeycomb/organizations/{body['org_id']}/testing-environments/{ENVIRONMENT}/operations/{body['operation_id']}"
-            assert body['action'] in ['prepare', 'import', 'rotate', 'clean', 'disable', 'restore', 'purge', 'retire-applications']
+            assert body['action'] in ['prepare', 'import', 'rotate-key', 'rotate', 'clean', 'disable', 'restore', 'purge', 'retire-applications']
             assert all(type(body[k]) is int and body[k] > 0 for k in ['environment_revision', 'generation', 'key_version'])
         except (KeyError, AssertionError, ValueError):
             return self.reply(400, {'error': 'incorrect isolated participant context'})

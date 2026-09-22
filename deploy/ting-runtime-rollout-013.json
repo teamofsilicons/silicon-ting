@@ -1,0 +1,16 @@
+{
+  "secret_id": "silicon-ting/production/runtime",
+  "region": "us-east-1",
+  "prior_version": "8b319e21-809b-4258-8a86-d1367474c978",
+  "version": "1294c65e-e2d0-4f9d-87e7-7a737da4523f",
+  "changed_keys": [
+    "TING_BROWSER_ORIGINS"
+  ],
+  "browser_origins": [
+    "https://dm.teamofsilicons.com",
+    "https://interface.teamofsilicons.com"
+  ],
+  "public_origin": "https://ting.teamofsilicons.com",
+  "frontend_origin": "https://ting.teamofsilicons.com",
+  "server_reload": "pending verified backend deployment"
+}

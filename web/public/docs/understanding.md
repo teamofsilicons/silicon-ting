@@ -111,4 +111,4 @@ i am also logged into IAM cli as shubham as admin, make this as an app inside to
 # Write modular code and dont abstract until it will be used atleast thrice.
 
 # Storing Tings
-Ting retains read or silent tings for one calendar month, and unread non-silent tings for three calendar months. Both periods run from the original creation time in UTC.
+Ting stores read or silent tings for one calendar month, and unread non-silent tings for three calendar months, measured from their original creation time in UTC.

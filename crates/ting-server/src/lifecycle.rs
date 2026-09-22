@@ -100,7 +100,7 @@ pub async fn handle(
     }
     let revoke = matches!(
         command.action.as_str(),
-        "clean" | "purge" | "disable" | "rotate" | "retire-applications"
+        "clean" | "purge" | "disable" | "rotate" | "rotate-key" | "retire-applications"
     );
     app.auth
         .fence_context(&environment, "pending", &command.key_hash, revoke)?;
@@ -210,6 +210,7 @@ impl Command {
             "prepare"
                 | "import"
                 | "rotate"
+                | "rotate-key"
                 | "clean"
                 | "disable"
                 | "restore"
@@ -273,12 +274,24 @@ impl Command {
             if self.action == "restore" && state != "disabled" {
                 return Err(conflict("Only a disabled environment can be restored."));
             }
+            if state == "disabled" && !matches!(self.action.as_str(), "restore" | "purge") {
+                return Err(conflict(
+                    "Restore the disabled environment before changing it.",
+                ));
+            }
+            if state == "retired" && !matches!(self.action.as_str(), "import" | "purge") {
+                return Err(conflict(
+                    "Import the retired application before changing its environment.",
+                ));
+            }
             if self.action == "clean" && self.generation <= *generation {
                 return Err(conflict(
                     "Cleaning must advance the environment generation.",
                 ));
             }
-            if self.action == "rotate" && self.key_version <= *key_version {
+            if matches!(self.action.as_str(), "rotate" | "rotate-key")
+                && self.key_version <= *key_version
+            {
                 return Err(conflict("Rotation must advance the key version."));
             }
         } else if !matches!(self.action.as_str(), "prepare" | "import") {
@@ -332,5 +345,46 @@ mod tests {
         );
         body["app_id"] = json!("tos>other");
         assert!(Command::parse(&body, "tos", &env, &op).is_err());
+    }
+
+    #[test]
+    fn honeycomb_rotation_preserves_wire_bytes_and_cannot_reactivate_contexts() {
+        let environment = uuid::Uuid::new_v4().to_string();
+        let operation = uuid::Uuid::new_v4().to_string();
+        for action in ["rotate-key", "rotate"] {
+            let body = json!({"app_id":"tos>ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":1,"key_version":2,"action":action,"testing_key":"b".repeat(32)});
+            let command = Command::parse(&body, "tos", &environment, &operation).unwrap();
+            assert_eq!(command.body, body);
+            assert_eq!(command.key_hash, digest("b".repeat(32).as_bytes()));
+            assert!(
+                command
+                    .validate_transition(Some(&(1, 1, 1, "active".into())))
+                    .is_ok()
+            );
+            assert!(
+                command
+                    .validate_transition(Some(&(1, 1, 2, "active".into())))
+                    .is_err()
+            );
+            for state in ["disabled", "retired", "purged"] {
+                assert!(
+                    command
+                        .validate_transition(Some(&(1, 1, 1, state.into())))
+                        .is_err()
+                );
+            }
+            assert!(command.receipt().get("testing_key").is_none());
+        }
+        for action in ["clean", "prepare", "retire-applications"] {
+            let body = json!({"app_id":"tos>ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":2,"key_version":1,"action":action,"testing_key":"a".repeat(32),"retired_apps":["tos>other"]});
+            let command = Command::parse(&body, "tos", &environment, &operation).unwrap();
+            for state in ["disabled", "retired"] {
+                assert!(
+                    command
+                        .validate_transition(Some(&(1, 1, 1, state.into())))
+                        .is_err()
+                );
+            }
+        }
     }
 }

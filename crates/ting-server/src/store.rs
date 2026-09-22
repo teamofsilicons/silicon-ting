@@ -986,6 +986,7 @@ mod tests {
             org_id: "org-uuid".into(),
             app_id: "tos>example".into(),
             actor_id: p.id.clone(),
+            test: None,
         };
         s.register_type(
             &p,
@@ -1209,6 +1210,7 @@ mod tests {
                     org_id: "org-uuid".into(),
                     app_id: "tos>example".into(),
                     actor_id: "si_test".into(),
+                    test: None,
                 };
                 s.send(&proof, &body("concurrent")).unwrap()
             }));

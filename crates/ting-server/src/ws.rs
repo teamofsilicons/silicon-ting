@@ -197,6 +197,7 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             let org = app.auth.org(&p, v::string(b, "org_id", 255)?).await?;
             let ids = v::ids(b, "webhook_ids", true)?;
             let _gate = app.mutations.lock().await;
+            app.auth.check_session(&p)?;
             let replaced = app.store.bind(&p, &org, rid, &ids, false, false)?;
             app.hub
                 .pause_replaced(replaced, &org, "binding_replaced")
@@ -223,6 +224,8 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
                     .await?
             };
             let org = app.auth.org(&p, v::string(b, "org_id", 255)?).await?;
+            let _gate = app.mutations.lock().await;
+            app.auth.check_session(&p)?;
             let mut map = app.hub.receivers.write().await;
             let r = map.get_mut(rid).ok_or_else(Error::not_found)?;
             r.watch = Some((p, org.clone()));
@@ -264,6 +267,7 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             };
             let active = app.store.active_hooks(rid)?;
             let mut canonical = None;
+            let mut principals = vec![];
             for hid in &ids {
                 let (_, context, org, owner, session) = active
                     .iter()
@@ -276,10 +280,14 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
                 if org != &org2 || context != &p.context || owner != &p.id {
                     return Err(Error::not_found());
                 }
-                canonical = Some(org2)
+                canonical = Some(org2);
+                principals.push(p);
             }
             let org = canonical.ok_or_else(Error::not_found)?;
             let _gate = app.mutations.lock().await;
+            for principal in &principals {
+                app.auth.check_session(principal)?;
+            }
             if op == "ack" {
                 let message_ids = v::ids(b, "message_ids", false)?;
                 let kind = v::string(b, "kind", 16)?;

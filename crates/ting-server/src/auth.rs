@@ -31,13 +31,16 @@ pub struct Proof {
     pub org_id: String,
     pub app_id: String,
     pub actor_id: String,
+    pub(crate) test: Option<TestContext>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct TestContext {
+pub(crate) struct TestContext {
     id: String,
     secret: String,
     key: String,
+    #[serde(default)]
+    generation: Option<i64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Session {
@@ -169,6 +172,8 @@ impl Auth {
             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, payload BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, revoke_pending INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS logins (id TEXT PRIMARY KEY, slt_hash TEXT NOT NULL, created INTEGER NOT NULL, payload BLOB, response BLOB);
             CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);")?;
+        // Read the authoritative lifecycle generation without duplicating it in credentials.
+        db.execute("ATTACH DATABASE ? AS delivery", [&config.database_path])?;
         let iam = Client::new(&config.iam_url)?.with_credential(Credential::application(
             &config.iam_app_id,
             &config.iam_app_secret,
@@ -303,11 +308,9 @@ impl Auth {
         tx.commit().map_err(storage)?;
         Ok(())
     }
-    fn check_context(&self, context: &str, key: &str) -> Result<()> {
-        let known: Option<(String, String)> = self
-            .db
-            .lock()
-            .unwrap()
+    fn check_context(&self, context: &str, key: &str) -> Result<i64> {
+        let db = self.db.lock().unwrap();
+        let known: Option<(String, String)> = db
             .query_row(
                 "SELECT state,key_hash FROM testing_contexts WHERE id=?",
                 [context],
@@ -315,17 +318,72 @@ impl Auth {
             )
             .optional()
             .map_err(storage)?;
-        if let Some((state, expected)) = known {
-            if state == "pending" {
-                return Err(Error::unavailable(
-                    "This testing environment has an unfinished lifecycle operation.",
-                ));
-            }
-            if state != "active" || expected != hash(key.as_bytes()) {
-                return Err(forbidden());
-            }
+        let (state, expected) = known.ok_or_else(|| {
+            Error::unavailable("Import this testing environment through Honeycomb before use.")
+        })?;
+        if state == "pending" {
+            return Err(Error::unavailable(
+                "This testing environment has an unfinished lifecycle operation.",
+            ));
         }
-        Ok(())
+        if state != "active" || expected != hash(key.as_bytes()) {
+            return Err(forbidden());
+        }
+        db
+            .query_row(
+                "SELECT generation FROM delivery.lifecycle_environments WHERE id=? AND state='active' AND key_hash=? AND generation>0",
+                params![context, expected],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or_else(|| Error::unavailable("This testing environment has no active lifecycle generation."))
+    }
+    fn session_environment(&self, session: &Session) -> Result<Value> {
+        match &session.test {
+            None if session.context == "production" => Ok(json!({"kind":"production"})),
+            Some(test) if test.id == session.context => {
+                let generation = self.check_context(&test.id, &test.key)?;
+                if test.generation != Some(generation) {
+                    return Err(expired());
+                }
+                Ok(json!({"kind":"testing","id":test.id,"generation":generation}))
+            }
+            _ => Err(expired()),
+        }
+    }
+    fn current_session(&self, principal: &Principal) -> Result<Session> {
+        let session = self.session(&principal.session)?;
+        if session.id != principal.id
+            || session.kind != principal.kind
+            || session.context != principal.context
+            || session.expires <= now()
+        {
+            return Err(expired());
+        }
+        self.session_environment(&session)?;
+        Ok(session)
+    }
+    pub fn check_session(&self, principal: &Principal) -> Result<()> {
+        self.current_session(principal).map(|_| ())
+    }
+    pub fn check_proof(&self, proof: &Proof) -> Result<()> {
+        match &proof.test {
+            None if proof.context == "production" => Ok(()),
+            Some(test)
+                if test.id == proof.context
+                    && test.generation == Some(self.check_context(&test.id, &test.key)?) =>
+            {
+                Ok(())
+            }
+            _ => Err(forbidden()),
+        }
+    }
+    pub fn me(&self, principal: &Principal) -> Result<Value> {
+        let session = self.current_session(principal)?;
+        Ok(
+            json!({"id":session.id,"kind":session.kind,"authenticated":true,"environment":self.session_environment(&session)?}),
+        )
     }
     fn lock(&self, id: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.locks.lock().unwrap();
@@ -414,6 +472,7 @@ impl Auth {
                     id: String::new(),
                     secret: secret.to_str().map_err(|_| forbidden())?.into(),
                     key: key.to_str().map_err(|_| forbidden())?.into(),
+                    generation: None,
                 };
                 let validated = self
                     .client(Some(&test))?
@@ -425,7 +484,7 @@ impl Auth {
                     return Err(forbidden());
                 }
                 test.id = validated.environment_id.to_string();
-                self.check_context(&test.id, &test.key)?;
+                test.generation = Some(self.check_context(&test.id, &test.key)?);
                 Ok(Some(test))
             }
             _ => Err(Error::new(
@@ -437,9 +496,9 @@ impl Auth {
         }
     }
     async fn inspect(&self, s: &Session) -> Result<models::TokenIntrospection> {
+        self.session_environment(s)?;
         let client = self.client(s.test.as_ref())?;
         if let Some(test) = &s.test {
-            self.check_context(&test.id, &test.key)?;
             let current = client
                 .applications()
                 .testing_context()
@@ -491,12 +550,15 @@ impl Auth {
                 return Err(forbidden());
             }
         }
+        // An IAM request can overlap a clean or rotation; do not attest the old generation.
+        self.session_environment(s)?;
         Ok(token)
     }
     async fn live(&self, id: &str) -> Result<(Session, models::TokenIntrospection)> {
         let lock = self.lock(id);
         let _guard = lock.lock().await;
         let mut session = self.session(id)?;
+        self.session_environment(&session)?;
         if session.expires <= now() + 10 || session.refresh_key.is_some() {
             if session.refresh_key.is_none() {
                 session.refresh_key = Some(secret());
@@ -519,6 +581,7 @@ impl Auth {
             self.save(id, &session)?;
         }
         let inspected = self.inspect(&session).await?;
+        self.session(id)?;
         Ok((session, inspected))
     }
     pub async fn authenticate(&self, token: &str, headers: &HeaderMap) -> Result<Principal> {
@@ -528,11 +591,12 @@ impl Auth {
         let id = hash(token.as_bytes());
         let (session, _) = self.live(&id).await?;
         if let Some(test) = self.test_headers(headers).await? {
-            if session
-                .test
-                .as_ref()
-                .is_none_or(|s| s.id != test.id || s.secret != test.secret || s.key != test.key)
-            {
+            if session.test.as_ref().is_none_or(|s| {
+                s.id != test.id
+                    || s.secret != test.secret
+                    || s.key != test.key
+                    || s.generation != test.generation
+            }) {
                 return Err(Error::new(
                     403,
                     "test_context_mismatch",
@@ -560,7 +624,11 @@ impl Auth {
             .as_ref()
             .map(|t| t.id.clone())
             .unwrap_or("production".into());
-        let operation = hash(format!("{context}:{key}").as_bytes());
+        let binding = match &test {
+            Some(t) => format!("{context}:{}:{key}", t.generation.ok_or_else(expired)?),
+            None => format!("{context}:{key}"),
+        };
+        let operation = hash(binding.as_bytes());
         let slt_hash = hash(slt.as_bytes());
         let lock = self.lock(&operation);
         let _guard = lock.lock().await;
@@ -925,10 +993,14 @@ impl Auth {
             return Err(forbidden());
         }
         Ok(Proof {
-            context: test.map(|t| t.id).unwrap_or("production".into()),
+            context: test
+                .as_ref()
+                .map(|t| t.id.clone())
+                .unwrap_or("production".into()),
             org_id: a.organization_id.to_string(),
             app_id: verified.issuer_app_id,
             actor_id: verified.actor.public_id,
+            test,
         })
     }
     pub async fn report(&self, p: &Principal, body: Value, version: Option<&str>) -> Result<Value> {
@@ -1113,6 +1185,7 @@ pub(crate) mod tests {
         pub status: AtomicU16,
         pub calls: Mutex<Vec<String>>,
         pub block_next: AtomicBool,
+        pub block_path: Mutex<Option<String>>,
         pub blocked: tokio::sync::Notify,
         pub release: tokio::sync::Notify,
         context: String,
@@ -1184,6 +1257,7 @@ pub(crate) mod tests {
             status: AtomicU16::new(200),
             calls: Mutex::new(vec![]),
             block_next: AtomicBool::new(false),
+            block_path: Mutex::new(None),
             blocked: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
             context: context.clone(),
@@ -1194,12 +1268,45 @@ pub(crate) mod tests {
         ) -> axum::response::Response {
             let path = request.uri().path().to_owned();
             iam.calls.lock().unwrap().push(path.clone());
-            if iam.block_next.swap(false, Ordering::SeqCst) {
+            if iam.block_next.swap(false, Ordering::SeqCst)
+                || iam
+                    .block_path
+                    .lock()
+                    .unwrap()
+                    .take_if(|wanted| wanted == &path)
+                    .is_some()
+            {
                 iam.blocked.notify_one();
                 iam.release.notified().await;
             }
             let body = match path.as_str() {
                 "/api/v1/oauth/introspect" => iam.reply.lock().unwrap().clone(),
+                "/api/v1/app-auth/tokens" => {
+                    json!({"access_token":"fixture-access", "refresh_token":"fixture-refresh", "expires_in":3600,
+                    "token_type":"Bearer", "scope":"", "actor":{"type":"silicon", "public_id":"si_fixture"}})
+                }
+                "/api/v1/obo-access/verify" => {
+                    let raw = axum::body::to_bytes(request.into_body(), 1024 * 1024)
+                        .await
+                        .unwrap();
+                    let request: Value = serde_json::from_slice(&raw).unwrap();
+                    let target = request["request"]["path"].as_str().unwrap();
+                    let endpoint = match target {
+                        "/v1/tings" => "tings.send",
+                        "/v1/subscriptions" => "subscriptions.register",
+                        "/v1/subscriptions/query" => "subscriptions.query",
+                        "/v1/subscriptions/revoke" => "subscriptions.revoke",
+                        "/v1/sent/query" => "sent.query",
+                        _ => panic!("unexpected proof path: {target}"),
+                    };
+                    let mut authorization = iam.reply.lock().unwrap()["authorization"].clone();
+                    authorization["scopes"] = json!([format!("obo:tos>ting:{endpoint}")]);
+                    json!({"valid":true,"proof_id":uuid::Uuid::new_v4(),"issuer_app_id":"tos>example","audience":"tos>ting",
+                        "actor":{"type":"silicon","public_id":"si_fixture"},"authorization":authorization,"org_id":"tos",
+                        "endpoint":{"endpoint_id":endpoint,"path":target},"metadata":{},
+                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339(),
+                        "consumed_at":chrono::Utc::now().to_rfc3339()})
+                }
                 "/api/v1/application/testing-context" => {
                     json!({"environment_id":iam.context,"application":{
                     "app_id":"tos>ting","base_url":"https://ting.example","app_scope":{"iam":[],"external":[]},"webhook_scope":[],"testing_idle_days":30}})
@@ -1234,6 +1341,7 @@ pub(crate) mod tests {
             spacestation_table: String::new(),
             frontend_origin: "http://127.0.0.1:1".into(),
             public_origin: "http://127.0.0.1:1".into(),
+            browser_origins: vec![],
             repository_url: String::new(),
             docs_url: String::new(),
             rust_package: String::new(),
@@ -1256,6 +1364,7 @@ pub(crate) mod tests {
                 id: context.clone(),
                 secret: "fixture-secret".into(),
                 key: environment_key.clone(),
+                generation: Some(1),
             }),
             refresh_key: None,
             revoke_key: secret(),
@@ -1279,6 +1388,7 @@ pub(crate) mod tests {
             org_id: org,
             app_id: "tos>example".into(),
             actor_id: principal.id.clone(),
+            test: session.test,
         };
         let store = crate::store::Store::open(&config.database_path).unwrap();
         if testing {
@@ -1325,6 +1435,259 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn me_attests_the_live_session_environment_and_fences_stale_generations() {
+        use axum::{
+            extract::{Path, RawQuery, State},
+            http::Method,
+        };
+        async fn get_me(f: &Fixture) -> Result<Value> {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "cookie",
+                format!("ting_session={}", f.token).parse().unwrap(),
+            );
+            let response = crate::http(
+                State(f.app.clone()),
+                Path("me".into()),
+                RawQuery(None),
+                Method::GET,
+                headers,
+                Ok(axum::body::Bytes::new()),
+            )
+            .await?;
+            assert_eq!(response.status(), 200);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            Ok(serde_json::from_slice(&bytes).unwrap())
+        }
+
+        let production = fixture(false).await;
+        assert_eq!(
+            get_me(&production).await.unwrap(),
+            json!({
+                "id":"si_fixture", "kind":"silicon", "authenticated":true,
+                "environment":{"kind":"production"}
+            })
+        );
+        let auth = &production.app.auth;
+        let mut malformed = auth.session(&production.principal.session).unwrap();
+        malformed.context.clear();
+        auth.save(&production.principal.session, &malformed)
+            .unwrap();
+        assert_eq!(get_me(&production).await.unwrap_err().status, 401);
+
+        let mut testing = fixture(true).await;
+        let mut headers = HeaderMap::new();
+        headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+        headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+        let (status, login) = testing
+            .app
+            .auth
+            .login("fixture-slt", &uuid::Uuid::new_v4().to_string(), &headers)
+            .await
+            .unwrap();
+        assert_eq!(status, 201);
+        testing.token = login["session_token"].as_str().unwrap().into();
+        testing.principal = testing
+            .app
+            .auth
+            .authenticate(&testing.token, &HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            get_me(&testing).await.unwrap(),
+            json!({
+                "id":"si_fixture", "kind":"silicon", "authenticated":true,
+                "environment":{"kind":"testing", "id":testing.principal.context, "generation":1}
+            })
+        );
+        let auth = &testing.app.auth;
+        let original = auth.session(&testing.principal.session).unwrap();
+        let mut legacy = original.clone();
+        legacy.test.as_mut().unwrap().generation = None;
+        auth.save(&testing.principal.session, &legacy).unwrap();
+        assert_eq!(get_me(&testing).await.unwrap_err().status, 401);
+        auth.save(&testing.principal.session, &original).unwrap();
+
+        // Even without a session revocation, a clean cannot relabel an old cookie.
+        Connection::open(&testing.app.config.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
+                [&testing.principal.context],
+            )
+            .unwrap();
+        assert_eq!(get_me(&testing).await.unwrap_err().status, 401);
+        let mut fresh = original.clone();
+        fresh.test.as_mut().unwrap().generation = Some(2);
+        auth.save(&testing.principal.session, &fresh).unwrap();
+        assert_eq!(
+            get_me(&testing).await.unwrap()["environment"]["generation"],
+            2
+        );
+
+        let key_hash = hash(fresh.test.as_ref().unwrap().key.as_bytes());
+        for (state, key, status) in [
+            ("pending", key_hash.as_str(), 503),
+            ("active", "rotated-key-hash", 403),
+            ("retired", key_hash.as_str(), 403),
+        ] {
+            auth.fence_context(&testing.principal.context, state, key, false)
+                .unwrap();
+            assert_eq!(get_me(&testing).await.unwrap_err().status, status);
+        }
+        auth.fence_context(&testing.principal.context, "active", &key_hash, false)
+            .unwrap();
+        Connection::open(&testing.app.config.database_path)
+            .unwrap()
+            .execute(
+                "DELETE FROM lifecycle_environments WHERE id=?",
+                [&testing.principal.context],
+            )
+            .unwrap();
+        assert_eq!(get_me(&testing).await.unwrap_err().status, 503);
+    }
+
+    #[tokio::test]
+    async fn session_mutation_rechecks_generation_after_waiting_for_gate() {
+        use axum::{
+            extract::{Path, RawQuery, State},
+            http::Method,
+        };
+        let f = fixture(true).await;
+        let gate = f.app.mutations.lock().await;
+        let app = f.app.clone();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {}", f.token).parse().unwrap(),
+        );
+        headers.insert("content-type", "application/json".parse().unwrap());
+        let mut pending = tokio::spawn(async move {
+            crate::http(
+                State(app),
+                Path("orgs/tos/preferences".into()),
+                RawQuery(None),
+                Method::PUT,
+                headers,
+                Ok(
+                    serde_json::to_vec(&json!({"app_id":"tos>example","enabled":false}))
+                        .unwrap()
+                        .into(),
+                ),
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut pending)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            f.take_calls(),
+            vec![
+                "/api/v1/application/testing-context",
+                "/api/v1/oauth/introspect",
+                "/api/v1/application/testing-context",
+                "/api/v1/oauth/introspect",
+            ]
+        );
+        Connection::open(&f.app.config.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
+                [&f.principal.context],
+            )
+            .unwrap();
+        drop(gate);
+        assert_eq!(pending.await.unwrap().unwrap_err().status, 401);
+        assert!(
+            f.app
+                .store
+                .preferences(&f.principal, &f.proof.org_id, &json!({}))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn proof_operations_recheck_generation_after_iam_and_before_storage() {
+        for path in [
+            "/v1/tings",
+            "/v1/subscriptions",
+            "/v1/subscriptions/query",
+            "/v1/sent/query",
+        ] {
+            let f = fixture(true).await;
+            let body = if path == "/v1/tings" {
+                json!({"org_id":f.proof.org_id,"type":"tos>example.msg.received","data":{},"for":f.principal.id,"key":"stale-proof"})
+            } else {
+                json!({"org_id":f.proof.org_id,"app_id":"tos>example"})
+            };
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+            headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+            *f.iam.block_path.lock().unwrap() = Some("/api/v1/obo-access/verify".into());
+            let gate = f.app.mutations.lock().await;
+            let app = f.app.clone();
+            let (h, b) = (headers.clone(), body.clone());
+            let pending = tokio::spawn(async move {
+                crate::app_call(&app, &h, path, &serde_json::to_vec(&b).unwrap(), &b).await
+            });
+            tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
+                .await
+                .unwrap();
+            Connection::open(&f.app.config.database_path)
+                .unwrap()
+                .execute(
+                    "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
+                    [&f.principal.context],
+                )
+                .unwrap();
+            f.iam.release.notify_one();
+            drop(gate);
+            assert_eq!(pending.await.unwrap().unwrap_err().status, 403, "{path}");
+            // The same operation freshly verified in the new generation remains usable.
+            assert!(
+                crate::app_call(
+                    &f.app,
+                    &headers,
+                    path,
+                    &serde_json::to_vec(&body).unwrap(),
+                    &body
+                )
+                .await
+                .is_ok(),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn session_revalidation_rejects_a_clean_during_iam_verification() {
+        let f = fixture(true).await;
+        f.iam.block_next.store(true, Ordering::SeqCst);
+        let app = f.app.clone();
+        let token = f.token.clone();
+        let pending =
+            tokio::spawn(async move { app.auth.authenticate(&token, &HeaderMap::new()).await });
+        tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
+            .await
+            .unwrap();
+        Connection::open(&f.app.config.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
+                [&f.principal.context],
+            )
+            .unwrap();
+        f.iam.release.notify_one();
+        assert_eq!(pending.await.unwrap().err().unwrap().status, 401);
+    }
+
     #[test]
     fn encrypted_sessions_bind_rows_and_lifecycle_revocation_is_durable() {
         let database =
@@ -1341,6 +1704,7 @@ pub(crate) mod tests {
             spacestation_table: String::new(),
             frontend_origin: "http://127.0.0.1:1".into(),
             public_origin: "http://127.0.0.1:1".into(),
+            browser_origins: vec![],
             repository_url: String::new(),
             docs_url: String::new(),
             rust_package: String::new(),
@@ -1396,7 +1760,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(pending, 1);
         drop(reopened);
-        for suffix in [".auth", ".auth-wal", ".auth-shm"] {
+        for suffix in ["", ".auth", ".auth-wal", ".auth-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", database.display()));
         }
     }

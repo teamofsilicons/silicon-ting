@@ -56,7 +56,7 @@ Except for public information, login initiation/session exchange and preflight, 
 | `GET /v1/session/login` | Browser navigation; optional local `next` path, default `/`. | `302` to the configured IAM consent page, with a server-bound login attempt. |
 | `GET /v1/session/callback` | IAM callback `slt` and the login-attempt state. | Exchanges the SLT, sets the session cookie, then `303` to the saved local path. |
 | `POST /v1/session` | CLI: `{ "slt": "<short-lived Ting login token>" }`; required `Idempotency-Key`. | `201` session response below; safe same-attempt replay returns `200`. |
-| `GET /v1/me` | Ting session. | `200 {"id":"si_123","kind":"silicon","authenticated":true}` |
+| `GET /v1/me` | Ting session. | `200 {"id":"si_123","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}`; testing context described below. |
 | `DELETE /v1/session` | Ting session. | `200 {"authenticated":false}` after local session revocation. |
 | `GET /v1/orgs` | Ting session; no selected org required. | `200 {"items":[{"id":"tos","name":"TOS"}]}` |
 | `GET /v1/orgs/{org}/apps` | Ting session; optional pagination. | `200 {"items":[{"app_id":"tos>dm","name":"DM","can_manage_tings":true}]}` |
@@ -92,7 +92,17 @@ Use IAM's official SLT exchange and rotating refresh APIs, including their idemp
 
 Revalidate IAM authority before protected HTTP operations and every 30 seconds for a live receiver. Refresh expired app access tokens server-side. IAM unavailability returns `503` and pauses delivery; it must not be reported as a successful logout. A definitively revoked session returns `401 session_expired`, stops its subscriptions, and requires login again. Logout invalidates the Ting session first and durably schedules IAM refresh-family revocation; it affects no other identity's session.
 
-The browser uses a `ting_session` cookie instead of a readable token: HttpOnly, Secure, SameSite=Lax, Path `/`, with no Domain attribute. Bind the IAM callback to a random one-use state and private browser login cookie; include that state in the callback `redirect_uri` sent to IAM and expire the attempt after ten minutes. Reject callbacks without that binding and reject external `next` URLs. Accept authenticated browser mutations only from the configured frontend origin and require JSON; CORS must never allow arbitrary credentialed origins. Never put Ting sessions or IAM refresh tokens in URLs.
+The browser uses a `ting_session` cookie instead of a readable token: HttpOnly, Secure, SameSite=Lax, Path `/`, with no Domain attribute. Bind the IAM callback to a random one-use state and private browser login cookie; include that state in the callback `redirect_uri` sent to IAM and expire the attempt after ten minutes. Reject callbacks without that binding and reject external `next` URLs. Accept authenticated browser mutations only from explicitly permitted origins and require JSON. `TING_PUBLIC_ORIGIN` and `TING_FRONTEND_ORIGIN` are permitted, along with the comma-separated exact origins in `TING_BROWSER_ORIGINS`. Configuration accepts HTTPS origins (HTTP only on loopback), never wildcards, credentials or paths. Unknown origins receive 403 on HTTP and WebSocket upgrades. Permitted HTTP responses, including errors and preflights, include `Access-Control-Allow-Origin` for that exact origin, `Access-Control-Allow-Credentials: true`, and `Vary: Origin`; `Ting-Request-Id` is exposed to browser clients. Never put Ting sessions or IAM refresh tokens in URLs.
+
+`GET /v1/me` revalidates the session and returns an explicit `environment` alongside `id`, `kind` and `authenticated`:
+
+```json
+{"id":"si_123","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}
+```
+
+For a testing session, `environment` is `{"kind":"testing","id":"<IAM environment UUID>","generation":1}`. The UUID is verified by IAM; the generation is bound at login to Ting's active Honeycomb lifecycle generation and checked again before returning it. Missing, retired, rotated, pending or stale testing context fails closed. Existing testing sessions without a generation require a new login; production sessions remain valid. A testing environment must be imported through Honeycomb before new testing sessions or proof-bound calls are accepted.
+
+Cross-app browsers use `credentials: "include"` when fetching `/v1/me` and connect to the host that issued the Ting cookie. Signing into DM does not create a Ting session. Match both the typed account and the explicit environment; for tests, match both UUID and generation. Missing fields on older servers mean unverified context, never production. This response attests the current session only; it does not extend authority or replace ongoing revalidation and application-side authorization.
 
 ### Proof-bound app calls
 
@@ -286,7 +296,7 @@ Ting session required; all operations affect only its recipient.
 
 Writes require `app_id`. Set neither service nor type for an app-wide override; never set both. A type must belong to the named app. `enabled` is a boolean. Repeated reset succeeds even if no override exists.
 
-Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent tings stay silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
+Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent tings remain silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
 
 ## Webhook registrations
 
@@ -324,6 +334,10 @@ Unhook detaches the route, retaining its ID and pending state. It invalidates an
 Flow: save the intended local URL, secret and creation key → open socket → `subscribe` with empty hook list to authenticate → create/attach hook over HTTP → save its returned ID → receive batches. Delivery can race the HTTP response; durably queue it by hook ID until the creation result links it to its local URL, and do not forward until that link is verified. The stable hook ID survives daemon restarts and URL changes.
 
 ## WebSocket API
+
+The Rust client provides `ting_client::websocket::{WebSocket, Event, reconnect_delay}`. Connect with `WebSocket::connect(&client).await?` and publish a prepared send once with `socket.send(&prepared, &fresh_proof, &test_headers).await?`. It validates the original `Prepared.body` bytes, preserves their exact UTF-8 string, correlates request IDs, answers ping and enforces timeouts. Cancellation or an uncertain transport failure closes the in-flight connection; reconnect explicitly, obtain a fresh actor-bound proof, and retain the original event body/key.
+
+Receivers call `subscribe(org, session, hook_ids, test_headers)` or `watch_inbox(org, session)` and consume `next_event()`. `Event` distinguishes full `Tings` batches, `InboxChanged` hints and `Paused` controls. `receiver_id()` is the temporary connection ID for hook registration. `ack` and `unsubscribe` are explicit; the client does not acknowledge batches, reenroll recipients or refresh authority. Its bounded event queue closes the socket on overflow so consumers must recover through stable hooks or HTTP reconciliation. Use `reconnect_delay(failure_index)` starting at zero and reset after one healthy minute. `is_connected()` reports transport state only. This native Rust API does not change the browser's cookie-based wire protocol.
 
 ### `GET /v1/ws?protocol=v1`
 
@@ -363,13 +377,15 @@ Unsubscribe/ACK require this connection's currently authorized hook binding; kno
 
 ### Browser inbox updates
 
-The browser uses one WebSocket and `watch_inbox` for its selected org. Validate the configured frontend Origin on browser upgrades and authenticate its HttpOnly session cookie; no JavaScript-readable session token is needed. A watch can only see its authenticated recipient's inbox and follows the same 30-second authority revalidation as other subscriptions.
+The browser uses one WebSocket and `watch_inbox` for its selected org. Validate its Origin against the same explicit browser allowlist as HTTP and authenticate its HttpOnly session cookie; no JavaScript-readable session token is needed. A watch can only see its authenticated recipient's inbox and follows the same 30-second authority revalidation as other subscriptions.
 
 After an eligible non-silent arrival or a read-state change, send `{"op":"inbox_changed","org_id":"tos"}`. Silent arrivals do not trigger a notification; the carbon can fetch them explicitly in the drawer. This is a refresh hint, not a ting delivery or read ACK. Unsent hints may be combined. The browser refetches the visible inbox and acknowledges only tings the carbon actually views. It also refetches after starting a watch or reconnecting, so missed hints cannot hide unread history. Switching org replaces the watch. Closing the socket removes it.
 
 Session expiry, lost org permission or unavailable authorization stops the watch and sends `paused` with an empty webhook list. The browser retries `watch_inbox` after transient failures with the connection backoff below, refetching on success. A revoked session requires login; denied org access requires selecting an allowed org. A live socket alone must not leave a transiently paused watch stuck.
 
 This does not create a webhook registration or block new browser updates behind unread items. CLI users receive live tings through their registered webhooks and access the same drawer/read actions through inbox commands.
+
+A DM or Interface adapter may use the hint to fetch current DM state with its independently authenticated DM session. It must reconcile after connecting, reconnecting and periodically (silent events have no hint). Viewing DM must not acknowledge unrelated Ting inbox items. Ting read state and DM delivered/read receipts remain separate.
 
 ### Incoming batches
 

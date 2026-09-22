@@ -1,3 +1,4 @@
+pub mod websocket;
 #[cfg(windows)]
 pub mod windows;
 use serde::{

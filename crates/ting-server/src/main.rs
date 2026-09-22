@@ -34,6 +34,7 @@ pub struct Config {
     pub spacestation_table: String,
     pub frontend_origin: String,
     pub public_origin: String,
+    pub browser_origins: Vec<String>,
     pub repository_url: String,
     pub docs_url: String,
     pub rust_package: String,
@@ -45,23 +46,12 @@ impl Config {
             anyhow::ensure!(!s.is_empty(), "{k} must not be empty");
             Ok(s)
         }
-        let public_origin = required("TING_PUBLIC_ORIGIN")?;
-        let frontend_origin =
-            env::var("TING_FRONTEND_ORIGIN").unwrap_or_else(|_| public_origin.clone());
-        for s in [&public_origin, &frontend_origin] {
-            let u = url::Url::parse(s)?;
-            anyhow::ensure!(
-                (u.scheme() == "https"
-                    || (u.scheme() == "http"
-                        && matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
-                    && u.username().is_empty()
-                    && u.password().is_none()
-                    && u.path() == "/"
-                    && u.query().is_none()
-                    && u.fragment().is_none(),
-                "Configured origins must be HTTPS with no path (HTTP permitted on loopback)"
-            );
-        }
+        let public_origin = browser_origin(&required("TING_PUBLIC_ORIGIN")?)?;
+        let frontend_origin = browser_origin(
+            &env::var("TING_FRONTEND_ORIGIN").unwrap_or_else(|_| public_origin.clone()),
+        )?;
+        let browser_origins =
+            browser_origins(&env::var("TING_BROWSER_ORIGINS").unwrap_or_default())?;
         Ok(Self {
             database_path: env::var("TING_DATABASE_PATH").unwrap_or("ting.sqlite".into()),
             encryption_key: required("TING_ENCRYPTION_KEY")?,
@@ -74,11 +64,34 @@ impl Config {
             spacestation_table: required("TING_SPACESTATION_TABLE")?,
             frontend_origin,
             public_origin,
+            browser_origins,
             repository_url: "https://github.com/teamofsilicons/silicon-ting".into(),
             docs_url: required("TING_DOCS_URL")?,
             rust_package: "silicon-ting-client".into(),
         })
     }
+}
+fn browser_origin(s: &str) -> anyhow::Result<String> {
+    let u = url::Url::parse(s)?;
+    anyhow::ensure!(
+        u.host_str().is_some_and(|host| !host.contains('*'))
+            && (u.scheme() == "https"
+                || (u.scheme() == "http"
+                    && matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
+            && u.username().is_empty()
+            && u.password().is_none()
+            && u.path() == "/"
+            && u.query().is_none()
+            && u.fragment().is_none(),
+        "Configured origins must be HTTPS with no path (HTTP permitted on loopback)"
+    );
+    Ok(u.origin().ascii_serialization())
+}
+fn browser_origins(s: &str) -> anyhow::Result<Vec<String>> {
+    if s.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    s.split(',').map(|s| browser_origin(s.trim())).collect()
 }
 pub struct App {
     pub config: Config,
@@ -140,7 +153,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-    let router = Router::new()
+    let router = router(app);
+    let bind = env::var("TING_BIND").unwrap_or("127.0.0.1:8080".into());
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    tracing::info!(%bind,"ting server listening");
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await?;
+    Ok(())
+}
+fn router(app: Shared) -> Router {
+    Router::new()
         .route(
             "/healthz",
             get(|| async {
@@ -153,16 +178,7 @@ async fn main() -> anyhow::Result<()> {
         .fallback(|| async { Error::not_found() })
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn_with_state(app.clone(), request_id))
-        .with_state(app);
-    let bind = env::var("TING_BIND").unwrap_or("127.0.0.1:8080".into());
-    let listener = tokio::net::TcpListener::bind(&bind).await?;
-    tracing::info!(%bind,"ting server listening");
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
-    Ok(())
+        .with_state(app)
 }
 async fn request_id(
     State(app): State<Shared>,
@@ -172,7 +188,29 @@ async fn request_id(
     let started = std::time::Instant::now();
     let method = request.method().as_str().to_owned();
     let path = request.uri().path().to_owned();
-    let mut response = next.run(request).await;
+    let browser_origin = request.headers().get("origin").cloned();
+    let allowed = origin(&app, request.headers());
+    let permitted = allowed.is_ok();
+    let mut response = match allowed {
+        Ok(()) => next.run(request).await,
+        Err(error) => error.into_response(),
+    };
+    response
+        .headers_mut()
+        .append("Vary", HeaderValue::from_static("Origin"));
+    if let Some(origin) = browser_origin.filter(|_| permitted) {
+        response
+            .headers_mut()
+            .insert("Access-Control-Allow-Origin", origin);
+        response.headers_mut().insert(
+            "Access-Control-Allow-Credentials",
+            HeaderValue::from_static("true"),
+        );
+        response.headers_mut().insert(
+            "Access-Control-Expose-Headers",
+            HeaderValue::from_static("Ting-Request-Id"),
+        );
+    }
     app.auth.diagnostic(
         "http.request.completed",
         &method,
@@ -261,12 +299,18 @@ fn origin(app: &App, h: &HeaderMap) -> Result<()> {
     if let Some(o) = h.get("origin") {
         if o.to_str().ok() != Some(&app.config.frontend_origin)
             && o.to_str().ok() != Some(&app.config.public_origin)
+            && !app
+                .config
+                .browser_origins
+                .iter()
+                .any(|allowed| o.to_str().ok() == Some(allowed))
+            || h.get_all("origin").iter().count() != 1
         {
             return Err(Error::new(
                 403,
                 "permission_denied",
                 "This browser origin is not permitted.",
-                "Use the configured Ting website.",
+                "Use a browser origin explicitly permitted by Ting.",
             ));
         }
     }
@@ -292,19 +336,12 @@ async fn http(
             "Send a complete request no larger than 1 MiB.",
         )
     })?;
-    origin(&app, &headers)?;
     if path == "iam/webhook" && method == Method::POST {
         return Ok(response(200, app.auth.webhook(&headers, &bytes)?));
     }
     if method == Method::OPTIONS {
         let mut r = StatusCode::NO_CONTENT.into_response();
-        if let Some(o) = headers.get("origin") {
-            r.headers_mut()
-                .insert("Access-Control-Allow-Origin", o.clone());
-            r.headers_mut().insert(
-                "Access-Control-Allow-Credentials",
-                HeaderValue::from_static("true"),
-            );
+        if headers.contains_key("origin") {
             r.headers_mut().insert(
                 "Access-Control-Allow-Methods",
                 HeaderValue::from_static("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
@@ -326,16 +363,14 @@ async fn http(
     if cookie(&headers, "ting_session").is_some()
         && method != Method::GET
         && headers.get("authorization").is_none()
+        && !headers.contains_key("origin")
     {
-        let o = headers.get("origin").and_then(|v| v.to_str().ok());
-        if o != Some(&app.config.frontend_origin) && o != Some(&app.config.public_origin) {
-            return Err(Error::new(
-                403,
-                "permission_denied",
-                "Browser mutations require the configured Origin.",
-                "Make this request from the Ting website.",
-            ));
-        }
+        return Err(Error::new(
+            403,
+            "permission_denied",
+            "Browser mutations require a permitted Origin.",
+            "Make this request from a browser origin explicitly permitted by Ting.",
+        ));
     }
     let f = query(raw)?;
     let parts: Vec<_> = path.split('/').collect();
@@ -404,10 +439,7 @@ async fn http(
     }
     let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
     if path == "me" && method == Method::GET {
-        return Ok(response(
-            200,
-            json!({"id":p.id,"kind":p.kind,"authenticated":true}),
-        ));
+        return Ok(response(200, app.auth.me(&p)?));
     }
     if path == "session" && method == Method::DELETE {
         let value = app.auth.logout(&p).await?;
@@ -444,17 +476,31 @@ async fn http(
         return Err(Error::not_found());
     }
     let org = app.auth.org(&p, parts[1]).await?;
+    let apps = match (method.as_str(), parts[2..].as_ref()) {
+        ("GET", ["apps"]) => Some(app.auth.apps(&p, &org).await?),
+        ("GET", ["apps", aid, "types"]) => {
+            app.auth.permission(&p, &org, aid, false).await?;
+            None
+        }
+        ("POST", ["apps", aid, "types"]) | ("PATCH", ["apps", aid, "types", _]) => {
+            app.auth.permission(&p, &org, aid, true).await?;
+            None
+        }
+        _ => None,
+    };
+    // ponytail: one lifecycle gate serializes store access; use per-environment gates if throughput requires it.
+    let _gate = app.mutations.lock().await;
+    app.auth.check_session(&p)?;
     let binding = format!("{}:{}:{}:{}", p.context, p.id, org, path);
     match (method.as_str(), parts[2..].as_ref()) {
         ("GET", ["apps"]) => {
             v::fields(&f, &["limit", "cursor"], &[])?;
-            let value = app.auth.apps(&p, &org).await?;
+            let value = apps.unwrap();
             let rows = value["items"].as_array().cloned().unwrap_or_default();
             Ok(response(200, app.store.page(rows, &binding, &f, false)?))
         }
         ("GET", ["apps", aid, "types"]) => {
             v::fields(&f, &["limit", "cursor"], &[])?;
-            app.auth.permission(&p, &org, aid, false).await?;
             Ok(response(
                 200,
                 app.store
@@ -462,7 +508,6 @@ async fn http(
             ))
         }
         ("POST", ["apps", aid, "types"]) => {
-            app.auth.permission(&p, &org, aid, true).await?;
             let (s, b) = app.store.register_type(&p, &org, aid, &b, false)?;
             Ok(response(s, b))
         }
@@ -470,7 +515,6 @@ async fn http(
             if v::type_parts(typ)?.0 != *aid {
                 return Err(Error::not_found());
             }
-            app.auth.permission(&p, &org, aid, true).await?;
             let (s, b) = app.store.register_type(&p, &org, typ, &b, true)?;
             Ok(response(s, b))
         }
@@ -491,7 +535,6 @@ async fn http(
             ))
         }
         ("DELETE", ["subscriptions", sid]) => {
-            let _gate = app.mutations.lock().await;
             let (out, recipient) = app.store.revoke(&p.context, &org, sid, Some(&p.id), None)?;
             app.hub
                 .invalidate(&app, &p.context, &org, &recipient, "permission_changed")
@@ -515,7 +558,6 @@ async fn http(
         )),
         ("POST", ["inbox", "read"]) => {
             v::fields(&b, &["message_ids"], &["message_ids"])?;
-            let _gate = app.mutations.lock().await;
             let (out, expired) = app
                 .store
                 .read(&p, &org, &v::ids(&b, "message_ids", false)?)?;
@@ -539,7 +581,6 @@ async fn http(
             ))
         }
         ("PUT", ["preferences"]) | ("DELETE", ["preferences"]) => {
-            let _gate = app.mutations.lock().await;
             let out = app.store.preference(
                 &p,
                 &org,
@@ -563,7 +604,6 @@ async fn http(
             v::fields(&b, &["receiver_id"], &["receiver_id"])?;
             let recv = v::string(&b, "receiver_id", 255)?;
             let key = header(&headers, "Idempotency-Key")?;
-            let _gate = app.mutations.lock().await;
             if let Some(old) = app.store.hook_retry(&p, &org, key, &b)? {
                 return Ok(response(200, old));
             }
@@ -576,7 +616,6 @@ async fn http(
             v::fields(&b, &["receiver_id", "takeover"], &["receiver_id"])?;
             let recv = v::string(&b, "receiver_id", 255)?;
             let takeover = v::optional_bool(&b, "takeover")?.unwrap_or(false);
-            let _gate = app.mutations.lock().await;
             app.hub.authorized(recv, &p, &org).await?;
             let replaced = app
                 .store
@@ -594,7 +633,6 @@ async fn http(
             Ok(response(200, out))
         }
         ("DELETE", ["webhooks", hid]) => {
-            let _gate = app.mutations.lock().await;
             if let Some(recv) = app.store.detach(&p, &org, hid)? {
                 app.hub
                     .pause_replaced(vec![(recv, hid.to_string())], &org, "hook_detached")
@@ -615,9 +653,10 @@ pub async fn app_call(
     v::filters(b)?;
     let p = app.auth.proof(headers, path, bytes).await?;
     v::string(b, "org_id", 255)?;
+    let _gate = app.mutations.lock().await;
+    app.auth.check_proof(&p)?;
     match path {
         "/v1/tings" => {
-            let _gate = app.mutations.lock().await;
             let result = app.store.send(&p, b)?;
             if result.0 == 202 && !result.1["silent"].as_bool().unwrap_or(true) {
                 app.hub
@@ -654,7 +693,6 @@ pub async fn app_call(
         }
         "/v1/subscriptions/revoke" => {
             v::fields(b, &["org_id", "id"], &["org_id", "id"])?;
-            let _gate = app.mutations.lock().await;
             let (out, recipient) = app.store.revoke(
                 &p.context,
                 &p.org_id,
@@ -810,7 +848,6 @@ async fn upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response> {
-    origin(&app, &headers)?;
     let f = query(raw)?;
     v::fields(&f, &["protocol"], &["protocol"])?;
     if f["protocol"] != "v1" {
@@ -831,4 +868,239 @@ async fn upgrade(
         .max_message_size(1024 * 1024)
         .max_frame_size(1024 * 1024)
         .on_upgrade(move |socket| ws::connection(app, socket, browser)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    #[test]
+    fn browser_origins_require_explicit_secure_hosts() {
+        assert_eq!(browser_origins("").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            browser_origins(" https://dm.example:443/, http://[::1]:5173 ").unwrap(),
+            ["https://dm.example", "http://[::1]:5173"]
+        );
+        for invalid in [
+            "*",
+            "https://*.example",
+            "null",
+            "https://",
+            "http://dm.example",
+            "https://dm.example/path",
+            "https://user@dm.example",
+            "https://dm.example?x",
+            "https://dm.example#x",
+            "https://dm.example,",
+        ] {
+            assert!(browser_origins(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[tokio::test]
+    async fn browser_http_and_websocket_share_origin_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config {
+            database_path: directory
+                .path()
+                .join("ting.sqlite")
+                .to_string_lossy()
+                .into_owned(),
+            encryption_key: "ab".repeat(32),
+            iam_url: "http://127.0.0.1:1".into(),
+            iam_app_id: "tos>ting".into(),
+            iam_app_secret: "fixture-secret".into(),
+            honeycomb_url: "http://127.0.0.1:1".into(),
+            spacestation_url: "http://127.0.0.1:1".into(),
+            spacestation_key: String::new(),
+            spacestation_table: String::new(),
+            frontend_origin: "https://ting.example".into(),
+            public_origin: "https://backend.ting.example".into(),
+            browser_origins: browser_origins("https://dm.example,https://interface.example")
+                .unwrap(),
+            repository_url: String::new(),
+            docs_url: String::new(),
+            rust_package: String::new(),
+        };
+        let app = Arc::new(App {
+            auth: auth::Auth::new(&config).unwrap(),
+            store: store::Store::open(&config.database_path).unwrap(),
+            config,
+            hub: ws::Hub::default(),
+            changed: Notify::new(),
+            mutations: Mutex::new(()),
+        });
+        let router = router(app);
+        for origin in [
+            "https://ting.example",
+            "https://backend.ting.example",
+            "https://dm.example",
+            "https://interface.example",
+        ] {
+            for (method, path, cookie, body, status) in [
+                ("GET", "/v1/iam", false, "", 200),
+                ("OPTIONS", "/v1/me", false, "", 204),
+                ("GET", "/v1/me", false, "", 401),
+                ("DELETE", "/v1/session", true, "", 401),
+                ("POST", "/v1/session", false, "{", 400),
+                ("GET", "/missing", false, "", 404),
+            ] {
+                let mut request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("Origin", origin)
+                    .header("Content-Type", "application/json");
+                if cookie {
+                    request = request.header("Cookie", "ting_session=invalid");
+                }
+                let response = router
+                    .clone()
+                    .oneshot(request.body(Body::from(body)).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status().as_u16(), status, "{method} {path}");
+                assert_eq!(response.headers()["Access-Control-Allow-Origin"], origin);
+                assert_eq!(
+                    response.headers()["Access-Control-Allow-Credentials"],
+                    "true"
+                );
+                assert_eq!(
+                    response.headers()["Access-Control-Expose-Headers"],
+                    "Ting-Request-Id"
+                );
+                assert_eq!(response.headers()["Vary"], "Origin");
+                assert!(response.headers().contains_key("Ting-Request-Id"));
+                if method == "OPTIONS" {
+                    assert!(
+                        response.headers()["Access-Control-Allow-Methods"]
+                            .to_str()
+                            .unwrap()
+                            .contains("DELETE")
+                    );
+                    assert!(
+                        response.headers()["Access-Control-Allow-Headers"]
+                            .to_str()
+                            .unwrap()
+                            .contains("Authorization")
+                    );
+                }
+            }
+        }
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/session")
+                    .header("Origin", "https://dm.example")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(vec![b'x'; 1024 * 1024 + 1]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            response.headers()["Access-Control-Allow-Origin"],
+            "https://dm.example"
+        );
+        for origin in [
+            "https://dm.example.attacker.test",
+            "null",
+            "https://dm.example/",
+        ] {
+            for method in ["GET", "OPTIONS"] {
+                let response = router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri("/v1/iam")
+                            .header("Origin", origin)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                assert!(
+                    !response
+                        .headers()
+                        .contains_key("Access-Control-Allow-Origin")
+                );
+            }
+        }
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/iam")
+                    .header("Origin", "https://dm.example")
+                    .header("Origin", "https://dm.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/session")
+                    .header("Cookie", "ting_session=invalid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(
+            !response
+                .headers()
+                .contains_key("Access-Control-Allow-Origin")
+        );
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/iam")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            !response
+                .headers()
+                .contains_key("Access-Control-Allow-Origin")
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/v1/ws?protocol=v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        use tokio_tungstenite::tungstenite::{Error as WsError, client::IntoClientRequest};
+        for (origin, status) in [
+            ("https://dm.example", 401),
+            ("https://interface.example", 401),
+            ("https://attacker.test", 403),
+        ] {
+            let mut request = url.clone().into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert("Origin", HeaderValue::from_static(origin));
+            let error = tokio_tungstenite::connect_async(request).await.unwrap_err();
+            let WsError::Http(response) = error else {
+                panic!("expected HTTP rejection: {error}")
+            };
+            assert_eq!(response.status().as_u16(), status);
+        }
+        server.abort();
+    }
 }
