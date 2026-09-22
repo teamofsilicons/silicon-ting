@@ -2,13 +2,7 @@ name: Build backend deployment
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/backend.yml'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/ting-server/**'
-      - 'deploy/**'
+    tags: ['server-*']
 permissions:
   contents: read
 jobs:
@@ -106,5 +100,6 @@ jobs:
           tar -czf "dist/ting-server-$GITHUB_SHA.tar.gz" -C backend-build .
           (cd dist && sha256sum ting-server-*.tar.gz > SHA256SUMS)
           tag="server-$GITHUB_SHA"
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || { echo 'Push the server-<full-commit-SHA> tag using the authorized release account first.' >&2; exit 1; }
           gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "Backend $GITHUB_SHA" --prerelease --latest=false --notes "Linux ARM64 backend tested and built on Amazon Linux 2023, with pinned Caddy. Source and build tools are recorded inside the archive."
           gh release upload "$tag" dist/* --clobber
