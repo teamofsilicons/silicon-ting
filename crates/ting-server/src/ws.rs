@@ -265,13 +265,15 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             let active = app.store.active_hooks(rid)?;
             let mut canonical = None;
             for hid in &ids {
-                let (_, _, org, _, session) = active
+                let (_, context, org, owner, session) = active
                     .iter()
                     .find(|(h, _, _, _, _)| h == hid)
                     .ok_or_else(Error::not_found)?;
-                let p = app.auth.authenticate_session(session).await?;
-                let org2 = app.auth.org(&p, requested).await?;
-                if org != &org2 {
+                let (p, org2) = app
+                    .auth
+                    .authenticate_session_org(session, requested)
+                    .await?;
+                if org != &org2 || context != &p.context || owner != &p.id {
                     return Err(Error::not_found());
                 }
                 canonical = Some(org2)
@@ -315,10 +317,7 @@ async fn validate_authority(app: &Shared, rid: &str) -> Result<()> {
         (r.auth.clone(), r.watch.clone())
     };
     for (p, org) in auth.iter().chain(watch.iter()) {
-        let valid = match app.auth.revalidate(p).await {
-            Ok(q) => app.auth.org(&q, org).await.map(|_| ()),
-            Err(e) => Err(e),
-        };
+        let valid = app.auth.org(p, org).await;
         if let Err(e) = valid {
             let reason = if e.status == 401 {
                 "session_expired"
@@ -407,6 +406,9 @@ pub async fn connection(app: Shared, mut socket: WebSocket, browser: Option<Prin
             let mut ping = tokio::time::interval(Duration::from_secs(1));
             let mut last_ping = Instant::now();
             let mut awaiting: Option<Instant> = None;
+            // Retain notifications received while another selected branch awaits IAM or I/O.
+            let changed = app.changed.notified();
+            tokio::pin!(changed);
             'connected: loop {
                 tokio::select! {
                     incoming = socket.recv() => match incoming {
@@ -439,7 +441,8 @@ pub async fn connection(app: Shared, mut socket: WebSocket, browser: Option<Prin
                     Some(value) = rx.recv() => {
                         if !send(&mut socket, Message::Text(value.to_string().into())).await { break; }
                     }
-                    _ = app.changed.notified() => {
+                    _ = &mut changed => {
+                        changed.set(app.changed.notified());
                         match offer(&app, &rid).await {
                             Ok(values) => for value in values {
                                 if !send(&mut socket, Message::Text(value.to_string().into())).await { break 'connected; }
@@ -481,6 +484,219 @@ pub async fn connection(app: Shared, mut socket: WebSocket, browser: Option<Prin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::tests::fixture;
+    use futures_util::{SinkExt, StreamExt};
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn acks_use_one_fresh_snapshot_and_rejections_do_not_mutate() {
+        for testing in [false, true] {
+            let f = fixture(testing).await;
+            let hook = f.hook("receiver");
+            let message = f.send("ack-fixture");
+            f.app.store.offer("receiver", &hook).unwrap().unwrap();
+            let mut ack = json!({"op":"ack","request_id":"ack","org_id":"tos","webhook_id":hook,"message_ids":[message],"kind":"delivery"});
+            let good = f.iam.reply.lock().unwrap().clone();
+            let mut cases = vec![];
+            for (field, value, expected) in [
+                ("active", json!(false), 401),
+                ("authorization", Value::Null, 403),
+                ("public_id", json!("si_other"), 401),
+                ("actor_type", json!("carbon"), 401),
+                ("client_id", json!("tos>other"), 401),
+            ] {
+                let mut reply = good.clone();
+                reply[field] = value;
+                cases.push((reply, 200, expected));
+            }
+            let mut context = good.clone();
+            context["authorization"]["testing_environment_id"] =
+                uuid::Uuid::new_v4().to_string().into();
+            cases.push((context, 200, 403));
+            cases.push((
+                json!({"error":{"code":"unavailable","message":"fixture unavailable"}}),
+                503,
+                503,
+            ));
+            for (reply, status, expected) in cases {
+                *f.iam.reply.lock().unwrap() = reply;
+                f.iam.status.store(status, Ordering::SeqCst);
+                assert_eq!(
+                    handle(&f.app, "receiver", &ack, None)
+                        .await
+                        .unwrap_err()
+                        .status,
+                    expected
+                );
+                assert_eq!(f.receipt(&hook, &message), (0, 0));
+                let calls = f.take_calls();
+                let expected_calls = if testing && status == 200 {
+                    vec![
+                        "/api/v1/application/testing-context",
+                        "/api/v1/oauth/introspect",
+                    ]
+                } else if testing {
+                    vec!["/api/v1/application/testing-context"]
+                } else {
+                    vec!["/api/v1/oauth/introspect"]
+                };
+                assert_eq!(calls, expected_calls);
+            }
+            *f.iam.reply.lock().unwrap() = good;
+            f.iam.status.store(200, Ordering::SeqCst);
+            for kind in ["delivery", "read"] {
+                ack["kind"] = kind.into();
+                assert_eq!(
+                    handle(&f.app, "receiver", &ack, None).await.unwrap()["op"],
+                    "acked"
+                );
+                assert_eq!(
+                    f.receipt(&hook, &message),
+                    if kind == "delivery" { (1, 0) } else { (1, 1) }
+                );
+                assert_eq!(
+                    f.take_calls(),
+                    if testing {
+                        vec![
+                            "/api/v1/application/testing-context",
+                            "/api/v1/oauth/introspect",
+                        ]
+                    } else {
+                        vec!["/api/v1/oauth/introspect"]
+                    }
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn periodic_authority_uses_one_snapshot_and_revocation_still_pauses() {
+        let f = fixture(true).await;
+        let hook = f.hook("receiver");
+        let message = f.send("periodic-fixture");
+        f.app.store.offer("receiver", &hook).unwrap().unwrap();
+        let (tx, mut rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
+        let (disconnect, _) = watch::channel(false);
+        f.app.hub.receivers.write().await.insert(
+            "receiver".into(),
+            Receiver {
+                tx,
+                disconnect,
+                auth: vec![(f.principal.clone(), f.proof.org_id.clone())],
+                watch: None,
+            },
+        );
+        validate_authority(&f.app, "receiver").await.unwrap();
+        assert_eq!(
+            f.take_calls(),
+            vec![
+                "/api/v1/application/testing-context",
+                "/api/v1/oauth/introspect"
+            ]
+        );
+        for field in ["id", "context", "kind"] {
+            let mut principal = f.principal.clone();
+            match field {
+                "id" => principal.id = "si_other".into(),
+                "context" => principal.context = "other".into(),
+                _ => principal.kind = "carbon".into(),
+            }
+            assert_eq!(
+                f.app.auth.org(&principal, "tos").await.unwrap_err().status,
+                401
+            );
+            assert_eq!(
+                f.take_calls(),
+                vec![
+                    "/api/v1/application/testing-context",
+                    "/api/v1/oauth/introspect"
+                ]
+            );
+            assert_eq!(f.receipt(&hook, &message), (0, 0));
+        }
+        f.iam.reply.lock().unwrap()["active"] = false.into();
+        validate_authority(&f.app, "receiver").await.unwrap();
+        assert_eq!(
+            f.take_calls(),
+            vec![
+                "/api/v1/application/testing-context",
+                "/api/v1/oauth/introspect"
+            ]
+        );
+        assert_eq!(rx.recv().await.unwrap()["reason"], "session_expired");
+        assert!(f.app.store.active_hooks("receiver").unwrap().is_empty());
+        assert!(f.app.store.offer("receiver", &hook).unwrap().is_none());
+        assert_eq!(f.receipt(&hook, &message), (0, 0));
+    }
+
+    async fn ws_json<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>) -> Value
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn delivery_notification_survives_an_awaiting_ack_handler() {
+        use axum::{
+            Router,
+            extract::{State, WebSocketUpgrade},
+            routing::get,
+        };
+        use tokio_tungstenite::tungstenite::Message as ClientMessage;
+        let f = fixture(false).await;
+        async fn upgrade(
+            State(app): State<Shared>,
+            ws: WebSocketUpgrade,
+        ) -> axum::response::Response {
+            ws.on_upgrade(move |socket| connection(app, socket, None))
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/v1/ws", listener.local_addr().unwrap());
+        let app = f.app.clone();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route("/v1/ws", get(upgrade)).with_state(app),
+            )
+            .await
+            .unwrap();
+        });
+        let (mut socket, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let ready = ws_json(&mut socket).await;
+        let started = tokio::time::Instant::now();
+        let receiver = ready["receiver_id"].as_str().unwrap();
+        let hook = f.hook(receiver);
+        socket.send(ClientMessage::Text(json!({"op":"subscribe","request_id":"subscribe","org_id":"tos","session_token":f.token,"webhook_ids":[hook]}).to_string().into())).await.unwrap();
+        assert_eq!(ws_json(&mut socket).await["op"], "subscribed");
+        let first = f.send("before-block");
+        f.app.changed.notify_waiters();
+        assert_eq!(ws_json(&mut socket).await["tings"][0]["id"], first);
+        // Enter just after a fallback tick, leaving almost one second before the next.
+        let period = Duration::from_secs(1);
+        let elapsed = started.elapsed();
+        let next = period.mul_f64((elapsed.as_secs_f64() / period.as_secs_f64()).floor() + 1.0)
+            + Duration::from_millis(50);
+        tokio::time::sleep_until(started + next).await;
+        f.iam.block_next.store(true, Ordering::SeqCst);
+        socket.send(ClientMessage::Text(json!({"op":"ack","request_id":"read","org_id":"tos","webhook_id":hook,"message_ids":[first],"kind":"read"}).to_string().into())).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
+            .await
+            .unwrap();
+        let second = f.send("during-block");
+        f.app.changed.notify_waiters();
+        f.iam.release.notify_one();
+        let delivery = tokio::time::timeout(Duration::from_millis(500), async {
+            assert_eq!(ws_json(&mut socket).await["op"], "acked");
+            ws_json(&mut socket).await
+        })
+        .await
+        .expect("committed delivery must not wait for the one-second fallback");
+        assert_eq!(delivery["op"], "tings");
+        assert_eq!(delivery["tings"][0]["id"], second);
+        socket.close(None).await.unwrap();
+        server.abort();
+    }
 
     #[tokio::test]
     async fn full_control_queue_closes_instead_of_losing_a_pause() {

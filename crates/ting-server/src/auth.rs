@@ -249,14 +249,24 @@ impl Auth {
         }
         Ok(p.clone())
     }
-    pub async fn authenticate_session(&self, id: &str) -> Result<Principal> {
-        let (s, _) = self.live(id).await?;
-        Ok(Principal {
-            context: s.context,
-            id: s.id,
-            kind: s.kind,
-            session: id.into(),
-        })
+    pub async fn authenticate_session_org(
+        &self,
+        id: &str,
+        org: &str,
+    ) -> Result<(Principal, String)> {
+        let (s, token) = self.live(id).await?;
+        let org = Self::org_authorization(token, org)?
+            .organization_id
+            .to_string();
+        Ok((
+            Principal {
+                context: s.context,
+                id: s.id,
+                kind: s.kind,
+                session: id.into(),
+            },
+            org,
+        ))
     }
     pub fn fence_context(
         &self,
@@ -721,13 +731,21 @@ impl Auth {
         org: &str,
     ) -> Result<(Session, models::ApplicationAuthorization)> {
         let (s, t) = self.live(&p.session).await?;
-        let org = t
+        if s.id != p.id || s.context != p.context || s.kind != p.kind {
+            return Err(expired());
+        }
+        Ok((s, Self::org_authorization(t, org)?))
+    }
+    fn org_authorization(
+        token: models::TokenIntrospection,
+        org: &str,
+    ) -> Result<models::ApplicationAuthorization> {
+        token
             .authorization
             .into_iter()
-            .chain(t.authorizations.unwrap_or_default())
+            .chain(token.authorizations.unwrap_or_default())
             .find(|a| a.org_id == org || a.organization_id.to_string() == org)
-            .ok_or_else(forbidden)?;
-        Ok((s, org))
+            .ok_or_else(forbidden)
     }
     pub async fn orgs(&self, p: &Principal) -> Result<Value> {
         let (s, t) = self.live(&p.session).await?;
@@ -1086,8 +1104,227 @@ fn validate_report(v: &Value) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+
+    pub(crate) struct MockIam {
+        pub reply: Mutex<Value>,
+        pub status: AtomicU16,
+        pub calls: Mutex<Vec<String>>,
+        pub block_next: AtomicBool,
+        pub blocked: tokio::sync::Notify,
+        pub release: tokio::sync::Notify,
+        context: String,
+    }
+    pub(crate) struct Fixture {
+        pub app: crate::Shared,
+        pub principal: Principal,
+        pub proof: Proof,
+        pub token: String,
+        pub iam: Arc<MockIam>,
+        task: tokio::task::JoinHandle<()>,
+        _directory: tempfile::TempDir,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+    impl Fixture {
+        pub fn hook(&self, receiver: &str) -> String {
+            self.app
+                .store
+                .create_hook(
+                    &self.principal,
+                    &self.proof.org_id,
+                    receiver,
+                    &uuid::Uuid::new_v4().to_string(),
+                    &json!({"receiver_id":receiver}),
+                )
+                .unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .into()
+        }
+        pub fn send(&self, key: &str) -> String {
+            self.app.store.send(&self.proof, &json!({"org_id":self.proof.org_id,"type":"tos>example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
+        }
+        pub fn receipt(&self, hook: &str, id: &str) -> (i64, i64) {
+            Connection::open(&self.app.config.database_path)
+                .unwrap()
+                .query_row(
+                    "SELECT delivery,read FROM deliveries WHERE hook=? AND message=?",
+                    params![hook, id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        }
+        pub fn take_calls(&self) -> Vec<String> {
+            std::mem::take(&mut *self.iam.calls.lock().unwrap())
+        }
+    }
+    pub(crate) async fn fixture(testing: bool) -> Fixture {
+        use axum::{
+            Json, Router,
+            extract::{Request, State},
+            response::IntoResponse,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let context = uuid::Uuid::new_v4().to_string();
+        let environment_key = "k".repeat(32);
+        let org = uuid::Uuid::new_v4().to_string();
+        let iam = Arc::new(MockIam {
+            reply: Mutex::new(
+                json!({"active":true,"public_id":"si_fixture","actor_type":"silicon","client_id":"tos>ting","authorization":{
+                "organization_id":org,"org_id":"tos","membership_id":"fixture-member","membership_version":1,"authorization_epoch":1,
+                "audience":"tos>ting","public_id":"si_fixture","actor_type":"silicon","scopes":[],
+                "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
+            ),
+            status: AtomicU16::new(200),
+            calls: Mutex::new(vec![]),
+            block_next: AtomicBool::new(false),
+            blocked: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            context: context.clone(),
+        });
+        async fn respond(
+            State(iam): State<Arc<MockIam>>,
+            request: Request,
+        ) -> axum::response::Response {
+            let path = request.uri().path().to_owned();
+            iam.calls.lock().unwrap().push(path.clone());
+            if iam.block_next.swap(false, Ordering::SeqCst) {
+                iam.blocked.notify_one();
+                iam.release.notified().await;
+            }
+            let body = match path.as_str() {
+                "/api/v1/oauth/introspect" => iam.reply.lock().unwrap().clone(),
+                "/api/v1/application/testing-context" => {
+                    json!({"environment_id":iam.context,"application":{
+                    "app_id":"tos>ting","base_url":"https://ting.example","app_scope":{"iam":[],"external":[]},"webhook_scope":[],"testing_idle_days":30}})
+                }
+                _ => panic!("unexpected IAM route: {path}"),
+            };
+            (
+                axum::http::StatusCode::from_u16(iam.status.load(Ordering::SeqCst)).unwrap(),
+                Json(body),
+            )
+                .into_response()
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let iam_url = format!("http://{}", listener.local_addr().unwrap());
+        let router = Router::new().fallback(respond).with_state(iam.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let config = crate::Config {
+            database_path: directory
+                .path()
+                .join("ting.sqlite")
+                .to_string_lossy()
+                .into_owned(),
+            encryption_key: "ab".repeat(32),
+            iam_url,
+            iam_app_id: "tos>ting".into(),
+            iam_app_secret: "fixture-secret".into(),
+            honeycomb_url: "http://127.0.0.1:1".into(),
+            spacestation_url: "http://127.0.0.1:1".into(),
+            spacestation_key: String::new(),
+            spacestation_table: String::new(),
+            frontend_origin: "http://127.0.0.1:1".into(),
+            public_origin: "http://127.0.0.1:1".into(),
+            repository_url: String::new(),
+            docs_url: String::new(),
+            rust_package: String::new(),
+        };
+        let auth = Auth::new(&config).unwrap();
+        let token = format!("ting_{}", "a".repeat(64));
+        let id = hash(token.as_bytes());
+        let session = Session {
+            context: if testing {
+                context.clone()
+            } else {
+                "production".into()
+            },
+            id: "si_fixture".into(),
+            kind: "silicon".into(),
+            access: "fixture-access".into(),
+            refresh: "fixture-refresh".into(),
+            expires: now() + 3600,
+            test: testing.then(|| TestContext {
+                id: context.clone(),
+                secret: "fixture-secret".into(),
+                key: environment_key.clone(),
+            }),
+            refresh_key: None,
+            revoke_key: secret(),
+        };
+        auth.db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO sessions(id,payload) VALUES(?,?)",
+                params![id, auth.seal(&id, &session).unwrap()],
+            )
+            .unwrap();
+        let principal = Principal {
+            context: session.context.clone(),
+            id: session.id,
+            kind: session.kind,
+            session: id,
+        };
+        let proof = Proof {
+            context: principal.context.clone(),
+            org_id: org,
+            app_id: "tos>example".into(),
+            actor_id: principal.id.clone(),
+        };
+        let store = crate::store::Store::open(&config.database_path).unwrap();
+        if testing {
+            auth.fence_context(&context, "active", &hash(environment_key.as_bytes()), false)
+                .unwrap();
+            Connection::open(&config.database_path)
+                .unwrap()
+                .execute(
+                    "INSERT INTO lifecycle_environments VALUES(?1,1,1,1,?2,'active')",
+                    params![context, hash(environment_key.as_bytes())],
+                )
+                .unwrap();
+        }
+        store
+            .register_type(
+                &principal,
+                &proof.org_id,
+                &proof.app_id,
+                &json!({"type":"tos>example.msg.received","description":"Fixture"}),
+                false,
+            )
+            .unwrap();
+        store
+            .subscribe_app(
+                &proof,
+                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
+            )
+            .unwrap();
+        let app = Arc::new(crate::App {
+            config,
+            auth,
+            store,
+            hub: crate::ws::Hub::default(),
+            changed: tokio::sync::Notify::new(),
+            mutations: AsyncMutex::new(()),
+        });
+        Fixture {
+            app,
+            principal,
+            proof,
+            token,
+            iam,
+            task,
+            _directory: directory,
+        }
+    }
     #[test]
     fn encrypted_sessions_bind_rows_and_lifecycle_revocation_is_durable() {
         let database =
