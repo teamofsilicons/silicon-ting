@@ -1,1 +1,31 @@
-{"rows":[{"records":"630","source":"tingbackend"},{"records":"1","source":"tingfrontendanalytics"},{"records":"0","source":"tingclidaemon"},{"records":"4","source":"tingfrontendevents"}],"watermarks":{"tingbackend":630,"tingclidaemon":0,"tingfrontendanalytics":1,"tingfrontendevents":4}}
+{
+  "rows": [
+    {
+      "latest_event_ms": "1790067736346",
+      "records": "839",
+      "source": "tingbackend"
+    },
+    {
+      "latest_event_ms": "1790067153011",
+      "records": "9",
+      "source": "tingfrontendanalytics"
+    },
+    {
+      "latest_event_ms": "1790067153746",
+      "records": "8",
+      "source": "tingfrontendevents"
+    },
+    {
+      "latest_event_ms": "1790067331420",
+      "records": "7",
+      "source": "tingclidaemon"
+    }
+  ],
+  "watermarks": {
+    "tingbackend": 839,
+    "tingclidaemon": 7,
+    "tingfrontendanalytics": 9,
+    "tingfrontendevents": 8
+  },
+  "queried_at": "2026-09-22T09:03:56.508355+00:00"
+}

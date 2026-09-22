@@ -1,0 +1,243 @@
+{
+  "complete": true,
+  "checks": [
+    "30 real direct-public WebSocket sends reach native daemon webhook"
+  ],
+  "samples_ms": [
+    245.457,
+    227.838,
+    281.649,
+    252.081,
+    249.174,
+    226.359,
+    265.736,
+    318.426,
+    239.523,
+    270.832,
+    236.508,
+    227.454,
+    243.379,
+    246.249,
+    246.726,
+    246.474,
+    278.264,
+    238.777,
+    248.649,
+    240.778,
+    242.865,
+    253.726,
+    255.468,
+    238.869,
+    247.306,
+    239.1,
+    383.04,
+    242.706,
+    239.46,
+    237.938
+  ],
+  "api_url": "https://backend.ting.teamofsilicons.com",
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "client_location": "Ubuntu 24.04 ARM64 container on production EC2 host in AWS us-east-1, using public TLS hostname",
+  "server_location": "AWS us-east-1, Northern Virginia, United States",
+  "callback_location": "127.0.0.1 inside same Ubuntu24 ARM64 container",
+  "client_platform": "Linux aarch64",
+  "accepted_roundtrip_samples_ms": [
+    240.644,
+    222.636,
+    276.87,
+    247.442,
+    244.32,
+    220.58,
+    261.075,
+    313.436,
+    234.492,
+    265.135,
+    231.882,
+    223.503,
+    235.602,
+    241.733,
+    242.065,
+    240.468,
+    273.598,
+    232.357,
+    243.579,
+    235.149,
+    238.222,
+    249.052,
+    250.509,
+    232.693,
+    242.513,
+    233.445,
+    374.283,
+    238.007,
+    235.219,
+    233.252
+  ],
+  "warmup_samples_ms": [
+    449.11,
+    280.251,
+    249.244
+  ],
+  "cli_version": "0.1.0",
+  "binary_sha256": {
+    "ting": "ca1baa97b4e96f3cf6931d145b7304fc4593933b9217d45a2805eff327b94f7f",
+    "ting-daemon": "a1e1dfe7123caf8a7451213855c7f8032ce48c3f84d9916a0458f0e13d05ac34"
+  },
+  "latency": {
+    "samples": 30,
+    "p50_ms": 245.457,
+    "p95_ms": 318.426,
+    "min_ms": 226.359,
+    "max_ms": 383.04,
+    "conditions": "Monotonic proof-ready WebSocket send through public TLS AWS backend to installed native daemon and local HTTP callback arrival; existing sockets; small sequential payloads; proof minting and callback ACK excluded; no relay or mocked responses in this phase."
+  },
+  "accepted_roundtrip": {
+    "samples": 30,
+    "p50_ms": 240.468,
+    "p95_ms": 313.436,
+    "min_ms": 220.58,
+    "max_ms": 374.283,
+    "conditions": "Same send start to sender receiving the accepted response; includes outbound and return network, IAM proof validation, and durable server acceptance. This is not isolated server CPU time."
+  },
+  "completed_at": "2026-09-22T08:46:58Z",
+  "inter_sample_delay_seconds": 3,
+  "iam_component_profile": [
+    {
+      "operation": "/application/testing-context",
+      "status": 200,
+      "milliseconds": 96.218,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/obo-access/verify",
+      "status": 200,
+      "milliseconds": 319.304,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/application/testing-context",
+      "status": 200,
+      "milliseconds": 56.241,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/obo-access/verify",
+      "status": 200,
+      "milliseconds": 212.253,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/application/testing-context",
+      "status": 200,
+      "milliseconds": 33.275,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/obo-access/verify",
+      "status": 200,
+      "milliseconds": 301.87,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/application/testing-context",
+      "status": 200,
+      "milliseconds": 33.207,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/obo-access/verify",
+      "status": 200,
+      "milliseconds": 212.436,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/application/testing-context",
+      "status": 200,
+      "milliseconds": 34.601,
+      "error_code": null,
+      "limits": {}
+    },
+    {
+      "operation": "/obo-access/verify",
+      "status": 200,
+      "milliseconds": 309.485,
+      "error_code": null,
+      "limits": {}
+    }
+  ],
+  "network_baseline": {
+    "samples_ms": [
+      0.652,
+      0.652,
+      0.643,
+      0.668,
+      0.648,
+      0.622,
+      0.62,
+      0.657,
+      0.649,
+      0.62,
+      0.649,
+      0.688,
+      0.658,
+      0.649,
+      0.638,
+      0.643,
+      0.681,
+      0.738,
+      0.632,
+      0.641,
+      0.659,
+      0.647,
+      0.676,
+      0.726,
+      0.679,
+      0.644,
+      0.638,
+      0.63,
+      0.635,
+      0.711
+    ],
+    "p50_ms": 0.649,
+    "p95_ms": 0.726,
+    "scope": "Unauthenticated public TLS WebSocket ping/pong round-trip; network and proxy baseline only"
+  },
+  "execution": {
+    "instance": "i-0559f9a77b4c1ca43",
+    "container": "Ubuntu24.04ARM64",
+    "ting_release": "v0.1.0",
+    "iam_release": "v3.1.2",
+    "backend_commit": "c96cb93c3068f3577875e7bfd97f5d5601a76827",
+    "network": "host networking, public backend TLS hostname, callback loopback within same container"
+  },
+  "callback_minus_accepted_observation": {
+    "p50_ms": 4.813,
+    "p95_ms": 7.777,
+    "scope": "Difference between two observer timestamps on the same sender/callback host; not an isolated server processing measurement."
+  },
+  "target": {
+    "p95_ms": 100,
+    "met": false
+  },
+  "prior_attempt": {
+    "complete": false,
+    "successful_samples": 21,
+    "failure": "dependency_unavailable",
+    "cause": "Unconfirmed upstream transient; no rate-limit response was captured.",
+    "report": "region-latency-partial-results.json"
+  },
+  "cleanup": {
+    "private_s3_versions_deleted": true,
+    "temporary_credentials_files_deleted": true,
+    "benchmark_container_and_images_removed": true,
+    "temporary_docker_installation_removed": true
+  }
+}

@@ -54,5 +54,5 @@ try {
   await page.getByRole('button', { name: 'Register type', exact: true }).last().click();
   await page.getByText('Use app_id.service.event, with lowercase service and event names.').waitFor();
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log('Chrome browser checks passed: public/mobile/docs, live authenticated inbox, no background read ACK, visible read ACK, safe URLs, silent filtering, type ownership validation.');
+  console.log('Chrome browser checks passed: public/mobile/docs, authenticated inbox with test API responses, no background read ACK, visible read ACK, safe URLs, silent filtering, type ownership validation.');
 } finally { await browser.close(); }

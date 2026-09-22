@@ -1,0 +1,553 @@
+{
+  "collected_at": "2026-09-22T10:50:54.728691+00:00",
+  "scope": "Read-only diagnosis; no production code, database settings, grants, validation rules, cache freshness or hardware changes. SQL probes ran BEGIN READ ONLY with transaction-local planner settings and nonexistent identities, then rolled back.",
+  "iam_runtime": {
+    "commit": "ae6ceb3b8b05134bf16232151d68d380b01eeabe",
+    "image_version_label": "3.0.1",
+    "instance_class": "t4g.small",
+    "availability_zone": "us-east-1a",
+    "production_database_class": "db.t4g.small",
+    "testing_database_class": "db.t4g.micro",
+    "database_availability_zone": "us-east-1a",
+    "api_pool_max_connections": {
+      "production": 12,
+      "testing": 4
+    },
+    "scoped_api_pool_max_connections": {
+      "production": 4,
+      "testing": 2
+    },
+    "ingress": "Existing Elastic IP, nginx and loopback API; Ting and IAM are in different VPCs in the same availability zone."
+  },
+  "health_transport_samples": [
+    {
+      "url": "https://backend.iam.teamofsilicons.com",
+      "connect_ms": 19.431441003689542,
+      "samples_ms": [
+        2.5163090031128377,
+        2.8430870006559417,
+        3.2680619988241233,
+        2.3934310011100024,
+        2.3003960013738833,
+        2.245586001663469,
+        2.639801998157054,
+        2.3604800007888116,
+        2.5262290000682697,
+        2.3562470014439896,
+        3.0351239984156564,
+        2.871303993742913,
+        2.5791910011321306,
+        2.621585997985676,
+        2.716410999710206,
+        2.811842998198699,
+        2.7410999973653816,
+        2.8888960005133413,
+        2.768232996459119,
+        3.0349349981406704
+      ],
+      "p50_ms": 2.67810649893363,
+      "p95_ms": 3.0351239984156564,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "url": "http://127.0.0.1:8080",
+      "connect_ms": 1.743383938446641,
+      "samples_ms": [
+        0.9329470340162516,
+        0.8925118017941713,
+        0.8265110664069653,
+        0.8237380534410477,
+        0.8856030181050301,
+        0.588244991376996,
+        0.7023189682513475,
+        0.8533990476280451,
+        0.6135979201644659,
+        0.5344271194189787,
+        0.9339971002191305,
+        0.5216528661549091,
+        1.2326769065111876,
+        1.224299892783165,
+        0.9066830389201641,
+        0.5788581911474466,
+        0.6296390201896429,
+        1.0895319283008575,
+        0.7675171364098787,
+        0.676104100421071
+      ],
+      "p50_ms": 0.8251245599240065,
+      "p95_ms": 1.224299892783165,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "url": "http://127.0.0.1:8081",
+      "connect_ms": 1.241627847775817,
+      "samples_ms": [
+        0.766450073570013,
+        0.7263598963618279,
+        0.6912511307746172,
+        0.6562969647347927,
+        0.6014469545334578,
+        0.9563560597598553,
+        0.8092890493571758,
+        0.7179169915616512,
+        0.6307789590209723,
+        0.9790100157260895,
+        0.8150639478117228,
+        0.8428469300270081,
+        0.7546020206063986,
+        0.6566171068698168,
+        0.6488549988716841,
+        0.6121129263192415,
+        0.6245600525289774,
+        0.5876289214938879,
+        0.6672590970993042,
+        0.6007410120218992
+      ],
+      "p50_ms": 0.6792551139369607,
+      "p95_ms": 0.9563560597598553,
+      "statuses": [
+        200
+      ]
+    }
+  ],
+  "existing_iam_request_log_window": {
+    "start_utc": "2026-09-22T08:25:00Z",
+    "end_utc": "2026-09-22T09:00:00Z",
+    "attribution": "Mixed IAM traffic, not uniquely attributable to Ting; server request duration includes middleware, authentication and handler.",
+    "containers": [
+      {
+        "container": "silicon-iam-api",
+        "parsed_log_objects": 11893,
+        "request_timing_rows": 11893,
+        "matched_summaries": [
+          {
+            "route": "/api/v1/application/testing-context",
+            "status": "401",
+            "count": 4691,
+            "min_ms": 2.0,
+            "p50_ms": 4.0,
+            "p95_ms": 8.0,
+            "max_ms": 240.0
+          },
+          {
+            "route": "/api/v1/oauth/introspect",
+            "status": "200",
+            "count": 2824,
+            "min_ms": 21.0,
+            "p50_ms": 29.0,
+            "p95_ms": 56.0,
+            "max_ms": 566.0
+          },
+          {
+            "route": "/api/v1/application/testing-context",
+            "status": "200",
+            "count": 531,
+            "min_ms": 25.0,
+            "p50_ms": 29.0,
+            "p95_ms": 85.0,
+            "max_ms": 605.0
+          },
+          {
+            "route": "/api/v1/obo-access/verify",
+            "status": "200",
+            "count": 87,
+            "min_ms": 181.0,
+            "p50_ms": 210.0,
+            "p95_ms": 328.0,
+            "max_ms": 612.0
+          },
+          {
+            "route": "/api/v1/application/testing-context",
+            "status": "429",
+            "count": 3,
+            "min_ms": 14.0,
+            "p50_ms": 15.0,
+            "p95_ms": 15.0,
+            "max_ms": 15.0
+          },
+          {
+            "route": "/api/v1/oauth/introspect",
+            "status": "429",
+            "count": 16,
+            "min_ms": 5.0,
+            "p50_ms": 6.0,
+            "p95_ms": 14.0,
+            "max_ms": 14.0
+          },
+          {
+            "route": "/api/v1/obo-access/verify",
+            "status": "400",
+            "count": 2,
+            "min_ms": 21.0,
+            "p50_ms": 21.5,
+            "p95_ms": 22.0,
+            "max_ms": 22.0
+          },
+          {
+            "route": "/api/v1/obo-access/verify",
+            "status": "403",
+            "count": 2,
+            "min_ms": 29.0,
+            "p50_ms": 107.5,
+            "p95_ms": 186.0,
+            "max_ms": 186.0
+          },
+          {
+            "route": "/api/v1/obo-access/verify",
+            "status": "409",
+            "count": 2,
+            "min_ms": 23.0,
+            "p50_ms": 24.0,
+            "p95_ms": 25.0,
+            "max_ms": 25.0
+          }
+        ],
+        "sample_field_names": [
+          "timestamp",
+          "level",
+          "message",
+          "target",
+          "span"
+        ]
+      },
+      {
+        "container": "silicon-iam-scoped-api",
+        "parsed_log_objects": 12,
+        "request_timing_rows": 12,
+        "matched_summaries": [
+          {
+            "route": "/api/v1/auth/introspect",
+            "status": "200",
+            "count": 1,
+            "min_ms": 75.0,
+            "p50_ms": 75.0,
+            "p95_ms": 75.0,
+            "max_ms": 75.0
+          }
+        ],
+        "sample_field_names": [
+          "timestamp",
+          "level",
+          "message",
+          "target",
+          "span"
+        ]
+      }
+    ]
+  },
+  "cloudwatch_5_minute_averages": [
+    {
+      "metric": "IAM EC2 CPUUtilization",
+      "points": 36,
+      "min": 3.5397137313385976,
+      "max": 5.445402632753604,
+      "mean": 3.9926445950597533,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "IAM EC2 CPUCreditBalance",
+      "points": 36,
+      "min": 576.0,
+      "max": 576.0,
+      "mean": 576.0,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "IAM EC2 CPUSurplusCreditBalance",
+      "points": 36,
+      "min": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production CPUUtilization",
+      "points": 36,
+      "min": 5.408982917145684,
+      "max": 7.570907453991547,
+      "mean": 6.130872772867082,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production CPUCreditBalance",
+      "points": 36,
+      "min": 576.0,
+      "max": 576.0,
+      "mean": 576.0,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production DatabaseConnections",
+      "points": 36,
+      "min": 9.8,
+      "max": 18.4,
+      "mean": 12.966666666666667,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production ReadLatency",
+      "points": 36,
+      "min": 0.0,
+      "max": 0.002,
+      "mean": 0.00020886644219977554,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production WriteLatency",
+      "points": 36,
+      "min": 0.000706394972181915,
+      "max": 0.0014974023965893463,
+      "mean": 0.0009702635713491337,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production DiskQueueDepth",
+      "points": 36,
+      "min": 0.010499672194760439,
+      "max": 0.028624469667156212,
+      "mean": 0.015686973709276356,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-production FreeableMemory",
+      "points": 36,
+      "min": 716801638.4,
+      "max": 895993446.4,
+      "mean": 847537561.6,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production CPUUtilization",
+      "points": 36,
+      "min": 3.72800059972013,
+      "max": 8.94146972739736,
+      "mean": 4.649223200524143,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production CPUCreditBalance",
+      "points": 36,
+      "min": 287.80724288333334,
+      "max": 288.0,
+      "mean": 287.9918844138889,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production DatabaseConnections",
+      "points": 36,
+      "min": 5.0,
+      "max": 6.0,
+      "mean": 5.872222222222222,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production ReadLatency",
+      "points": 36,
+      "min": 0.0,
+      "max": 0.008697142857142858,
+      "mean": 0.0006909513805187716,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production WriteLatency",
+      "points": 36,
+      "min": 0.0002898747814276745,
+      "max": 0.0026379758399495243,
+      "mean": 0.0012601535879574585,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production DiskQueueDepth",
+      "points": 36,
+      "min": 0.004978427604264419,
+      "max": 0.033482650556212745,
+      "mean": 0.013335860311128203,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    },
+    {
+      "metric": "silicon-iam-testing-production FreeableMemory",
+      "points": 36,
+      "min": 80779673.6,
+      "max": 160132300.8,
+      "mean": 131846166.75555556,
+      "start": "2026-09-22T13:10:00+05:30",
+      "end": "2026-09-22T16:05:00+05:30"
+    }
+  ],
+  "readonly_no_row_planner_probe": {
+    "function": "iam_private.application_obo_load_current_context(text,uuid,uuid,text,text,uuid,text,bigint,text,text)",
+    "description": "Three alternating default/bounded samples per database, each in a fresh read-only transaction/session using nonexistent actor/application/organization/membership/token. Top-level EXPLAIN execution time includes inner SQL-function planning; actual rows zero. Not a positive proof verification or a production gain estimate.",
+    "results": [
+      {
+        "database": "production",
+        "kind": "function_settings",
+        "data": [
+          {
+            "name": "application_obo_load_current_context",
+            "args": "text, uuid, uuid, text, text, uuid, text, bigint, text, text",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private"
+            ]
+          },
+          {
+            "name": "application_token_allows_membership",
+            "args": "p_access_token_id uuid, p_membership_id uuid",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private",
+              "join_collapse_limit=1"
+            ]
+          },
+          {
+            "name": "get_current_application_authorization",
+            "args": "p_access_token_id uuid, p_subject_principal_id text, p_organization_id uuid, p_membership_id uuid, p_audience_application_id text, p_audience_auth_epoch bigint, p_proof_id uuid",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private"
+            ]
+          }
+        ]
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.037,
+        "execution_ms": 8.777,
+        "actual_rows": 0
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.035,
+        "execution_ms": 7.877,
+        "actual_rows": 0
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.037,
+        "execution_ms": 8.424,
+        "actual_rows": 0
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.033,
+        "execution_ms": 7.629,
+        "actual_rows": 0
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.035,
+        "execution_ms": 8.379,
+        "actual_rows": 0
+      },
+      {
+        "database": "production",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.034,
+        "execution_ms": 7.621,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "kind": "function_settings",
+        "data": [
+          {
+            "name": "application_obo_load_current_context",
+            "args": "text, uuid, uuid, text, text, uuid, text, bigint, text, text",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private"
+            ]
+          },
+          {
+            "name": "application_token_allows_membership",
+            "args": "p_access_token_id uuid, p_membership_id uuid",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private",
+              "join_collapse_limit=1"
+            ]
+          },
+          {
+            "name": "get_current_application_authorization",
+            "args": "p_access_token_id uuid, p_subject_principal_id text, p_organization_id uuid, p_membership_id uuid, p_audience_application_id text, p_audience_auth_epoch bigint, p_proof_id uuid",
+            "settings": [
+              "search_path=pg_catalog, iam, iam_private"
+            ]
+          }
+        ]
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.042,
+        "execution_ms": 53.103,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.032,
+        "execution_ms": 9.086,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.029,
+        "execution_ms": 10.445,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.03,
+        "execution_ms": 9.043,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 8,
+        "planning_ms": 0.03,
+        "execution_ms": 10.532,
+        "actual_rows": 0
+      },
+      {
+        "database": "testing",
+        "join_collapse_limit": 1,
+        "planning_ms": 0.029,
+        "execution_ms": 8.98,
+        "actual_rows": 0
+      }
+    ]
+  },
+  "statement_statistics": "pg_stat_statements unavailable; no measured per-statement positive-request attribution. Aggregate database stats show no deadlocks or temp files, and very high buffer hit ratios.",
+  "evidence_commands": {
+    "topology-command": "d8357614-cd3e-457e-9a94-1008313da6cf",
+    "runtime-command": "2511031a-8756-4f75-bfa1-8ed682be81b2",
+    "db-command": "3c29e85f-8d8c-47ef-b013-faddfc0a78bd",
+    "logs-command": "7a580981-3d64-4df8-8f36-a40ecb205c7c",
+    "ting-public-iam-command": "27891ba2-bf67-4853-8991-c6f2515f66aa",
+    "iam-loopback-command": "cb4b2932-530b-42d7-88f3-3d49ea30ea30",
+    "plan-command": "6ad24fdd-506b-4e2b-9aeb-c6ab58a153fa"
+  }
+}

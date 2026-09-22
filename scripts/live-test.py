@@ -4,7 +4,7 @@
 Run: python -m pip install requests websocket-client
      python scripts/live-test.py --fixture deploy/private/live-test.json
 Fixture fields: environment_id, testing_key, ting_app_secret, sender_app_id,
-sender_app_secret, actor_id, org_id; optional api_url and iam_url.
+sender_app_secret, actor_id, org_id; optional org_handle, api_url and iam_url.
 The official IAM CLI must know this environment key (`iam env key <UUID>`).
 The fixture's org/app/actor must already exist and scopes must be approved.
 Only test context records are created; credentials and proofs are never printed.
@@ -67,7 +67,7 @@ class Checks:
                     "/v1/sent/query": "sent.query"}[path]
         return self.iam("app", "obo", "exchange", "tos>ting", endpoint,
                         "--as-app-id", self.app, "--app-secret", self.f["sender_app_secret"],
-                        "--subject-token", self.subject, "--org-context", self.org,
+                        "--subject-token", self.subject, "--org-context", self.f.get("org_handle", self.org),
                         "--method", "POST", "--body-file", "-", stdin=raw)["access_proof"]
 
     def http(self, method, path, body=None, *, raw=None, token=None, expected=200, extra=None, test=True):

@@ -1,0 +1,60 @@
+{
+  "completed_at": "2026-09-22T10:54:59.579185+00:00",
+  "server_version": "0.1.2",
+  "source_commit": "a86971a08089bd212810b2df49f3f13bd41e83ac",
+  "scope": "Local isolated SQLite, official IAM SDK against a loopback HTTP fixture, and a real loopback WebSocket. No live IAM credentials or post-change production benchmark.",
+  "server_tests_passed": 18,
+  "new_tests": [
+    "acks_use_one_fresh_snapshot_and_rejections_do_not_mutate",
+    "periodic_authority_uses_one_snapshot_and_revocation_still_pauses",
+    "delivery_notification_survives_an_awaiting_ack_handler"
+  ],
+  "ack_rpcs_per_decision": {
+    "production_introspection": 1,
+    "testing_context": 1,
+    "testing_introspection": 1
+  },
+  "rejections_preserve_receipts": [
+    "inactive token",
+    "missing organization",
+    "wrong actor",
+    "wrong actor kind",
+    "wrong audience",
+    "wrong test context",
+    "upstream HTTP503"
+  ],
+  "periodic_identity_checks": [
+    "actor ID",
+    "context",
+    "actor kind"
+  ],
+  "periodic_revocation_pauses_and_releases": true,
+  "lost_wakeup_regression": {
+    "real_websocket": true,
+    "handler_blocked_on_IAM": true,
+    "second_ting_committed_while_blocked": true,
+    "delivery_deadline_after_release_ms": 500,
+    "fallback_interval_ms": 1000,
+    "fixed_passes": true,
+    "negative_control": "Temporary isolated copy reverting only persistent Notified failed at the expected 500 ms deadline; no root worktree rollback."
+  },
+  "format_and_diff_checks": "passed",
+  "source_sha256": {
+    "crates/ting-server/src/auth.rs": "5dea2ffdab4c07a5c87c843b71f35ba0c4efe5e4fbeb7df39d626fc034e6190f",
+    "crates/ting-server/src/ws.rs": "52abb1eddcc1170409ef3e61bd8f887d631f7359b39f6a793bbeadfc0e0bfba7"
+  },
+  "deployment_status": "success",
+  "source_change_scope": [
+    "Retain Notified while WebSocket handler awaits; reset before offering",
+    "One fresh IAM authority snapshot per ACK and periodic org validation; preserve all identity/context/ownership/freshness checks",
+    "Server-only version 0.1.2; native 0.1.2 tags and assets unchanged"
+  ],
+  "build_workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35718577022",
+  "build_status": "success",
+  "deployment_evidence": "backend-012-deployment-results.json",
+  "fresh_local_rebuild_followup": {
+    "server_tests_passed": 18,
+    "source_changed": false,
+    "note": "A stale local negative-control test binary initially failed; cleaning the server package and rebuilding the unchanged source passed all 18 tests. Release CI built independently and passed."
+  }
+}

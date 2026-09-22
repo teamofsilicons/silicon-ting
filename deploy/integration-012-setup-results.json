@@ -1,0 +1,26 @@
+{
+  "completed_at": "2026-09-22T12:17:43.859919+00:00",
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "generation": 4,
+  "org_id": "01a0c903-1127-78a1-8f58-f6b6779ed082",
+  "temporary_participant": {
+    "app_id": "tos>ting-probe",
+    "environment_allowlist": [
+      "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f"
+    ],
+    "fresh_control_token": true,
+    "malformed_authenticated_context_rejected_status": 400,
+    "host_setup_command_id": "dfa29113-0162-4517-864a-f492de5cba9a",
+    "honeycomb_binding_command_id": "a99338a0-7de5-4bb8-997e-66e2a144e217",
+    "honeycomb_image_and_data_preserved": true
+  },
+  "sender_configuration": {
+    "operation_id": "dd9e3ea5-165a-407c-a30a-40d624b20e88",
+    "state": "accepted",
+    "revision": 1
+  },
+  "live_protocol_report": "live-test-012-results.json",
+  "live_protocol_groups_passed": 12,
+  "public_honeycomb_report": "honeycomb-012-publication-status.json",
+  "cleanup": "Complete; see integration-cleanup-012-results.json."
+}

@@ -1,0 +1,107 @@
+{
+  "checked_at": "2026-09-22T10:45:07.176364+00:00",
+  "version": "0.1.2",
+  "source_commit": "e8e90005d39e5601116846892707f21494b70739",
+  "backend_version": "0.1.2",
+  "native": {
+    "release_url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2",
+    "workflow_url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35708888149",
+    "six_native_builds_and_publish": "success",
+    "platforms": "x86_64 and ARM64 on macOS, Linux and Windows",
+    "archive_checksums_verified": {
+      "ting-v0.1.2-aarch64-apple-darwin.tar.gz": "c9172cae8a4b82143e00e810ed47a33ec1aa752caaea14be4be071aa0a62d749",
+      "ting-v0.1.2-aarch64-pc-windows-msvc.zip": "60709dd94025bf021c8afdd0250ad763c89e8d7167dc416551839c179dd0fe0a",
+      "ting-v0.1.2-aarch64-unknown-linux-gnu.tar.gz": "db11696107ffb76a3d729c975e77bc925969458a104717c9593de6baedc64c4b",
+      "ting-v0.1.2-x86_64-apple-darwin.tar.gz": "a0b67a6afebe03f46b7b7c03d22c7da07efd2d8324018f00c13a6d729440081d",
+      "ting-v0.1.2-x86_64-pc-windows-msvc.zip": "772db2b9c060eca92e49adabaccc177737624995cfcd093fdae135005f2308dc",
+      "ting-v0.1.2-x86_64-unknown-linux-gnu.tar.gz": "b873224c62e3b91fc48060b709d635b90ad35e73606f5161fb39dd4f7806f383"
+    }
+  },
+  "crates": {
+    "silicon-ting-client": {
+      "url": "https://crates.io/crates/silicon-ting-client/0.1.2",
+      "version": "0.1.2",
+      "sha256": "0c25022eef4e3c41b23ceb9b8136329338a8ad02c89e62771f5faa5603953354",
+      "registry_checksum_verified": true,
+      "yanked": false,
+      "older_versions_0_1_0_and_0_1_1_yanked": false
+    },
+    "silicon-ting-cli": {
+      "url": "https://crates.io/crates/silicon-ting-cli/0.1.2",
+      "version": "0.1.2",
+      "sha256": "27d96609c970becd207b276b85924eec38cacf8b5b13bc12353211f9fe88c661",
+      "registry_checksum_verified": true,
+      "yanked": false,
+      "older_versions_0_1_0_and_0_1_1_yanked": false
+    }
+  },
+  "honeycomb": {
+    "app_id": "tos>ting",
+    "version": "0.1.2",
+    "release_id": "6dedc0b1-f976-4eb0-9f0f-89dbb163c4fa",
+    "upload_status": 201,
+    "state": "accepted",
+    "archive_sha256": "13cb185e429fa234eb9f6a09e6ca767fa072783411abc0b24731317144a87031",
+    "archive_size": 31059794,
+    "official_validator_passed": true,
+    "visibility": "public",
+    "catalog_publication": {
+      "request_id": "4f524fcb-86f1-4eaf-9e74-2b69f0fb2e37",
+      "revision": 2,
+      "state": "published",
+      "gates": [
+        {
+          "provider": "honeycomb",
+          "state": "approved"
+        },
+        {
+          "provider": "tos>honeycomb",
+          "state": "approved"
+        }
+      ],
+      "activation": {
+        "id": "b8d19ddd-697c-4c7f-9882-0861ed5a88e4",
+        "state": "accepted",
+        "mode": "automatic after validator approval",
+        "archives": [
+          {
+            "version": "0.1.0",
+            "state": "ready"
+          },
+          {
+            "version": "0.1.2",
+            "state": "ready"
+          }
+        ]
+      },
+      "approval": "User arranged eligible validator approval; live official API confirms published state.",
+      "further_approval_or_activation_required": false
+    },
+    "private_staging_credential_versions_deleted": true,
+    "remote_packaging_scratch_deleted": true,
+    "secret_audit": "honeycomb-012-secret-audit.json",
+    "anonymous_release_list_status": 200,
+    "publication_verified_at": "2026-09-22T12:08:29.611821+00:00",
+    "public_verification": "honeycomb-012-publication-status.json"
+  },
+  "local": {
+    "manager": "Honeycomb",
+    "effective_cli_version": "0.1.2",
+    "cli_sha256": "684962814094f1d3dce91050c04ec44f2ed6a26b49248b7e80b3a5f90282afea",
+    "daemon_release_version_verified_by_sha256": "0.1.2",
+    "daemon_sha256": "6bf1400c5e9b2f56330c2cf137c3c40a1efead040330c4d1eb57c8bef7b67ed8",
+    "both_effective_executables_match_native_release": true,
+    "same_owner_native_ipc_smoke_passed": true,
+    "ipc_smoke_report": "native-ipc-smoke-results.json",
+    "system_service_installation": "Completed with administrator approval; see macos-service-012-results.json."
+  },
+  "older_releases": {
+    "github_0_1_0_and_0_1_1_preserved": true,
+    "all_older_published_crates_not_yanked": true,
+    "honeycomb_0_1_0_still_listed": true,
+    "deletions_yanks_or_withdrawals_performed": false
+  },
+  "finalized_at": "2026-09-22T12:09:28.673794+00:00",
+  "backend_deployment": "backend-012-deployment-results.json",
+  "release_reverification": "release-audit-012-results.json"
+}

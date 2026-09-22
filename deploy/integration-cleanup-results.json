@@ -1,0 +1,49 @@
+{
+  "completed_at": "2026-09-22T09:02:18.619023+00:00",
+  "working_fixture": {
+    "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+    "state": "deleted",
+    "revision": 10,
+    "generation": 3,
+    "clean_verified_receiver_pause": true,
+    "clean_verified_session_revocation": true,
+    "purge_after": 1792659412,
+    "purge_policy": "Official recoverable deletion; coordinated permanent purge is deferred until Honeycomb recovery window expires."
+  },
+  "honeycomb": {
+    "command_id": "5aae082f-c84c-4650-9cfd-db1425339d67",
+    "status": "Success",
+    "retained_participants": [
+      "tos>briefcase",
+      "tos>remind",
+      "tos>commit",
+      "tos>ting"
+    ],
+    "temporary_probe_binding_and_runtime_token_removed": true,
+    "same_backend_image_and_data_preserved": true
+  },
+  "ting_host": {
+    "command_id": "53e0add2-d635-41e8-a6d4-b0c4a8c529e6",
+    "status": "Success",
+    "temporary_probe_route_service_dropin_token_source_database_removed": true,
+    "tracked_caddy_probe_route_removed": true,
+    "iam_underscore_header_allowlist_preserved": true,
+    "health_status": 200,
+    "old_probe_token_status": 401
+  },
+  "temporary_probe_archives": {
+    "bucket": "silicon-ting-production-artifacts-dnhhu0vcfcdt",
+    "keys": [
+      "releases/integration-probe.tgz",
+      "integration/probe.tgz"
+    ],
+    "all_versions_and_delete_markers_absent": true
+  },
+  "earlier_abandoned_fixture": {
+    "environment_id": "7b091bd2-bf36-4f95-9e2c-280a4d098c3d",
+    "blocked_operation": "0afbb7e6-f89c-481c-a0ae-c843560291a0",
+    "resource": "tingprobe>sender",
+    "cleanup_status": "blocked_by_honeycomb",
+    "reason": "IAM permanently rejected the mismatched test organization. Honeycomb leaves the configure operation pending and exposes no supported cancellation; official environment deletion rejects pending test application operations. A supported coordinator repair is required. No database workaround or independent IAM deletion was performed."
+  }
+}

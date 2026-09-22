@@ -1,0 +1,44 @@
+{
+  "complete": true,
+  "checks": [
+    "1 real direct-public WebSocket sends reach native daemon webhook"
+  ],
+  "samples_ms": [
+    484.672
+  ],
+  "api_url": "https://backend.ting.teamofsilicons.com",
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "client_location": "Developer macOS ARM64 host; brief 0.1.1 release smoke",
+  "server_location": "AWS us-east-1, Northern Virginia, United States",
+  "callback_location": "127.0.0.1 on the same macOS host",
+  "client_platform": "Darwin arm64",
+  "accepted_roundtrip_samples_ms": [
+    482.195
+  ],
+  "warmup_samples_ms": [],
+  "cli_version": "0.1.1",
+  "binary_sha256": {
+    "ting": "826b8d1e80b22186430dbc5fd940af3565086133b5c987a6abfab0ba4354a94c",
+    "ting-daemon": "cd6d7e9b07856d3ba0cbbf613b5178755ed8ec4edc8732ea31090abb37cb7258"
+  },
+  "latency": {
+    "samples": 1,
+    "p50_ms": 484.672,
+    "p95_ms": 484.672,
+    "min_ms": 484.672,
+    "max_ms": 484.672,
+    "conditions": "Monotonic proof-ready WebSocket send through public TLS AWS backend to installed native daemon and local HTTP callback arrival; existing sockets; small sequential payloads; proof minting and callback ACK excluded; no relay or mocked responses in this phase."
+  },
+  "accepted_roundtrip": {
+    "samples": 1,
+    "p50_ms": 482.195,
+    "p95_ms": 482.195,
+    "min_ms": 482.195,
+    "max_ms": 482.195,
+    "conditions": "Same send start to sender receiving the accepted response; includes outbound and return network, IAM proof validation, and durable server acceptance. This is not isolated server CPU time."
+  },
+  "completed_at": "2026-09-22T08:55:45Z",
+  "scope": "Functional 0.1.1 release smoke with one fresh ting; not a performance benchmark.",
+  "backend_commit": "397feeab9aadbae110a915a4c59e3af8c367c485",
+  "native_workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35706612610"
+}

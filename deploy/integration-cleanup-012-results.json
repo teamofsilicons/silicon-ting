@@ -1,0 +1,70 @@
+{
+  "completed_at": "2026-09-22T12:23:15.601614+00:00",
+  "working_fixture": {
+    "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+    "state": "deleted",
+    "revision": 17,
+    "generation": 5,
+    "clean_verified_receiver_pause": true,
+    "clean_verified_session_revocation": true,
+    "purge_after": 1792671590,
+    "purge_policy": "Official recoverable deletion; no manual data deletion or lifecycle bypass."
+  },
+  "honeycomb": {
+    "command_id": "e4a1f080-7954-49d1-820a-ac06deaa2d99",
+    "status": "Success",
+    "retained_participants": [
+      "tos>briefcase",
+      "tos>remind",
+      "tos>commit",
+      "tos>ting"
+    ],
+    "temporary_probe_binding_and_runtime_token_removed": true,
+    "same_backend_image_and_data_preserved": true,
+    "health_status": 200,
+    "temporary_runtime_secret_version_unstaged": true,
+    "secret_version_retention": "The inactive unstaged Secrets Manager version remains subject to AWS retention/garbage collection; its temporary control token is rejected."
+  },
+  "ting_host": {
+    "command_id": "19b877e0-90f6-43d6-87b7-44c792b3633e",
+    "status": "Success",
+    "release_directory": "a86971a08089bd21-2f4b0c8fb06f",
+    "backend_version": "0.1.2",
+    "caddy_matches_committed_release": true,
+    "temporary_probe_route_service_dropin_token_source_database_removed": true,
+    "caddy_runtime_probe_token_absent": true,
+    "health_status": 200,
+    "old_probe_token_status": 401,
+    "private_staging_cleanup_command": "0da79d20-edae-44a3-870d-adf26c599475",
+    "private_staging_cleanup_status": "Success"
+  },
+  "temporary_probe_archives": {
+    "bucket": "silicon-ting-production-artifacts-dnhhu0vcfcdt",
+    "objects": [
+      {
+        "key": "integration/ting-012-probe-20260922.tgz",
+        "removed_versions_and_markers": 1,
+        "all_versions_and_delete_markers_absent": true
+      },
+      {
+        "key": "releases/ting-012-probe-20260922.tgz",
+        "removed_versions_and_markers": 1,
+        "all_versions_and_delete_markers_absent": true
+      }
+    ]
+  },
+  "honeycomb_publication_reverified_after_cleanup": {
+    "visibility": "public",
+    "latest_version": "0.1.2",
+    "anonymous_release_versions": [
+      "0.1.2",
+      "0.1.0"
+    ],
+    "publication_report": "honeycomb-012-publication-status.json"
+  },
+  "live_protocol_report": "live-test-012-results.json",
+  "live_protocol_groups_passed": 12,
+  "lifecycle_report": "live-lifecycle-012-test-results.json",
+  "regional_benchmark_cleanup": "region-benchmark-012-cleanup.json",
+  "earlier_abandoned_fixture": "7b091bd2-bf36-4f95-9e2c-280a4d098c3d was not modified by this release completion."
+}

@@ -51,14 +51,14 @@ Verified on 22 September 2026. Existing account credentials were preserved. CLI 
 
 | Additional executable | Version |
 | --- | --- |
-| IAM | 3.1.0 |
+| IAM | 3.1.2 |
 | Honeycomb | 0.3.0 |
 | Space Station | 0.1.4 |
 | Briefcase | 1.1.1 |
 | NATS CLI | 0.5.0 |
 | Node.js | 26.9.0 |
 | npm | 12.0.2 |
-| Ting CLI and daemon | 0.1.0 |
+| Ting CLI and daemon | 0.1.2 |
 | LiveKit CLI | 2.18.7 |
 
 The two pipx packages were also upgraded: `silicon-cli` 1.0.11 → 1.0.61 and `silicon-browser` 0.1.1 → 1.1.1. The separate effective `silicon` executable reports 4.0.9; `silicon-browser` reports 1.1.1.

@@ -6,6 +6,8 @@ Notifications for carbons and silicons. A Rust service, stateless client, CLI an
 - **API:** https://backend.ting.teamofsilicons.com
 - **IAM application:** `tos>ting`
 
+Current release: [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), also available through `honeycomb install 'tos>ting'`. Previous releases [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+
 ## Start receiving
 
 ```sh
@@ -56,7 +58,7 @@ The local daemon is installed through [platform installers](installers/README.md
 
 ## Deployment
 
-AWS CloudFormation provisions a dedicated ARM64 EC2 host, encrypted retained EBS, private encrypted S3 and Secrets Manager. GitHub tests and builds releases on Amazon Linux 2023. `deploy/github-release.py` installs a checksum-verified release through SSM; systemd supervises the service and failed health checks restore the previous release. See [deployment instructions](deploy/README.md). No SSH port is exposed.
+AWS CloudFormation provisions a dedicated ARM64 EC2 host, encrypted retained EBS, private encrypted S3 and Secrets Manager. GitHub tests and builds releases on Amazon Linux 2023. `deploy/github-release.py` installs a checksum-verified release through SSM; systemd supervises the service and failed health checks restore the previous release. See [deployment instructions](deploy/README.md) and the [verification record](deploy/verification.md) for measured results and limitations. No SSH port is exposed.
 
 Vercel hosts the built frontend. Caddy serves `ting.teamofsilicons.com`, proxies static frontend requests to Vercel and `/v1` to Rust. `backend.ting.teamofsilicons.com` exposes the backend directly. This keeps the browser's HttpOnly, host-only session cookie and WebSocket on one origin. Namecheap manages both DNS records.
 

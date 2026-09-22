@@ -1,0 +1,36 @@
+{
+  "environment_id": "7cd7acfb-7a3c-42ad-b23c-93e896b0a59f",
+  "clean_received_pause": true,
+  "clean_revoked_session": true,
+  "final_state": "deleted",
+  "revision": 10,
+  "generation": 3,
+  "purge_after": 1792659412,
+  "services": [
+    {
+      "app_id": "tos>briefcase",
+      "error": null,
+      "operation_id": "1ac1df5f-25ab-4c76-af4f-3cd005f61a6f",
+      "state": "ready"
+    },
+    {
+      "app_id": "tos>honeycomb",
+      "error": null,
+      "operation_id": "1ac1df5f-25ab-4c76-af4f-3cd005f61a6f",
+      "state": "ready"
+    },
+    {
+      "app_id": "tos>iam",
+      "error": null,
+      "operation_id": "1ac1df5f-25ab-4c76-af4f-3cd005f61a6f",
+      "state": "ready"
+    },
+    {
+      "app_id": "tos>ting",
+      "error": null,
+      "operation_id": "1ac1df5f-25ab-4c76-af4f-3cd005f61a6f",
+      "state": "ready"
+    }
+  ],
+  "completed_at": "2026-09-22T08:56:54Z"
+}

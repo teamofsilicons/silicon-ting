@@ -1,0 +1,33 @@
+{
+  "release": "a86971a08089bd21-2f4b0c8fb06f",
+  "commit": "a86971a08089bd212810b2df49f3f13bd41e83ac",
+  "checksum": "2f4b0c8fb06fceebae344fcf330aa2665bbe0fac67f474b75f4f01089021e58b",
+  "instance": "i-0559f9a77b4c1ca43",
+  "command_id": "5bb5dc3d-b27a-45b5-9db1-e20b7a5f54e3",
+  "completed_at": "2026-09-22T12:05:18.911158+00:00",
+  "status": "success",
+  "version": "0.1.2",
+  "workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35718577022",
+  "workflow_jobs": [
+    "server:success",
+    "caddy:success",
+    "publish:success"
+  ],
+  "public_checks": [
+    {
+      "url": "https://backend.ting.teamofsilicons.com/healthz",
+      "status": 200,
+      "json": {
+        "service": "ting",
+        "status": "ok",
+        "version": "0.1.2"
+      }
+    },
+    {
+      "url": "https://ting.teamofsilicons.com/v1/iam",
+      "status": 200,
+      "app_id": "tos>ting"
+    }
+  ],
+  "older_releases_preserved": true
+}

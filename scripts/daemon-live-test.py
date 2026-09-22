@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import platform
 import pathlib
 import pwd
 import shutil
@@ -182,7 +183,9 @@ class Run:
         self.report = {"complete": False, "checks": [], "samples_ms": [], "api_url": self.checks.api,
                        "environment_id": self.fixture["environment_id"], "client_location": args.client_location,
                        "server_location": "AWS us-east-1, Northern Virginia, United States",
-                       "callback_location": "127.0.0.1 on the same macOS host as the sending WebSocket"}
+                       "callback_location": args.callback_location, "client_platform": platform.system() + " " + platform.machine(),
+                       "accepted_roundtrip_samples_ms": [], "warmup_samples_ms": [],
+                       "sample_interval_seconds": args.interval_seconds}
         self.process = None
         self.hooks = []
         self.sessions = []
@@ -256,6 +259,7 @@ class Run:
         started = time.monotonic()
         result = self.sender.call("send", proof_token=proof, body=raw.decode(), headers=self.checks.test)
         assert result["op"] == "accepted"
+        self.last_accepted_ms = round((time.monotonic() - started) * 1000, 3)
         return body["key"], result["id"], started
 
     def rows(self, hid, mid):
@@ -278,8 +282,11 @@ class Run:
         self.report["binary_sha256"] = {name: hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
                                         for name, binary in (("ting", self.args.ting), ("ting-daemon", self.args.daemon))}
         self.destinations = Destinations()
-        self.relay = Relay(self.checks.api, self.database)
-        self.profile("faults", self.relay.origin)
+        if self.args.latency_only:
+            self.profile("latency", self.checks.api)
+        else:
+            self.relay = Relay(self.checks.api, self.database)
+            self.profile("faults", self.relay.origin)
         # Integration fixture cleanup is intentional and confined to this isolated actor.
         while True:
             page = self.checks.http("GET", self.checks.prefix + "/inbox?limit=100&read=false")[1]
@@ -288,64 +295,78 @@ class Run:
                 break
             self.checks.http("POST", self.checks.prefix + "/inbox/read", {"message_ids": ids})
         self.checks.app_call("/v1/subscriptions", {"org_id": self.checks.org, "app_id": self.checks.app, "for": self.checks.actor}, expected=(200, 201))
-        self.start()
-        self.sender = self.checks.socket()
-        healthy, dead = self.hook("/healthy"), self.hook("/dead")
-        self.destinations.allow_healthy.clear()
-        self.relay.hold_reads = True
-        business_key, mid, started = self.send("durability-and-lost-read-ack")
-        arrived = wait_for(lambda: self.destinations.calls[(healthy, business_key)], "healthy callback")[0]
-        wait_for(lambda: (healthy, mid) in self.relay.delivery_records, "healthy delivery ACK observed")
-        assert self.relay.delivery_checks and all(self.relay.delivery_checks), "Delivery ACK preceded durable SQLite queue"
-        assert self.rows(healthy, mid) == (0,), "Callback is not yet accepted"
-        assert not self.read_state(mid), "Delivery ACK incorrectly marked read"
-        assert arrived - started < 10, "Unresponsive hook blocked healthy hook"
-        self.mark("durable local queue precedes delivery ACK; delivery ACK keeps server unread")
-        self.destinations.allow_healthy.set()
-        wait_for(self.relay.read_seen.is_set, "read ACK suppression")
-        assert self.rows(healthy, mid) == (1,), "204 acceptance not durably recorded before read ACK"
-        assert not self.read_state(mid), "Suppressed read ACK reached server"
-        def dead_has_failed():
-            with sqlite3.connect(self.database) as db:
-                row = db.execute("SELECT first_failure FROM hooks WHERE id=?", (dead,)).fetchone()
-                return row and row[0] is not None
-        wait_for(dead_has_failed, "unresponsive webhook timeout recorded", timeout=20)
-        self.stop()
-        self.relay.hold_reads = False
-        self.start()
-        wait_for(lambda: self.rows(healthy, mid) is None, "accepted receipt acknowledged after restart", timeout=90)
-        assert self.read_state(mid)
-        time.sleep(3)
-        assert len(self.destinations.calls[(healthy, business_key)]) == 1, "Accepted callback was forwarded twice"
-        self.mark("restart retries lost read ACK from durable acceptance without duplicate forwarding")
-        # Keep a failed destination alive through its real retry interval.
-        wait_for(lambda: len(self.destinations.dead_attempts) >= 2, "dead webhook retry", timeout=90)
-        self.report["unresponsive_hook"] = {"attempts": len(self.destinations.dead_attempts),
-            "first_retry_seconds": round(self.destinations.dead_attempts[1] - self.destinations.dead_attempts[0], 3),
-            "healthy_delivery_ms": round((arrived - started) * 1000, 3)}
-        self.mark("unresponsive webhook retries independently while healthy hook completes")
-        self.detach(dead)
-        self.detach(healthy)
-        self.stop()
-        self.relay.close()
-        self.relay = None
-        self.profile("latency", self.checks.api)
+        if not self.args.latency_only:
+            self.start()
+            self.sender = self.checks.socket()
+            healthy, dead = self.hook("/healthy"), self.hook("/dead")
+            self.destinations.allow_healthy.clear()
+            self.relay.hold_reads = True
+            business_key, mid, started = self.send("durability-and-lost-read-ack")
+            arrived = wait_for(lambda: self.destinations.calls[(healthy, business_key)], "healthy callback")[0]
+            wait_for(lambda: (healthy, mid) in self.relay.delivery_records, "healthy delivery ACK observed")
+            assert self.relay.delivery_checks and all(self.relay.delivery_checks), "Delivery ACK preceded durable SQLite queue"
+            assert self.rows(healthy, mid) == (0,), "Callback is not yet accepted"
+            assert not self.read_state(mid), "Delivery ACK incorrectly marked read"
+            assert arrived - started < 10, "Unresponsive hook blocked healthy hook"
+            self.mark("durable local queue precedes delivery ACK; delivery ACK keeps server unread")
+            self.destinations.allow_healthy.set()
+            wait_for(self.relay.read_seen.is_set, "read ACK suppression")
+            assert self.rows(healthy, mid) == (1,), "204 acceptance not durably recorded before read ACK"
+            assert not self.read_state(mid), "Suppressed read ACK reached server"
+            def dead_has_failed():
+                with sqlite3.connect(self.database) as db:
+                    row = db.execute("SELECT first_failure FROM hooks WHERE id=?", (dead,)).fetchone()
+                    return row and row[0] is not None
+            wait_for(dead_has_failed, "unresponsive webhook timeout recorded", timeout=20)
+            self.stop()
+            self.relay.hold_reads = False
+            self.start()
+            wait_for(lambda: self.rows(healthy, mid) is None, "accepted receipt acknowledged after restart", timeout=90)
+            assert self.read_state(mid)
+            time.sleep(3)
+            assert len(self.destinations.calls[(healthy, business_key)]) == 1, "Accepted callback was forwarded twice"
+            self.mark("restart retries lost read ACK from durable acceptance without duplicate forwarding")
+            # Keep a failed destination alive through its real retry interval.
+            wait_for(lambda: len(self.destinations.dead_attempts) >= 2, "dead webhook retry", timeout=90)
+            self.report["unresponsive_hook"] = {"attempts": len(self.destinations.dead_attempts),
+                "first_retry_seconds": round(self.destinations.dead_attempts[1] - self.destinations.dead_attempts[0], 3),
+                "healthy_delivery_ms": round((arrived - started) * 1000, 3)}
+            self.mark("unresponsive webhook retries independently while healthy hook completes")
+            self.detach(dead)
+            self.detach(healthy)
+            self.stop()
+            self.relay.close()
+            self.relay = None
+            self.profile("latency", self.checks.api)
         self.start()
         measured = self.hook("/latency")
         # The blocking Python sender was idle during the retry test; establish a fresh measured socket.
-        self.sender.close()
+        if self.sender:
+            self.sender.close()
         self.sender = self.checks.socket()
-        for sample in range(self.args.samples):
+        for sample in range(self.args.warmups + self.args.samples):
+            if sample:
+                time.sleep(self.args.interval_seconds)
             business_key, mid, started = self.send("latency-" + str(sample + 1))
             received = wait_for(lambda: self.destinations.calls[(measured, business_key)], "latency callback")[0]
-            self.report["samples_ms"].append(round((received - started) * 1000, 3))
+            callback_ms = round((received - started) * 1000, 3)
             wait_for(lambda: self.rows(measured, mid) is None, "read acknowledgement")
             assert len(self.destinations.calls[(measured, business_key)]) == 1
-            print(f"SAMPLE {sample + 1}/{self.args.samples} {self.report['samples_ms'][-1]:.3f} ms", flush=True)
+            if sample < self.args.warmups:
+                self.report["warmup_samples_ms"].append(callback_ms)
+                print(f"WARMUP {sample + 1}/{self.args.warmups} {callback_ms:.3f} ms", flush=True)
+            else:
+                self.report["samples_ms"].append(callback_ms)
+                self.report["accepted_roundtrip_samples_ms"].append(self.last_accepted_ms)
+                print(f"SAMPLE {sample + 1 - self.args.warmups}/{self.args.samples} {callback_ms:.3f} ms; accepted {self.last_accepted_ms:.3f} ms", flush=True)
         values = sorted(self.report["samples_ms"])
         self.report["latency"] = {"samples": len(values), "p50_ms": values[math.ceil(len(values) * .5) - 1],
             "p95_ms": values[math.ceil(len(values) * .95) - 1], "min_ms": values[0], "max_ms": values[-1],
             "conditions": "Monotonic proof-ready WebSocket send through public TLS AWS backend to installed native daemon and local HTTP callback arrival; existing sockets; small sequential payloads; proof minting and callback ACK excluded; no relay or mocked responses in this phase."}
+        accepted = sorted(self.report["accepted_roundtrip_samples_ms"])
+        self.report["accepted_roundtrip"] = {"samples": len(accepted), "p50_ms": accepted[math.ceil(len(accepted) * .5) - 1],
+            "p95_ms": accepted[math.ceil(len(accepted) * .95) - 1], "min_ms": accepted[0], "max_ms": accepted[-1],
+            "conditions": "Same send start to sender receiving the accepted response; includes outbound and return network, IAM proof validation, and durable server acceptance. This is not isolated server CPU time."}
         self.mark(f"{len(values)} real direct-public WebSocket sends reach native daemon webhook")
         self.detach(measured)
         self.report["complete"] = True
@@ -386,10 +407,14 @@ def main():
     parser.add_argument("--ting", default=shutil.which("ting"))
     parser.add_argument("--daemon", default=shutil.which("ting-daemon"))
     parser.add_argument("--samples", type=int, default=30)
-    parser.add_argument("--client-location", default="Developer macOS host; city/country unverified")
+    parser.add_argument("--latency-only", action="store_true", help="Skip fault injection and measure direct-public delivery only")
+    parser.add_argument("--warmups", type=int, default=0, help="Exclude this many initial sends from reported samples")
+    parser.add_argument("--interval-seconds", type=float, default=0, help="Pause between samples outside the timed send; use 3 for the regional benchmark")
+    parser.add_argument("--client-location", default="Developer host; city/country unverified")
+    parser.add_argument("--callback-location", default="127.0.0.1 on the same host as the sending WebSocket")
     args = parser.parse_args()
-    if not args.ting or not args.daemon or not 1 <= args.samples <= 100:
-        parser.error("Installed ting/ting-daemon and 1..100 samples required")
+    if not args.ting or not args.daemon or not 1 <= args.samples <= 100 or not 0 <= args.warmups <= 10 or not 0 <= args.interval_seconds <= 60:
+        parser.error("Installed ting/ting-daemon, 1..100 samples, 0..10 warmups, and 0..60 seconds between samples required")
     os.umask(0o077)
     run = Run(args)
     try:

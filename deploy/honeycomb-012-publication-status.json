@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-09-22T12:08:29.611821+00:00",
+  "app_id": "tos>ting",
+  "version": "0.1.2",
+  "release_uploaded": true,
+  "archive_sha256": "13cb185e429fa234eb9f6a09e6ca767fa072783411abc0b24731317144a87031",
+  "archive_size": 31059794,
+  "uploaded_digest_matches_prior_verified_archive": true,
+  "latest_version": "0.1.2",
+  "visibility": "public",
+  "releases_preserved": [
+    "0.1.2",
+    "0.1.0"
+  ],
+  "duplicate_upload_or_release_deletion_performed": false,
+  "publication": {
+    "request_id": "4f524fcb-86f1-4eaf-9e74-2b69f0fb2e37",
+    "revision": 2,
+    "state": "published",
+    "gates": [
+      {
+        "provider": "honeycomb",
+        "state": "approved"
+      },
+      {
+        "provider": "tos>honeycomb",
+        "state": "approved"
+      }
+    ],
+    "activation": {
+      "id": "b8d19ddd-697c-4c7f-9882-0861ed5a88e4",
+      "state": "accepted",
+      "mode": "automatic after validator approval",
+      "archives": [
+        {
+          "version": "0.1.0",
+          "state": "ready"
+        },
+        {
+          "version": "0.1.2",
+          "state": "ready"
+        }
+      ]
+    },
+    "approval": "User arranged eligible validator approval; live official API confirms published state.",
+    "further_approval_or_activation_required": false
+  },
+  "anonymous_app_status": 200,
+  "anonymous_search_status": 200,
+  "anonymous_release_list_status": 200,
+  "anonymous_release_versions": [
+    "0.1.2",
+    "0.1.0"
+  ],
+  "anonymous_app_url": "https://backend.honeycomb.teamofsilicons.com/api/v1/apps/tos%3Eting",
+  "anonymous_release_list_url": "https://backend.honeycomb.teamofsilicons.com/api/v2/apps/tos%3Eting/releases?channel=prod",
+  "anonymous_urls": {
+    "app": "https://backend.honeycomb.teamofsilicons.com/api/v1/apps/tos%3Eting",
+    "releases": "https://backend.honeycomb.teamofsilicons.com/api/v2/apps/tos%3Eting/releases?channel=prod",
+    "search": "https://backend.honeycomb.teamofsilicons.com/api/v1/apps?q=ting&page=1&managed=false"
+  }
+}

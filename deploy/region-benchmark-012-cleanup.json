@@ -1,0 +1,18 @@
+{
+  "completed_at": "2026-09-22T12:22:01.062842+00:00",
+  "benchmark_command_id": "45667b78-2042-4557-a712-b23727b0bba5",
+  "benchmark_report": "region-latency-012-results.json",
+  "host_cleanup": {
+    "command_id": "1d7303f9-a9b2-4aa3-a5fc-2db683afbec3",
+    "earlier_command": "ba36de4f-0c60-4f83-9391-f3a379ca4bfb",
+    "retry_reason": "Base image tag was already absent; made exact-image removal idempotent.",
+    "status": "Success",
+    "scratch_and_fixture_removed": true,
+    "temporary_container_and_named_image_removed": true,
+    "docker_stopped_and_uninstalled_only_if_created_by_this_run": true,
+    "ting_and_caddy_active": true,
+    "health_version": "0.1.2"
+  },
+  "private_s3_fixture_all_versions_deleted": true,
+  "other_test_infrastructure_cleanup": "integration-cleanup-012-results.json"
+}

@@ -1,0 +1,24 @@
+{
+  "checked_at": "2026-09-22T10:56:49.176637+00:00",
+  "release": "0.1.2",
+  "administrator_approval": "completed through macOS system prompt",
+  "service": "system/com.silicon.ting",
+  "state": "running",
+  "daemon_effective_uid": 501,
+  "runs_as_root": false,
+  "run_at_load": true,
+  "keep_alive": true,
+  "installed_binaries_match_verified_native_release": {
+    "ting": "684962814094f1d3dce91050c04ec44f2ed6a26b49248b7e80b3a5f90282afea",
+    "ting-daemon": "6bf1400c5e9b2f56330c2cf137c3c40a1efead040330c4d1eb57c8bef7b67ed8"
+  },
+  "root_owned_binaries_and_plist": true,
+  "owner_only_socket_and_state": true,
+  "same_owner_cli_ipc_check": {
+    "pending": null,
+    "running": true,
+    "socket_connected": false
+  },
+  "ipc_check_scope": "Isolated temporary profile and reserved non-listening loopback HTTP port; no live credentials or remote delivery tested.",
+  "temporary_profile_removed": true
+}

@@ -1,0 +1,42 @@
+{
+  "completed_at": "2026-09-22T08:28:11.838082+00:00",
+  "unit_tests_passed": 2,
+  "typescript_and_production_build": "passed",
+  "chrome_ui_regression": "passed",
+  "ui_checks": [
+    "public page",
+    "mobile layout",
+    "documentation",
+    "authenticated inbox",
+    "no background read ACK",
+    "explicit visible read ACK",
+    "safe URLs",
+    "silent filtering",
+    "type ownership validation"
+  ],
+  "conditions": "Automated Chrome UI checks use deterministic HTTP/WebSocket test responses. Separately, the public site was signed into with real IAM in Chrome, and public telemetry was verified against real Space Station.",
+  "latest_deployment": {
+    "id": "dpl_HNLv7EN28pSRea5vVn81zEgTm1gQ",
+    "url": "https://silicon-ting-hhvp5mthf-shubham-guptas-projects-7ecb7811.vercel.app",
+    "public_url": "https://ting.teamofsilicons.com",
+    "asset": "/assets/index-CVjo_Mtl.js",
+    "ready": true,
+    "verified_at": "2026-09-22T10:54:59.579185+00:00",
+    "public_installer_version": "0.1.2",
+    "public_installers_match_source": true,
+    "public_home_status": 200
+  },
+  "previous_deployments": [
+    {
+      "id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+      "url": "https://silicon-ting-mozitqh44-shubham-guptas-projects-7ecb7811.vercel.app",
+      "public_url": "https://ting.teamofsilicons.com",
+      "asset": "/assets/index-CVjo_Mtl.js",
+      "ready": true,
+      "verified_at": "2026-09-22T08:57:34.566025+00:00",
+      "public_installer_version": "0.1.1",
+      "public_installers_match_source": true,
+      "public_home_status": 200
+    }
+  ]
+}

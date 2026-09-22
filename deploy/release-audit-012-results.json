@@ -1,0 +1,200 @@
+{
+  "checked_at": "2026-09-22T12:08:05.005465+00:00",
+  "scope": "Fresh read-only public distribution audit; existing local binaries/service checked; no distribution mutation.",
+  "github_releases": [
+    {
+      "version": "v0.1.0",
+      "url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0",
+      "draft": false,
+      "prerelease": false,
+      "all_six_archive_checksums_verified": true,
+      "archive_sha256": {
+        "ting-v0.1.0-aarch64-apple-darwin.tar.gz": "8e39fa0c7d7ef82fb3f71a3489ef3760533eedda429ccc03dee4f1a9ecebd995",
+        "ting-v0.1.0-aarch64-pc-windows-msvc.zip": "d504f71977170bdaf812c87cbb31457a3f59dc99910bdd31a15a116da8cced06",
+        "ting-v0.1.0-aarch64-unknown-linux-gnu.tar.gz": "d38fb957ed7bba290a5cb3944b86a2d72fd801d78dd0e2d898286a4897d7e8b4",
+        "ting-v0.1.0-x86_64-apple-darwin.tar.gz": "2f20866fd7554e1f08891297dcd545e8844288a53bfba80bc4c877a67f0969f8",
+        "ting-v0.1.0-x86_64-pc-windows-msvc.zip": "63a3c41a28078e4478e48a740f1c190511c06e2f84a6f5270c15314869bf048b",
+        "ting-v0.1.0-x86_64-unknown-linux-gnu.tar.gz": "341eed49f16a6824a3f84a30ace630844dc85df0da0ec8dcce130fe0d3697c7e"
+      }
+    },
+    {
+      "version": "v0.1.1",
+      "url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1",
+      "draft": false,
+      "prerelease": false,
+      "all_six_archive_checksums_verified": true,
+      "archive_sha256": {
+        "ting-v0.1.1-aarch64-apple-darwin.tar.gz": "95a3ecc5e99e243222601e9a5f97b2800245dbe43f34a627904ca602cce385b9",
+        "ting-v0.1.1-aarch64-pc-windows-msvc.zip": "c0ac0cb75d456c391fda1124bd5d7d9fe5b93e70409a9d595796a5bdbc04e5d2",
+        "ting-v0.1.1-aarch64-unknown-linux-gnu.tar.gz": "9a9f5159718e0571901117688de6fea3d26e01c04010dbd51122652ac891d4e3",
+        "ting-v0.1.1-x86_64-apple-darwin.tar.gz": "a77f8c7b54ae208e7d8e4ca9974454ce4999cb48616cfbc43bf27ab672a9265e",
+        "ting-v0.1.1-x86_64-pc-windows-msvc.zip": "317fcef768123d8e5432ee3e9e43255695bfca7bb9f6255387e6f3edd4800652",
+        "ting-v0.1.1-x86_64-unknown-linux-gnu.tar.gz": "510125e349657720a8bd900d35d48dd78587fa9ae1372ec96e0238f255512c18"
+      }
+    },
+    {
+      "version": "v0.1.2",
+      "url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2",
+      "draft": false,
+      "prerelease": false,
+      "all_six_archive_checksums_verified": true,
+      "archive_sha256": {
+        "ting-v0.1.2-aarch64-apple-darwin.tar.gz": "c9172cae8a4b82143e00e810ed47a33ec1aa752caaea14be4be071aa0a62d749",
+        "ting-v0.1.2-aarch64-pc-windows-msvc.zip": "60709dd94025bf021c8afdd0250ad763c89e8d7167dc416551839c179dd0fe0a",
+        "ting-v0.1.2-aarch64-unknown-linux-gnu.tar.gz": "db11696107ffb76a3d729c975e77bc925969458a104717c9593de6baedc64c4b",
+        "ting-v0.1.2-x86_64-apple-darwin.tar.gz": "a0b67a6afebe03f46b7b7c03d22c7da07efd2d8324018f00c13a6d729440081d",
+        "ting-v0.1.2-x86_64-pc-windows-msvc.zip": "772db2b9c060eca92e49adabaccc177737624995cfcd093fdae135005f2308dc",
+        "ting-v0.1.2-x86_64-unknown-linux-gnu.tar.gz": "b873224c62e3b91fc48060b709d635b90ad35e73606f5161fb39dd4f7806f383"
+      }
+    }
+  ],
+  "completed_at": "2026-09-22T12:08:55.392021+00:00",
+  "source_commit": "a86971a08089bd212810b2df49f3f13bd41e83ac",
+  "local_checks": {
+    "cargo_test_workspace_locked": {
+      "passed": true,
+      "tests": 28,
+      "by_crate": {
+        "cli": 1,
+        "client": 3,
+        "daemon": 6,
+        "server": 18
+      }
+    },
+    "cargo_fmt_check": "passed",
+    "honeycomb_archive_regression": {
+      "passed": true,
+      "tests": 5
+    },
+    "unix_installer_regression": {
+      "passed": true,
+      "tests": 1,
+      "scope": "temporary directories and sudo stub; no actual elevation"
+    },
+    "installed_cli_loopback_smoke": {
+      "passed": true,
+      "version": "0.1.2",
+      "scope": "temporary profile, loopback HTTP, exact proof bytes, private files, input and origin rejection"
+    },
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "frontend_typescript_and_production_build": "passed",
+    "frontend_chrome_regression": {
+      "passed": true,
+      "scope": "Fresh local production preview with deterministic mocked HTTP/WebSocket responses; not live IAM"
+    },
+    "changed_python_script_syntax": "passed",
+    "unix_installer_shell_syntax": "passed",
+    "git_diff_check": "passed"
+  },
+  "reviewed_script_changes": {
+    "files": [
+      "scripts/daemon-live-test.py",
+      "scripts/live-test.py",
+      "scripts/live-retention-test.py",
+      "web/scripts/browser-check.mjs"
+    ],
+    "findings": [],
+    "scope": "Manual control-flow review of edits and new retention check; isolated benchmark setup, warmup exclusion, timing definitions, cleanup, guarded test-row mutation, org handle selection, and browser evidence wording."
+  },
+  "source_sha256": {
+    "scripts/daemon-live-test.py": "2158c333faac5d754575583e55a6dde5ca823761cd4851caf1cc0cf585ac014c",
+    "scripts/live-test.py": "9c873a8d9d6bb67cb20241c19e3c9903fac8fbd94eaab30e5634fc533a17ca11",
+    "scripts/live-retention-test.py": "c8f11f63d3267cfaaa59834df3da5b7a23038071e7181becb363f821eb575236",
+    "web/scripts/browser-check.mjs": "f9848ebfc0a167930ad59abf721f407ae593217d199e67bff9d69718ba0487b5",
+    "crates/ting-server/src/auth.rs": "5dea2ffdab4c07a5c87c843b71f35ba0c4efe5e4fbeb7df39d626fc034e6190f",
+    "crates/ting-server/src/ws.rs": "52abb1eddcc1170409ef3e61bd8f887d631f7359b39f6a793bbeadfc0e0bfba7"
+  },
+  "native_workflow": {
+    "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35708888149",
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "backend_workflow": {
+    "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35718577022",
+    "source_commit": "a86971a08089bd212810b2df49f3f13bd41e83ac",
+    "jobs": {
+      "server": "success",
+      "caddy": "success",
+      "publish": "success"
+    }
+  },
+  "public_installers": {
+    "install.sh": {
+      "matches_source": true,
+      "default_version": "0.1.2",
+      "sha256": "bb454d036f8900665aae901754b559b993a76baf81fb8e4c636831c9635f1580"
+    },
+    "install.ps1": {
+      "matches_source": true,
+      "default_version": "0.1.2",
+      "sha256": "212812c0b348eac8eece82f830ae314059e3b788269105e7dbbaf561d3a2f3c3"
+    }
+  },
+  "crates": {
+    "silicon-ting-client": [
+      {
+        "num": "0.1.2",
+        "yanked": false,
+        "checksum": "0c25022eef4e3c41b23ceb9b8136329338a8ad02c89e62771f5faa5603953354"
+      },
+      {
+        "num": "0.1.1",
+        "yanked": false,
+        "checksum": "81687019f54604c6ceb4f7b49590e88bb00a18c6e34e2ffa4c9674e056c5eb4d"
+      },
+      {
+        "num": "0.1.0",
+        "yanked": false,
+        "checksum": "c3d6585a145399242c2ebf79d0ede97ea353bff995cb4649c30c045b185d37c2"
+      }
+    ],
+    "silicon-ting-cli": [
+      {
+        "num": "0.1.2",
+        "yanked": false,
+        "checksum": "27d96609c970becd207b276b85924eec38cacf8b5b13bc12353211f9fe88c661"
+      },
+      {
+        "num": "0.1.1",
+        "yanked": false,
+        "checksum": "60a76a10fcc00687dc0015a12050e8eb6822cd6b8a9857530da5aa86e02cb640"
+      },
+      {
+        "num": "0.1.0",
+        "yanked": false,
+        "checksum": "4944917c151044b3a2b0d472292f8bf712885317eaf86d162bbed2428ebb39b8"
+      }
+    ]
+  },
+  "local_macos_installation": {
+    "effective_cli_version": "0.1.2",
+    "service": "system/com.silicon.ting",
+    "state": "running",
+    "effective_uid": 501,
+    "keep_alive": true,
+    "run_at_load": true,
+    "root_owned_binaries_and_plist": true,
+    "owner_only_socket_and_state": true,
+    "binary_sha256": {
+      "ting": "684962814094f1d3dce91050c04ec44f2ed6a26b49248b7e80b3a5f90282afea",
+      "ting-daemon": "6bf1400c5e9b2f56330c2cf137c3c40a1efead040330c4d1eb57c8bef7b67ed8"
+    },
+    "matches_previously_verified_native_release": true
+  },
+  "backend_health_at_audit_completion": {
+    "status": 200,
+    "body": {
+      "service": "ting",
+      "status": "ok",
+      "version": "0.1.2"
+    }
+  },
+  "limitations": [
+    "The current-account Honeycomb publication authorization is reported separately in honeycomb-012-publication-status.json.",
+    "This audit does not claim live authenticated 0.1.2 delivery or performance coverage; follow the deployment and benchmark evidence.",
+    "Tests may create ignored local build output; this audit made no production or distribution mutations."
+  ]
+}

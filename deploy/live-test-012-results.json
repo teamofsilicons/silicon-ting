@@ -21,271 +21,269 @@
       "method": "GET",
       "path": "/v1/iam",
       "status": 200,
-      "milliseconds": 743.0
+      "milliseconds": 1143.7
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 401,
-      "milliseconds": 815.2
+      "milliseconds": 808.4
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 400,
-      "milliseconds": 751.0
+      "milliseconds": 707.5
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 401,
-      "milliseconds": 828.3
+      "milliseconds": 702.0
     },
     {
       "method": "POST",
       "path": "/v1/session",
       "status": 201,
-      "milliseconds": 1334.4
+      "milliseconds": 954.0
     },
     {
       "method": "POST",
       "path": "/v1/session",
       "status": 200,
-      "milliseconds": 984.0
+      "milliseconds": 778.5
     },
     {
       "method": "POST",
       "path": "/v1/session",
       "status": 409,
-      "milliseconds": 750.7
+      "milliseconds": 724.0
     },
     {
       "method": "GET",
       "path": "/v1/me",
       "status": 200,
-      "milliseconds": 787.0
+      "milliseconds": 809.5
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/apps/tos%3Eting-probe/types",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/apps/tos%3Eting-probe/types",
+      "status": 201,
+      "milliseconds": 1682.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/apps/tos%3Eting-probe/types",
       "status": 200,
-      "milliseconds": 1786.2
+      "milliseconds": 1642.8
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/apps/tos%3Eting-probe/types",
-      "status": 200,
-      "milliseconds": 1619.3
-    },
-    {
-      "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/apps/tos%3Eting-probe/types",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/apps/tos%3Eting-probe/types",
       "status": 409,
-      "milliseconds": 1736.2
+      "milliseconds": 1610.2
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/apps/tos%3Eting-probe/types",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/apps/tos%3Eting-probe/types",
       "status": 400,
-      "milliseconds": 1694.7
+      "milliseconds": 1576.1
     },
     {
       "method": "POST",
       "path": "/v1/subscriptions",
-      "status": 200,
-      "milliseconds": 968.9
+      "status": 201,
+      "milliseconds": 945.1
     },
     {
       "method": "POST",
       "path": "/v1/subscriptions",
       "status": 403,
-      "milliseconds": 986.8
+      "milliseconds": 963.1
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks",
       "status": 201,
-      "milliseconds": 900.8
+      "milliseconds": 955.6
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks",
       "status": 201,
-      "milliseconds": 899.1
+      "milliseconds": 897.3
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 401,
-      "milliseconds": 749.5
+      "milliseconds": 776.0
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 202,
-      "milliseconds": 1111.5
+      "milliseconds": 1003.5
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 401,
-      "milliseconds": 798.7
-    },
-    {
-      "method": "POST",
-      "path": "/v1/tings",
-      "status": 202,
-      "milliseconds": 985.7
+      "milliseconds": 756.6
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 200,
-      "milliseconds": 1012.7
+      "milliseconds": 1619.7
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 1620.7
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 409,
-      "milliseconds": 949.1
+      "milliseconds": 970.2
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox/msg_8b5700c081c14008b351150d84d6102a",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox/msg_e6683541f8f448d586d758b3c535b1f5",
       "status": 200,
-      "milliseconds": 962.7
+      "milliseconds": 924.6
     },
     {
       "method": "POST",
       "path": "/v1/sent/query",
       "status": 200,
-      "milliseconds": 912.7
+      "milliseconds": 994.4
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks",
       "status": 200,
-      "milliseconds": 884.8
+      "milliseconds": 905.7
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks",
       "status": 200,
-      "milliseconds": 899.6
+      "milliseconds": 957.1
     },
     {
       "method": "PUT",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/preferences",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/preferences",
       "status": 200,
-      "milliseconds": 893.0
+      "milliseconds": 925.8
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 202,
-      "milliseconds": 1056.9
+      "milliseconds": 954.0
     },
     {
       "method": "DELETE",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/preferences",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/preferences",
       "status": 200,
-      "milliseconds": 875.9
+      "milliseconds": 926.9
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox/msg_cd6883f09c09424297eeef231d88b834",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox/msg_1ffe018b87aa4323b0e354d2bc7726e5",
       "status": 200,
-      "milliseconds": 921.2
+      "milliseconds": 922.9
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox",
       "status": 200,
-      "milliseconds": 906.6
+      "milliseconds": 899.1
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox",
       "status": 200,
-      "milliseconds": 1152.0
+      "milliseconds": 933.0
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox",
       "status": 400,
-      "milliseconds": 1898.9
+      "milliseconds": 894.9
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox/read",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox/read",
       "status": 404,
-      "milliseconds": 990.1
+      "milliseconds": 914.1
     },
     {
       "method": "GET",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/inbox/msg_cd6883f09c09424297eeef231d88b834",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/inbox/msg_1ffe018b87aa4323b0e354d2bc7726e5",
       "status": 200,
-      "milliseconds": 888.2
+      "milliseconds": 970.5
     },
     {
       "method": "POST",
       "path": "/v1/subscriptions/revoke",
       "status": 200,
-      "milliseconds": 907.1
+      "milliseconds": 956.7
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 403,
-      "milliseconds": 937.4
+      "milliseconds": 956.9
     },
     {
       "method": "POST",
       "path": "/v1/tings",
       "status": 200,
-      "milliseconds": 939.2
+      "milliseconds": 944.4
     },
     {
       "method": "DELETE",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks/hook_8a8e3bc92e334cb69d9e655dc3670b3f",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks/hook_7cfe720a32814e14a8a9e23a76556bb3",
       "status": 200,
-      "milliseconds": 924.9
+      "milliseconds": 911.5
     },
     {
       "method": "DELETE",
-      "path": "/v1/orgs/01a0c836-f7bd-7bb0-b8cd-49f155c857cd/webhooks/hook_c9ab08b8a7d3493186b6cbbfedc8b7ab",
+      "path": "/v1/orgs/01a0c903-1127-78a1-8f58-f6b6779ed082/webhooks/hook_6e86adda23bb48deb25a80e9971daabc",
       "status": 200,
-      "milliseconds": 886.4
+      "milliseconds": 985.7
     },
     {
       "method": "POST",
       "path": "/v1/bugs",
       "status": 201,
-      "milliseconds": 837.2
+      "milliseconds": 830.9
     },
     {
       "method": "DELETE",
       "path": "/v1/session",
       "status": 200,
-      "milliseconds": 903.0
+      "milliseconds": 937.7
     },
     {
       "method": "GET",
       "path": "/v1/me",
       "status": 401,
-      "milliseconds": 694.4
+      "milliseconds": 716.7
     }
   ],
-  "completed_at": "2026-09-22T08:52:57Z",
+  "completed_at": "2026-09-22T12:16:32Z",
   "complete": true,
   "http_send_latency": {
     "samples": 5,
-    "p50_ms": 1012.7,
-    "p95_ms": 1111.5,
+    "p50_ms": 1003.5,
+    "p95_ms": 1620.7,
     "conditions": "Proof ready; client on developer machine; fresh HTTP connection per request; includes IAM verification and durable acceptance. Small integration sample, not a load test."
   },
-  "backend_version": "0.1.1",
-  "backend_commit": "397feeab9aadbae110a915a4c59e3af8c367c485",
-  "fixture_generation": 2,
-  "fixture_revision": 8
+  "backend_commit": "a86971a08089bd212810b2df49f3f13bd41e83ac",
+  "backend_version": "0.1.2"
 }

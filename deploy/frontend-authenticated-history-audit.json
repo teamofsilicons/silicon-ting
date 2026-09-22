@@ -1,0 +1,1597 @@
+{
+  "completed_at": "2026-09-22T09:43:24.634562+00:00",
+  "mode": "Existing authenticated Vercel CLI API; GET requests only",
+  "deployments": [
+    {
+      "id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+      "url": "silicon-ting-mozitqh44-shubham-guptas-projects-7ecb7811.vercel.app",
+      "state": "READY",
+      "source_files": [
+        {
+          "path": "/src/README.md",
+          "uid": "af08f6a502fc4ffdf625de3abfc4bbbcc6f1ac85"
+        },
+        {
+          "path": "/src/dist/assets/index-BA5lsSbP.js",
+          "uid": "034daf5a840e69c53c66a2d25d04ff148ff808a3"
+        },
+        {
+          "path": "/src/dist/assets/index-CRQKiShF.css",
+          "uid": "ae25f13943c6c52d72f5c7c70f89354a91566ef5"
+        },
+        {
+          "path": "/src/dist/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/dist/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/dist/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/dist/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/dist/index.html",
+          "uid": "f1bc8c1b8a4fc99d0b17d7ab5daf4535814345f9"
+        },
+        {
+          "path": "/src/dist/install.ps1",
+          "uid": "1776906560c8b2214cf4ecd3e4cafa07ab7b4230"
+        },
+        {
+          "path": "/src/dist/install.sh",
+          "uid": "11bd0bc26c9f1a759b7b17f8a6ec29c65f46aa5a"
+        },
+        {
+          "path": "/src/public/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/public/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/public/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/public/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/public/install.ps1",
+          "uid": "1df6e527686001a4955dca17eff47bebec6191d7"
+        },
+        {
+          "path": "/src/public/install.sh",
+          "uid": "57d9efa642f8cc3ecfbd602cc985bb60623a11d0"
+        },
+        {
+          "path": "/src/index.html",
+          "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0"
+        },
+        {
+          "path": "/src/package-lock.json",
+          "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3"
+        },
+        {
+          "path": "/src/package.json",
+          "uid": "28522a6ee9930d3c735f339ae883e10ebec84898"
+        },
+        {
+          "path": "/src/scripts/browser-check.mjs",
+          "uid": "1525d4c49ffc51630cb012e54a69abfc6b95b5c9"
+        },
+        {
+          "path": "/src/src/App.tsx",
+          "uid": "581455a15942e32542939488e610586890c6fc86"
+        },
+        {
+          "path": "/src/src/api.ts",
+          "uid": "6ba1e2f504be2bb8b4e5242c84cb5d33e3f2bfe8"
+        },
+        {
+          "path": "/src/src/index.tsx",
+          "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9"
+        },
+        {
+          "path": "/src/src/styles.css",
+          "uid": "149458c01a81afaf3415953d1e8fa275d0871946"
+        },
+        {
+          "path": "/src/src/telemetry.ts",
+          "uid": "0e11c9edfa808bc179548bb544a2a9b1a023d613"
+        },
+        {
+          "path": "/src/src/utils.test.ts",
+          "uid": "34df9385e3cb875e1e4df8949d2469ccc5aa7fb4"
+        },
+        {
+          "path": "/src/src/utils.ts",
+          "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082"
+        },
+        {
+          "path": "/src/tsconfig.json",
+          "uid": "ece957976451887b1b1c71b6e0746922bea058b3"
+        },
+        {
+          "path": "/src/vercel.json",
+          "uid": "79409a0ff27cc4da3e2a822804cb246107e331be"
+        },
+        {
+          "path": "/src/vite.config.ts",
+          "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74"
+        }
+      ],
+      "build_environment": []
+    },
+    {
+      "id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+      "url": "silicon-ting-51igc4tak-shubham-guptas-projects-7ecb7811.vercel.app",
+      "state": "READY",
+      "source_files": [
+        {
+          "path": "/src/README.md",
+          "uid": "af08f6a502fc4ffdf625de3abfc4bbbcc6f1ac85"
+        },
+        {
+          "path": "/src/dist/assets/index-CRQKiShF.css",
+          "uid": "ae25f13943c6c52d72f5c7c70f89354a91566ef5"
+        },
+        {
+          "path": "/src/dist/assets/index-CVjo_Mtl.js",
+          "uid": "33e681b91989a8f9cdf6eb48afd8bae62a5cf9af"
+        },
+        {
+          "path": "/src/dist/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/dist/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/dist/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/dist/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/dist/index.html",
+          "uid": "4177b9a40752de01a4a3f9e0571bbf5a287bfd31"
+        },
+        {
+          "path": "/src/dist/install.ps1",
+          "uid": "1776906560c8b2214cf4ecd3e4cafa07ab7b4230"
+        },
+        {
+          "path": "/src/dist/install.sh",
+          "uid": "11bd0bc26c9f1a759b7b17f8a6ec29c65f46aa5a"
+        },
+        {
+          "path": "/src/public/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/public/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/public/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/public/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/public/install.ps1",
+          "uid": "1776906560c8b2214cf4ecd3e4cafa07ab7b4230"
+        },
+        {
+          "path": "/src/public/install.sh",
+          "uid": "11bd0bc26c9f1a759b7b17f8a6ec29c65f46aa5a"
+        },
+        {
+          "path": "/src/index.html",
+          "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0"
+        },
+        {
+          "path": "/src/package-lock.json",
+          "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3"
+        },
+        {
+          "path": "/src/package.json",
+          "uid": "28522a6ee9930d3c735f339ae883e10ebec84898"
+        },
+        {
+          "path": "/src/scripts/browser-check.mjs",
+          "uid": "6c6d88ea5a43c80ad955a831069b03adf010611c"
+        },
+        {
+          "path": "/src/src/App.tsx",
+          "uid": "581455a15942e32542939488e610586890c6fc86"
+        },
+        {
+          "path": "/src/src/api.ts",
+          "uid": "6ba1e2f504be2bb8b4e5242c84cb5d33e3f2bfe8"
+        },
+        {
+          "path": "/src/src/index.tsx",
+          "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9"
+        },
+        {
+          "path": "/src/src/styles.css",
+          "uid": "149458c01a81afaf3415953d1e8fa275d0871946"
+        },
+        {
+          "path": "/src/src/telemetry.ts",
+          "uid": "0e11c9edfa808bc179548bb544a2a9b1a023d613"
+        },
+        {
+          "path": "/src/src/utils.test.ts",
+          "uid": "34df9385e3cb875e1e4df8949d2469ccc5aa7fb4"
+        },
+        {
+          "path": "/src/src/utils.ts",
+          "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082"
+        },
+        {
+          "path": "/src/tsconfig.json",
+          "uid": "ece957976451887b1b1c71b6e0746922bea058b3"
+        },
+        {
+          "path": "/src/vercel.json",
+          "uid": "79409a0ff27cc4da3e2a822804cb246107e331be"
+        },
+        {
+          "path": "/src/vite.config.ts",
+          "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74"
+        }
+      ],
+      "build_environment": []
+    },
+    {
+      "id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+      "url": "silicon-ting-p5z8nttfw-shubham-guptas-projects-7ecb7811.vercel.app",
+      "state": "READY",
+      "source_files": [
+        {
+          "path": "/src/README.md",
+          "uid": "fc52ca406ed0bc371841e1e26bebf489efd7f429"
+        },
+        {
+          "path": "/src/dist/assets/index-CRQKiShF.css",
+          "uid": "ae25f13943c6c52d72f5c7c70f89354a91566ef5"
+        },
+        {
+          "path": "/src/dist/assets/index-DVq7I9DJ.js",
+          "uid": "356841482e5cc3c1a0e8d2b0fea1b9cbfd1c888d"
+        },
+        {
+          "path": "/src/dist/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/dist/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/dist/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/dist/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/dist/index.html",
+          "uid": "af40c96970c72a3d46f3c6d26b0e7d36831a5ecc"
+        },
+        {
+          "path": "/src/dist/install.sh",
+          "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817"
+        },
+        {
+          "path": "/src/public/docs/api.md",
+          "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d"
+        },
+        {
+          "path": "/src/public/docs/cli.md",
+          "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3"
+        },
+        {
+          "path": "/src/public/docs/understanding.md",
+          "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e"
+        },
+        {
+          "path": "/src/public/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/public/install.sh",
+          "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817"
+        },
+        {
+          "path": "/src/index.html",
+          "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0"
+        },
+        {
+          "path": "/src/package-lock.json",
+          "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3"
+        },
+        {
+          "path": "/src/package.json",
+          "uid": "28522a6ee9930d3c735f339ae883e10ebec84898"
+        },
+        {
+          "path": "/src/scripts/browser-check.mjs",
+          "uid": "6c6d88ea5a43c80ad955a831069b03adf010611c"
+        },
+        {
+          "path": "/src/src/App.tsx",
+          "uid": "a6d48eeed61e9d48d4750aef6c066401e91aee7d"
+        },
+        {
+          "path": "/src/src/api.ts",
+          "uid": "6ba1e2f504be2bb8b4e5242c84cb5d33e3f2bfe8"
+        },
+        {
+          "path": "/src/src/index.tsx",
+          "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9"
+        },
+        {
+          "path": "/src/src/styles.css",
+          "uid": "149458c01a81afaf3415953d1e8fa275d0871946"
+        },
+        {
+          "path": "/src/src/utils.test.ts",
+          "uid": "78bea077ba63b7dea413c8cc3f2e27f2e2875aac"
+        },
+        {
+          "path": "/src/src/utils.ts",
+          "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082"
+        },
+        {
+          "path": "/src/tsconfig.json",
+          "uid": "ece957976451887b1b1c71b6e0746922bea058b3"
+        },
+        {
+          "path": "/src/vercel.json",
+          "uid": "79409a0ff27cc4da3e2a822804cb246107e331be"
+        },
+        {
+          "path": "/src/vite.config.ts",
+          "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74"
+        }
+      ],
+      "build_environment": []
+    },
+    {
+      "id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+      "url": "silicon-ting-34hzbizvi-shubham-guptas-projects-7ecb7811.vercel.app",
+      "state": "READY",
+      "source_files": [
+        {
+          "path": "/src/README.md",
+          "uid": "fc52ca406ed0bc371841e1e26bebf489efd7f429"
+        },
+        {
+          "path": "/src/dist/assets/index-BUQWG7PM.js",
+          "uid": "5daab224d46b827da34792a845dc5522778c5255"
+        },
+        {
+          "path": "/src/dist/assets/index-CRQKiShF.css",
+          "uid": "ae25f13943c6c52d72f5c7c70f89354a91566ef5"
+        },
+        {
+          "path": "/src/dist/docs/api.md",
+          "uid": "9fe7c5d5449bedea48e9ee6f87c7301efae1b7d9"
+        },
+        {
+          "path": "/src/dist/docs/cli.md",
+          "uid": "2fc5d0ea096161b75a4a90210c62fc6857a78668"
+        },
+        {
+          "path": "/src/dist/docs/understanding.md",
+          "uid": "d956515a6336f25bd47c96cfec7635167c75ed6a"
+        },
+        {
+          "path": "/src/dist/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/dist/index.html",
+          "uid": "12173426ea014a905ac46e4dd14efb753b5e502c"
+        },
+        {
+          "path": "/src/dist/install.sh",
+          "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817"
+        },
+        {
+          "path": "/src/public/docs/api.md",
+          "uid": "9fe7c5d5449bedea48e9ee6f87c7301efae1b7d9"
+        },
+        {
+          "path": "/src/public/docs/cli.md",
+          "uid": "2fc5d0ea096161b75a4a90210c62fc6857a78668"
+        },
+        {
+          "path": "/src/public/docs/understanding.md",
+          "uid": "d956515a6336f25bd47c96cfec7635167c75ed6a"
+        },
+        {
+          "path": "/src/public/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/public/install.sh",
+          "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817"
+        },
+        {
+          "path": "/src/index.html",
+          "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0"
+        },
+        {
+          "path": "/src/package-lock.json",
+          "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3"
+        },
+        {
+          "path": "/src/package.json",
+          "uid": "28522a6ee9930d3c735f339ae883e10ebec84898"
+        },
+        {
+          "path": "/src/scripts/browser-check.mjs",
+          "uid": "6c6d88ea5a43c80ad955a831069b03adf010611c"
+        },
+        {
+          "path": "/src/src/App.tsx",
+          "uid": "155f059cc19efd27efa5c27c073cb85417503b31"
+        },
+        {
+          "path": "/src/src/api.ts",
+          "uid": "6ba1e2f504be2bb8b4e5242c84cb5d33e3f2bfe8"
+        },
+        {
+          "path": "/src/src/index.tsx",
+          "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9"
+        },
+        {
+          "path": "/src/src/styles.css",
+          "uid": "149458c01a81afaf3415953d1e8fa275d0871946"
+        },
+        {
+          "path": "/src/src/utils.test.ts",
+          "uid": "78bea077ba63b7dea413c8cc3f2e27f2e2875aac"
+        },
+        {
+          "path": "/src/src/utils.ts",
+          "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082"
+        },
+        {
+          "path": "/src/tsconfig.json",
+          "uid": "ece957976451887b1b1c71b6e0746922bea058b3"
+        },
+        {
+          "path": "/src/vercel.json",
+          "uid": "79409a0ff27cc4da3e2a822804cb246107e331be"
+        },
+        {
+          "path": "/src/vite.config.ts",
+          "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74"
+        }
+      ],
+      "build_environment": []
+    },
+    {
+      "id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+      "url": "silicon-ting-r3u9k3evz-shubham-guptas-projects-7ecb7811.vercel.app",
+      "state": "READY",
+      "source_files": [
+        {
+          "path": "/src/README.md",
+          "uid": "76c1dc1ee791e476ec36b8ddbdf30bbd79f35c59"
+        },
+        {
+          "path": "/src/dist/assets/index-BsCLkip7.js",
+          "uid": "52d9e9df180eb53ae89c7d56343d934af3433fb5"
+        },
+        {
+          "path": "/src/dist/assets/index-CuNR4SKi.css",
+          "uid": "eae24f660ee86c2e4e8ee09651291e2417b99b02"
+        },
+        {
+          "path": "/src/dist/docs/api.md",
+          "uid": "37053b196e5d804ec2b86dde57407fc38f288404"
+        },
+        {
+          "path": "/src/dist/docs/cli.md",
+          "uid": "c1aee99f7f3edaaba14faebb12589229d499b09f"
+        },
+        {
+          "path": "/src/dist/docs/understanding.md",
+          "uid": "c8c6ddc9577c640ce3796cdf14680257fe99e306"
+        },
+        {
+          "path": "/src/dist/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/dist/index.html",
+          "uid": "3589b919bbbc3d75a4c30ed416a244d709578172"
+        },
+        {
+          "path": "/src/public/docs/api.md",
+          "uid": "37053b196e5d804ec2b86dde57407fc38f288404"
+        },
+        {
+          "path": "/src/public/docs/cli.md",
+          "uid": "c1aee99f7f3edaaba14faebb12589229d499b09f"
+        },
+        {
+          "path": "/src/public/docs/understanding.md",
+          "uid": "c8c6ddc9577c640ce3796cdf14680257fe99e306"
+        },
+        {
+          "path": "/src/public/favicon.svg",
+          "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f"
+        },
+        {
+          "path": "/src/public/install.sh",
+          "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817"
+        },
+        {
+          "path": "/src/index.html",
+          "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0"
+        },
+        {
+          "path": "/src/package-lock.json",
+          "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3"
+        },
+        {
+          "path": "/src/package.json",
+          "uid": "28522a6ee9930d3c735f339ae883e10ebec84898"
+        },
+        {
+          "path": "/src/scripts/browser-check.mjs",
+          "uid": "6c6d88ea5a43c80ad955a831069b03adf010611c"
+        },
+        {
+          "path": "/src/src/App.tsx",
+          "uid": "75eaf98f074a14226ae0587ccc23459b028692c9"
+        },
+        {
+          "path": "/src/src/api.ts",
+          "uid": "af22ad309314747f0aad63e291846b8548a251f9"
+        },
+        {
+          "path": "/src/src/index.tsx",
+          "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9"
+        },
+        {
+          "path": "/src/src/styles.css",
+          "uid": "149458c01a81afaf3415953d1e8fa275d0871946"
+        },
+        {
+          "path": "/src/src/utils.test.ts",
+          "uid": "78bea077ba63b7dea413c8cc3f2e27f2e2875aac"
+        },
+        {
+          "path": "/src/src/utils.ts",
+          "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082"
+        },
+        {
+          "path": "/src/tsconfig.json",
+          "uid": "ece957976451887b1b1c71b6e0746922bea058b3"
+        },
+        {
+          "path": "/src/vercel.json",
+          "uid": "79409a0ff27cc4da3e2a822804cb246107e331be"
+        },
+        {
+          "path": "/src/vite.config.ts",
+          "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74"
+        }
+      ],
+      "build_environment": []
+    }
+  ],
+  "unique_uploaded_files_scanned": 50,
+  "uploaded_file_references_scanned": 140,
+  "files": [
+    {
+      "uid": "af08f6a502fc4ffdf625de3abfc4bbbcc6f1ac85",
+      "sha256": "d7cd951c139232508974ff02e84c604179d69b48e6314ce88b85ac9e2f414197",
+      "bytes": 1758,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/README.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/README.md"
+        }
+      ]
+    },
+    {
+      "uid": "034daf5a840e69c53c66a2d25d04ff148ff808a3",
+      "sha256": "a75902a7666242e8cb6bc532bfa0f873b2b87afb7d75b17efcf9dc98e2c08079",
+      "bytes": 59857,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/assets/index-BA5lsSbP.js"
+        }
+      ]
+    },
+    {
+      "uid": "ae25f13943c6c52d72f5c7c70f89354a91566ef5",
+      "sha256": "ba0c54a4da92529ff96bf74182e379ae0ef7b9fc2160d2527b62e8568ffb8318",
+      "bytes": 34405,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/assets/index-CRQKiShF.css"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/assets/index-CRQKiShF.css"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/assets/index-CRQKiShF.css"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/assets/index-CRQKiShF.css"
+        }
+      ]
+    },
+    {
+      "uid": "7bae2bb4e37ca132677d85f93fe35dda8f2ae04d",
+      "sha256": "08db3538e65813d1474ff30106811b3b85910e45db81892aa0b8b66b145bf2e9",
+      "bytes": 46112,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/public/docs/api.md"
+        }
+      ]
+    },
+    {
+      "uid": "a3e589bd07bf0d48b4d8f94855d3b862d6b3f0c3",
+      "sha256": "7638b03a6d3dc832daea067a6be3aea59eacc1246fd6da4241a0ad626865dfa8",
+      "bytes": 38998,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/public/docs/cli.md"
+        }
+      ]
+    },
+    {
+      "uid": "80040974bc5d645d3a8e1b2460d73ea8feb3008e",
+      "sha256": "6afa2838fa3c849198d26b50bfaff412b6a231b634c20b17fc02f19b1866a80e",
+      "bytes": 7531,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/public/docs/understanding.md"
+        }
+      ]
+    },
+    {
+      "uid": "182bcb44f409551a5b89ddecbd605fedf71a748f",
+      "sha256": "6d2188898b7a9729ea9be55d247ed34cca6d109150e96372370e84f60755bf7c",
+      "bytes": 253,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/public/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/public/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/favicon.svg"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/public/favicon.svg"
+        }
+      ]
+    },
+    {
+      "uid": "f1bc8c1b8a4fc99d0b17d7ab5daf4535814345f9",
+      "sha256": "c7ae3ce376c0cb7bd8d8cfe4b48307c1003cccb27f581ac74ede27f525a916fc",
+      "bytes": 700,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "1776906560c8b2214cf4ecd3e4cafa07ab7b4230",
+      "sha256": "03cfc55903a85328feddbc7bddf759c62ae67aff0360fac530e2f410529fb765",
+      "bytes": 3147,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/install.ps1"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/install.ps1"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/install.ps1"
+        }
+      ]
+    },
+    {
+      "uid": "11bd0bc26c9f1a759b7b17f8a6ec29c65f46aa5a",
+      "sha256": "69c9d6d3ec1d0f95421206a6c8061326858c81b81e3b63766b693f971e1c7ebf",
+      "bytes": 3978,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/dist/install.sh"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/install.sh"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/public/install.sh"
+        }
+      ]
+    },
+    {
+      "uid": "1df6e527686001a4955dca17eff47bebec6191d7",
+      "sha256": "de3040ebd4170a23ff20c748825f054d737db974c5e24649a16f254d11bc8d4e",
+      "bytes": 3147,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/install.ps1"
+        }
+      ]
+    },
+    {
+      "uid": "57d9efa642f8cc3ecfbd602cc985bb60623a11d0",
+      "sha256": "8d4ed72ec30bcae8bcf50d622ccca4e08c56c81a12d477be87ff0a72d3618011",
+      "bytes": 3978,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/public/install.sh"
+        }
+      ]
+    },
+    {
+      "uid": "f60c12de16b65c1dce76a306b91860c5cf85abb0",
+      "sha256": "dd4e0e30f974fe60cd22f267d6eb1d03f33783429b87da98ad9344b70910f961",
+      "bytes": 598,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/index.html"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/index.html"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/index.html"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/index.html"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "5828579b4e8bab5560445aa99884eb7c1afca8d3",
+      "sha256": "cc7df31087b28b801ecf3a119e6c8208eda12d582f7495162e099f334268c078",
+      "bytes": 66527,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/package-lock.json"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/package-lock.json"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/package-lock.json"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/package-lock.json"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/package-lock.json"
+        }
+      ]
+    },
+    {
+      "uid": "28522a6ee9930d3c735f339ae883e10ebec84898",
+      "sha256": "2d7332316cafa7621e011b9f479568ed278fae6b5054c3fcd3010e5d2e75f3e7",
+      "bytes": 640,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/package.json"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/package.json"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/package.json"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/package.json"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/package.json"
+        }
+      ]
+    },
+    {
+      "uid": "1525d4c49ffc51630cb012e54a69abfc6b95b5c9",
+      "sha256": "f9848ebfc0a167930ad59abf721f407ae593217d199e67bff9d69718ba0487b5",
+      "bytes": 4852,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/scripts/browser-check.mjs"
+        }
+      ]
+    },
+    {
+      "uid": "581455a15942e32542939488e610586890c6fc86",
+      "sha256": "3ec718fc1e7eddc9cbbbc662fb62012b83ded610bfd1496dc6865963f2635959",
+      "bytes": 47646,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/App.tsx"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "uid": "6ba1e2f504be2bb8b4e5242c84cb5d33e3f2bfe8",
+      "sha256": "e52fd17175c651693b18ae7136d937db87382068ada6cce7e78b75400a0043ec",
+      "bytes": 2374,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/api.ts"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/api.ts"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/api.ts"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/api.ts"
+        }
+      ]
+    },
+    {
+      "uid": "b674d2bf31d77aa78b4be6d699284762cd1b17c9",
+      "sha256": "955f47b7b5972ac30b11e2b7b9f6866061fc4643dc9b7d2391d14f07ff9d8bf3",
+      "bytes": 144,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/index.tsx"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/index.tsx"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/index.tsx"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/index.tsx"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/index.tsx"
+        }
+      ]
+    },
+    {
+      "uid": "149458c01a81afaf3415953d1e8fa275d0871946",
+      "sha256": "7ed1f09c10c2e1580e73594471cb178d52d58198f9d4187d305f0c4ceb761041",
+      "bytes": 34554,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/styles.css"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/styles.css"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/styles.css"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/styles.css"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/styles.css"
+        }
+      ]
+    },
+    {
+      "uid": "0e11c9edfa808bc179548bb544a2a9b1a023d613",
+      "sha256": "499c4936287fe153bdcfc29096ed9217abb31d918d9b7a71f664091df860a013",
+      "bytes": 1220,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/telemetry.ts"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/telemetry.ts"
+        }
+      ]
+    },
+    {
+      "uid": "34df9385e3cb875e1e4df8949d2469ccc5aa7fb4",
+      "sha256": "7c434d47bf1743e423800d8e55a21a09b6052af4c3d157adc11084f9d091e129",
+      "bytes": 2276,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/utils.test.ts"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/utils.test.ts"
+        }
+      ]
+    },
+    {
+      "uid": "54d9d4404a133b7bac6b188ddc1297c5817c1082",
+      "sha256": "0b81befd0cd1c0ff5f9043a48c91449b5a353d19b57faff434bdbc4c1996a331",
+      "bytes": 1830,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/src/utils.ts"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/src/utils.ts"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/utils.ts"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/utils.ts"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/utils.ts"
+        }
+      ]
+    },
+    {
+      "uid": "ece957976451887b1b1c71b6e0746922bea058b3",
+      "sha256": "d0a98ff3d3eb242db48f5f12d524a898eab7c16286017ccb230ed9e1234d9bc9",
+      "bytes": 373,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/tsconfig.json"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/tsconfig.json"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/tsconfig.json"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/tsconfig.json"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/tsconfig.json"
+        }
+      ]
+    },
+    {
+      "uid": "79409a0ff27cc4da3e2a822804cb246107e331be",
+      "sha256": "1c6208780e3c069cd5b7271a587ab3b4a412798b025a4869cdbbb9202039cca6",
+      "bytes": 943,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/vercel.json"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/vercel.json"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/vercel.json"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/vercel.json"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/vercel.json"
+        }
+      ]
+    },
+    {
+      "uid": "b802ff9cb64c62ae273edc94fd5e39e3997f6c74",
+      "sha256": "05f37fabfe1d0a99d930c73b39bc8f473777c97c250076992ff37b5a0d10b5d9",
+      "bytes": 271,
+      "locations": [
+        {
+          "deployment_id": "dpl_GthJioE3gZimHvuJnb46UauxXzez",
+          "path": "/src/vite.config.ts"
+        },
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/vite.config.ts"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/vite.config.ts"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/vite.config.ts"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/vite.config.ts"
+        }
+      ]
+    },
+    {
+      "uid": "33e681b91989a8f9cdf6eb48afd8bae62a5cf9af",
+      "sha256": "867d8141bd1543c1e04741531863d93ed7d0e07c45b020dc2a22cb78f3f16156",
+      "bytes": 66983,
+      "locations": [
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/assets/index-CVjo_Mtl.js"
+        }
+      ]
+    },
+    {
+      "uid": "4177b9a40752de01a4a3f9e0571bbf5a287bfd31",
+      "sha256": "1daed06e795216491befe2bcfcab287900918e907bcd30bcff8657340aa096c3",
+      "bytes": 700,
+      "locations": [
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/dist/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "6c6d88ea5a43c80ad955a831069b03adf010611c",
+      "sha256": "165c93771fe421ed66550b5a59c6e864ef23ad1a78ba2156c0399c25f70d70a6",
+      "bytes": 4833,
+      "locations": [
+        {
+          "deployment_id": "dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa",
+          "path": "/src/scripts/browser-check.mjs"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/scripts/browser-check.mjs"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/scripts/browser-check.mjs"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/scripts/browser-check.mjs"
+        }
+      ]
+    },
+    {
+      "uid": "fc52ca406ed0bc371841e1e26bebf489efd7f429",
+      "sha256": "8c2dac109cbcfea3254ca3e493a74927f0d3ca2f871dcd91934b431965670cc1",
+      "bytes": 1518,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/README.md"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/README.md"
+        }
+      ]
+    },
+    {
+      "uid": "356841482e5cc3c1a0e8d2b0fea1b9cbfd1c888d",
+      "sha256": "ab5ea7aa54be1dbc744f5d655800c0d79354536b14d1753d788b67b806c01a6e",
+      "bytes": 66380,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/assets/index-DVq7I9DJ.js"
+        }
+      ]
+    },
+    {
+      "uid": "af40c96970c72a3d46f3c6d26b0e7d36831a5ecc",
+      "sha256": "7a93952b068cfa7dda8630077c61f692b1864ae6a022eb9812f0a634ed77fae9",
+      "bytes": 700,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "c9dd8fb2619016ca02160ee874dfeedc7a5c7817",
+      "sha256": "076e76e97b89b5550b2f6fcc3f5b13bb61b75b33656d59922f1788ef4804275a",
+      "bytes": 3967,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/dist/install.sh"
+        },
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/public/install.sh"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/install.sh"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/public/install.sh"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/public/install.sh"
+        }
+      ]
+    },
+    {
+      "uid": "a6d48eeed61e9d48d4750aef6c066401e91aee7d",
+      "sha256": "51f738294c21b461dbf912d94de9856daf08e231ac410aa68226756bcaa73f2f",
+      "bytes": 47525,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "uid": "78bea077ba63b7dea413c8cc3f2e27f2e2875aac",
+      "sha256": "6011f1ef86d6109048f4a8e0e136d1435ea16e7767c475f8bbdd42ec4b066943",
+      "bytes": 958,
+      "locations": [
+        {
+          "deployment_id": "dpl_Cr95szAkZuEEadjoQ39GFdcofnKF",
+          "path": "/src/src/utils.test.ts"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/utils.test.ts"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/utils.test.ts"
+        }
+      ]
+    },
+    {
+      "uid": "5daab224d46b827da34792a845dc5522778c5255",
+      "sha256": "0b98b3043d6fb25073f375037e720a8c27b099431567657e99850fc3d7d5f97e",
+      "bytes": 66371,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/assets/index-BUQWG7PM.js"
+        }
+      ]
+    },
+    {
+      "uid": "9fe7c5d5449bedea48e9ee6f87c7301efae1b7d9",
+      "sha256": "ae02a33a3423b703aa7bdcb0664259110b0c5bb28643747cca88801a93ef5fbb",
+      "bytes": 45930,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/public/docs/api.md"
+        }
+      ]
+    },
+    {
+      "uid": "2fc5d0ea096161b75a4a90210c62fc6857a78668",
+      "sha256": "934772b5b7fe40cae0a1fce91da11a3134b93eba281e7ccace77894e759a2a01",
+      "bytes": 38811,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/public/docs/cli.md"
+        }
+      ]
+    },
+    {
+      "uid": "d956515a6336f25bd47c96cfec7635167c75ed6a",
+      "sha256": "4cbd3bbe1baec6c519c2a041fb58bb67b5407f1dc872e31179341601c67609ba",
+      "bytes": 7655,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/public/docs/understanding.md"
+        }
+      ]
+    },
+    {
+      "uid": "12173426ea014a905ac46e4dd14efb753b5e502c",
+      "sha256": "00454caf50c8f46cee13253f36646e33dcd58f0a8fc91db991e2cf0f16ab2cbc",
+      "bytes": 700,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/dist/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "155f059cc19efd27efa5c27c073cb85417503b31",
+      "sha256": "0f7288a5a0072894736314dd26e501b4e8d21fc57574de14c2c0c8859f2a51ea",
+      "bytes": 47516,
+      "locations": [
+        {
+          "deployment_id": "dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf",
+          "path": "/src/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "uid": "76c1dc1ee791e476ec36b8ddbdf30bbd79f35c59",
+      "sha256": "75c8dcda1b779c9d5f4e754abb28537278f0365599e46ecd19d0b770d197fb35",
+      "bytes": 1294,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/README.md"
+        }
+      ]
+    },
+    {
+      "uid": "52d9e9df180eb53ae89c7d56343d934af3433fb5",
+      "sha256": "8a56fe99f0730c93e9ad922c6ab4c59ec551ce424d54b60f34270afb34140dd8",
+      "bytes": 59050,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/assets/index-BsCLkip7.js"
+        }
+      ]
+    },
+    {
+      "uid": "eae24f660ee86c2e4e8ee09651291e2417b99b02",
+      "sha256": "da552ccc1d01fa44909fa3ad223efc765b6aa00b93366260a24bba4b2d348c8e",
+      "bytes": 33706,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/assets/index-CuNR4SKi.css"
+        }
+      ]
+    },
+    {
+      "uid": "37053b196e5d804ec2b86dde57407fc38f288404",
+      "sha256": "cf668d6bc8873b52edd10bc91b6c7e9613495b1d2659f22378182588d59c87b6",
+      "bytes": 45663,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/docs/api.md"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/public/docs/api.md"
+        }
+      ]
+    },
+    {
+      "uid": "c1aee99f7f3edaaba14faebb12589229d499b09f",
+      "sha256": "d327a9a056edf19eaa5ad9e1af8c5d2010f790fbcd6f83baea8cc4a63d0ce822",
+      "bytes": 38688,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/docs/cli.md"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/public/docs/cli.md"
+        }
+      ]
+    },
+    {
+      "uid": "c8c6ddc9577c640ce3796cdf14680257fe99e306",
+      "sha256": "688063ae186b0e3a9042b55595dab443e43dcdeecdfcbddd1f19d279ffe270be",
+      "bytes": 7344,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/docs/understanding.md"
+        },
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/public/docs/understanding.md"
+        }
+      ]
+    },
+    {
+      "uid": "3589b919bbbc3d75a4c30ed416a244d709578172",
+      "sha256": "57df77c1a525780296277e40a271ae30ef41bd45c4e9e15e5a677279b2eb7280",
+      "bytes": 700,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/dist/index.html"
+        }
+      ]
+    },
+    {
+      "uid": "75eaf98f074a14226ae0587ccc23459b028692c9",
+      "sha256": "dc29570dcec01ca1227b9e867719238c6ca78f46a239d3b6d49da49dd4eb7743",
+      "bytes": 46241,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "uid": "af22ad309314747f0aad63e291846b8548a251f9",
+      "sha256": "94e095809022f8591ff29317be145389289a6b03399e8359993b654a8a36a04f",
+      "bytes": 2018,
+      "locations": [
+        {
+          "deployment_id": "dpl_1tTVV2ufuZ48R4AoMaYYwvZWWoNz",
+          "path": "/src/src/api.ts"
+        }
+      ]
+    }
+  ],
+  "import_meta_env_references": [
+    {
+      "location": "vercel-upload:dpl_GthJioE3gZimHvuJnb46UauxXzez:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_GthJioE3gZimHvuJnb46UauxXzez:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_GthJioE3gZimHvuJnb46UauxXzez:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_GthJioE3gZimHvuJnb46UauxXzez:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_4FJpMm6svkKF8yUdBU6sVUTdQpWa:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_Cr95szAkZuEEadjoQ39GFdcofnKF:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_Cr95szAkZuEEadjoQ39GFdcofnKF:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_Cr95szAkZuEEadjoQ39GFdcofnKF:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_Cr95szAkZuEEadjoQ39GFdcofnKF:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf:/src/src/App.tsx",
+      "variable": "VITE_SS_ANALYTICS_TABLE"
+    },
+    {
+      "location": "vercel-upload:dpl_92NX4TaE1NjpfZdp1vSLtiwTmduf:/src/src/App.tsx",
+      "variable": "VITE_SS_EVENTS_TABLE"
+    }
+  ],
+  "bare_import_meta_env_locations": [],
+  "findings": [],
+  "known_credential_fingerprints_compared": 29,
+  "documentation": [
+    "https://vercel.com/docs/rest-api/deployments/list-deployment-files",
+    "https://vercel.com/docs/rest-api/deployments/get-deployment-file-contents",
+    "https://vercel.com/docs/cli/curl"
+  ],
+  "limitation": "The documented file APIs expose uploaded source and pre-existing uploaded dist files, not the final remote build output. The account can read source and metadata. Project protection is all_except_custom_domains, with no existing protection-bypass token. Official vercel curl would generate a token, so it was not invoked. No protection setting changed, token created, deployment performed, or permission denial overridden.",
+  "build_environment_visibility": "The authenticated deployment responses did not include build-environment names or values; historical injected values could not be compared and are not claimed absent.",
+  "source_environment_assessment": "Across all five uploaded source trees, the only import.meta.env property references are VITE_SS_ANALYTICS_TABLE and VITE_SS_EVENTS_TABLE. No bare import.meta.env object access or spread was found."
+}
