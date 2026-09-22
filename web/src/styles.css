@@ -9,3 +9,5 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 /* Keep supporting copy legible on the pale workspace surfaces. */
 .feature-card p,.welcome-intro>p,.developer-banner p,.page-heading p,.empty-state>p,.footnote,.form-note,.gate-note,.panel-heading p,.type-row p,.setting-row p,.preference-row p,.connection-row p,.docs-section>p,.docs-tip p,.detail-body time,.detail-info,.form-dialog>.panel-body>p{color:#6f7c61}.feature-card p{font-size:11px}.form-stack label,.ting-meta,.ting-row time,.count-label,.list-label,.step-number,.tabs button,.setting-row h3,.preference-row strong,.connection-row strong,.tag{color:#697b56}.feature-tag{color:#738264}.docs-tip h3,.docs-section h2,.detail-body h2,.detail-body h3,.panel-heading h2,.type-row h3{color:#4e6539}.setting-row .form-note{color:#748168}.switch{min-height:24px}
+
+.required-delivery{display:flex;align-items:center;gap:8px;max-width:360px}.required-delivery input{min-height:16px;height:16px;width:16px;padding:0;flex-shrink:0}

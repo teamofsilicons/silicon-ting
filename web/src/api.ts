@@ -5,7 +5,7 @@ export type TingApp = { app_id: string; name: string; can_manage_tings: boolean 
 export type TingType = { type: string; description: string; defaults: { carbon: boolean; silicon: boolean } };
 export type Ting = { id: string; type: string; created_at: string; for: string; key: string; read: boolean; silent: boolean; data?: Record<string, unknown>; metadata?: Record<string, unknown> };
 export type Preference = { app_id: string; service: string | null; type: string | null; enabled: boolean };
-export type Subscription = { id: string; app_id: string; for: string; active: boolean };
+export type Subscription = { id: string; app_id: string; for: string; active: boolean; required_delivery?: boolean };
 export type Hook = { id: string; for: string; state: 'connected' | 'disconnected' | 'paused' | 'detached'; pending: number; receiver_id: string | null };
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public hint?: string) { super(message); }

@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod lifecycle;
+mod receiver;
 mod store;
 mod telemetry;
 mod validation;
@@ -173,6 +174,7 @@ fn router(app: Shared) -> Router {
             }),
         )
         .route("/v1/ws", get(upgrade))
+        .route("/v1/receivers/ws", get(receiver::upgrade))
         .route("/internal/honeycomb/organizations/{org}/testing-environments/{environment}/operations/{operation}", axum::routing::put(lifecycle::handle))
         .route("/v1/{*path}", any(http))
         .fallback(|| async { Error::not_found() })
@@ -412,6 +414,13 @@ async fn http(
             .await?;
         return Ok(response(status, result));
     }
+    if path == "receivers/bootstrap" && method == Method::POST {
+        let (status, result) = receiver::bootstrap(&app, &headers, &bytes, &b).await?;
+        return Ok(response(status, result));
+    }
+    if path.starts_with("receivers/") {
+        return receiver::http(&app, &method, &path, &headers, &f).await;
+    }
     if method == Method::POST
         && [
             "tings",
@@ -437,16 +446,15 @@ async fn http(
         }
         return Ok(response(202, telemetry::ingest(&app, b).await?));
     }
-    let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
-    if path == "me" && method == Method::GET {
-        return Ok(response(200, app.auth.me(&p)?));
-    }
     if path == "session" && method == Method::DELETE {
-        let value = app.auth.logout(&p).await?;
+        // Possession can revoke this exact opaque session even when IAM access is
+        // inactive; durable cleanup must not depend on live login authority.
+        let id = auth::Auth::session_id(&token(&headers)?)?;
+        let result = app.auth.logout_by_id(&id).await;
         app.hub
-            .invalidate_session(&app, &p.session, "session_expired")
+            .invalidate_session(&app, &id, "session_expired")
             .await?;
-        let mut r = response(200, value);
+        let mut r = response(200, result?);
         r.headers_mut().insert(
             "Set-Cookie",
             HeaderValue::from_static(
@@ -454,6 +462,10 @@ async fn http(
             ),
         );
         return Ok(r);
+    }
+    let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
+    if path == "me" && method == Method::GET {
+        return Ok(response(200, app.auth.me(&p)?));
     }
     if path == "orgs" && method == Method::GET {
         return Ok(response(200, app.auth.orgs(&p).await?));
@@ -539,6 +551,27 @@ async fn http(
             app.hub
                 .invalidate(&app, &p.context, &org, &recipient, "permission_changed")
                 .await?;
+            Ok(response(200, out))
+        }
+        ("GET", ["subscriptions", sid, "required-delivery"])
+        | ("PUT", ["subscriptions", sid, "required-delivery"]) => {
+            let enabled = if method == Method::PUT {
+                v::fields(&b, &["enabled"], &["enabled"])?;
+                Some(
+                    v::optional_bool(&b, "enabled")?
+                        .ok_or_else(|| Error::invalid("enabled must be a boolean."))?,
+                )
+            } else {
+                v::fields(&f, &[], &[])?;
+                None
+            };
+            let out = app.store.required_delivery(&p, &org, sid, enabled)?;
+            if enabled.is_some() {
+                app.hub
+                    .invalidate(&app, &p.context, &org, &p.id, "preference_changed")
+                    .await?;
+                app.changed.notify_waiters();
+            }
             Ok(response(200, out))
         }
         ("GET", ["inbox"]) => {

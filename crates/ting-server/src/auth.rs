@@ -31,7 +31,15 @@ pub struct Proof {
     pub org_id: String,
     pub app_id: String,
     pub actor_id: String,
+    pub actor_kind: String,
+    pub expires_at: i64,
     pub(crate) test: Option<TestContext>,
+}
+impl Proof {
+    pub fn receiver_context(&self) -> Option<(i64, String)> {
+        let test = self.test.as_ref()?;
+        Some((test.generation?, hash(test.key.as_bytes())))
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,6 +60,8 @@ struct Session {
     expires: i64,
     test: Option<TestContext>,
     refresh_key: Option<String>,
+    #[serde(default)]
+    refresh_started: Option<i64>,
     revoke_key: String,
 }
 pub struct Auth {
@@ -171,6 +181,7 @@ impl Auth {
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, payload BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, revoke_pending INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS logins (id TEXT PRIMARY KEY, slt_hash TEXT NOT NULL, created INTEGER NOT NULL, payload BLOB, response BLOB);
+            CREATE INDEX IF NOT EXISTS logins_slt ON logins(slt_hash);
             CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);")?;
         // Read the authoritative lifecycle generation without duplicating it in credentials.
         db.execute("ATTACH DATABASE ? AS delivery", [&config.database_path])?;
@@ -309,6 +320,20 @@ impl Auth {
         Ok(())
     }
     fn check_context(&self, context: &str, key: &str) -> Result<i64> {
+        self.check_context_hash(context, &hash(key.as_bytes()))
+    }
+    pub fn check_receiver_context(
+        &self,
+        context: &str,
+        generation: i64,
+        key_hash: &str,
+    ) -> Result<()> {
+        if self.check_context_hash(context, key_hash)? != generation {
+            return Err(forbidden());
+        }
+        Ok(())
+    }
+    fn check_context_hash(&self, context: &str, key_hash: &str) -> Result<i64> {
         let db = self.db.lock().unwrap();
         let known: Option<(String, String)> = db
             .query_row(
@@ -326,7 +351,7 @@ impl Auth {
                 "This testing environment has an unfinished lifecycle operation.",
             ));
         }
-        if state != "active" || expected != hash(key.as_bytes()) {
+        if state != "active" || expected != key_hash {
             return Err(forbidden());
         }
         db
@@ -395,7 +420,7 @@ impl Auth {
         locks.insert(id.into(), Arc::downgrade(&lock));
         lock
     }
-    fn seal(&self, id: &str, value: &impl Serialize) -> Result<Vec<u8>> {
+    pub(crate) fn seal(&self, id: &str, value: &impl Serialize) -> Result<Vec<u8>> {
         let mut nonce = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce);
         let bytes = serde_json::to_vec(value).map_err(storage)?;
@@ -411,7 +436,7 @@ impl Auth {
             .map_err(|_| storage("encryption"))?;
         Ok([nonce.as_slice(), encrypted.as_slice()].concat())
     }
-    fn open<T: serde::de::DeserializeOwned>(&self, id: &str, bytes: &[u8]) -> Result<T> {
+    pub(crate) fn open<T: serde::de::DeserializeOwned>(&self, id: &str, bytes: &[u8]) -> Result<T> {
         if bytes.len() < 28 {
             return Err(storage("invalid ciphertext"));
         }
@@ -559,9 +584,14 @@ impl Auth {
         let _guard = lock.lock().await;
         let mut session = self.session(id)?;
         self.session_environment(&session)?;
-        if session.expires <= now() + 10 || session.refresh_key.is_some() {
+        // At most one old result and one fresh rotation; malformed IAM lifetimes must not spin.
+        for _ in 0..2 {
+            if session.expires > now() + 10 && session.refresh_key.is_none() {
+                break;
+            }
             if session.refresh_key.is_none() {
                 session.refresh_key = Some(secret());
+                session.refresh_started = Some(now());
                 self.save(id, &session)?;
             }
             let refreshed = self
@@ -576,19 +606,26 @@ impl Auth {
                 .map_err(iam_error)?;
             session.access = refreshed.access_token;
             session.refresh = refreshed.refresh_token;
-            session.expires = now() + refreshed.expires_in;
+            // Legacy pending operations have no known start: recover their family, then rotate again.
+            session.expires = session
+                .refresh_started
+                .map(|started| started.saturating_add(refreshed.expires_in))
+                .unwrap_or(0);
             session.refresh_key = None;
+            session.refresh_started = None;
             self.save(id, &session)?;
+            self.session(id)?;
+            self.session_environment(&session)?;
+        }
+        if session.expires <= now() + 10 {
+            return Err(unavailable());
         }
         let inspected = self.inspect(&session).await?;
         self.session(id)?;
         Ok((session, inspected))
     }
     pub async fn authenticate(&self, token: &str, headers: &HeaderMap) -> Result<Principal> {
-        if !token.starts_with("ting_") || token.len() != 69 {
-            return Err(expired());
-        }
-        let id = hash(token.as_bytes());
+        let id = Self::session_id(token)?;
         let (session, _) = self.live(&id).await?;
         if let Some(test) = self.test_headers(headers).await? {
             if session.test.as_ref().is_none_or(|s| {
@@ -632,6 +669,8 @@ impl Auth {
         let slt_hash = hash(slt.as_bytes());
         let lock = self.lock(&operation);
         let _guard = lock.lock().await;
+        let slt_lock = self.lock(&format!("slt:{slt_hash}"));
+        let _slt_guard = slt_lock.lock().await;
         let prior: Option<(String, i64, Option<Vec<u8>>, Option<Vec<u8>>)> = self
             .db
             .lock()
@@ -645,6 +684,7 @@ impl Auth {
             .map_err(storage)?;
         let mut restored = None;
         let mut exchanged_at = now();
+        let recovering = prior.is_some();
         if let Some((original, created, payload, response)) = prior {
             exchanged_at = created;
             if original != slt_hash {
@@ -655,14 +695,34 @@ impl Auth {
                     "Retry the original token or obtain a fresh login attempt.",
                 ));
             }
-            if created + 120 < now() {
-                return Err(expired());
-            }
             if let Some(response) = response {
-                return Ok((200, self.open(&operation, &response)?));
+                let response: Value = self.open(&operation, &response)?;
+                self.login_result(&response, &context).await?;
+                return Ok((200, response));
             }
             restored = payload;
-        } else {
+        }
+        // An SLT is one-use even when a clean changes the local operation namespace.
+        // Old completed receipts can recover only their original fixed session above.
+        let reused: bool = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM logins WHERE slt_hash=? AND id<>?)",
+                params![slt_hash, operation],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        if reused {
+            return Err(Error::new(
+                409,
+                "login_context_conflict",
+                "This short-lived token is already bound to another login operation or environment generation.",
+                "Recover the original operation in its original context, or obtain a fresh IAM short-lived token and operation key.",
+            ));
+        }
+        if !recovering {
             self.db
                 .lock()
                 .unwrap()
@@ -680,7 +740,16 @@ impl Auth {
                 .oauth()
                 .login(&self.app_id, slt, &mutation(key)?)
                 .await
-                .map_err(iam_error)?;
+                .map_err(|error| {
+                    let error = iam_error(error);
+                    if recovering && matches!(error.status, 401 | 403) {
+                        Error::new(409, "login_recovery_unresolved",
+                            "The original login result could not be recovered; its earlier outcome remains unknown.",
+                            "Retain the original operation and credentials for recovery or operator cleanup. A fresh login does not cancel the earlier operation.")
+                    } else {
+                        error
+                    }
+                })?;
             let encrypted = self.seal(&operation, &tokens)?;
             self.db
                 .lock()
@@ -709,43 +778,106 @@ impl Auth {
             expires: exchanged_at + tokens.expires_in,
             test,
             refresh_key: None,
+            refresh_started: None,
             revoke_key: secret(),
         };
-        self.inspect(&session).await?;
         let token = format!("ting_{}", secret());
         let id = hash(token.as_bytes());
         let response =
             json!({"authenticated":true,"id":session.id,"kind":session.kind,"session_token":token});
         let payload = self.seal(&id, &session)?;
         let replay = self.seal(&operation, &response)?;
-        let mut db = self.db.lock().unwrap();
-        let tx = db.transaction().map_err(storage)?;
-        tx.execute(
-            "INSERT INTO sessions(id,payload) VALUES(?,?)",
-            params![id, payload],
-        )
-        .map_err(storage)?;
-        tx.execute(
-            "UPDATE logins SET response=?,payload=NULL WHERE id=?",
-            params![replay, operation],
-        )
-        .map_err(storage)?;
-        tx.commit().map_err(storage)?;
+        {
+            let mut db = self.db.lock().unwrap();
+            let tx = db.transaction().map_err(storage)?;
+            tx.execute(
+                "INSERT INTO sessions(id,payload) VALUES(?,?)",
+                params![id, payload],
+            )
+            .map_err(storage)?;
+            tx.execute(
+                "UPDATE logins SET response=?,payload=NULL WHERE id=?",
+                params![replay, operation],
+            )
+            .map_err(storage)?;
+            tx.commit().map_err(storage)?;
+        }
+        // Persist the exchange and opaque result before validation so a failure/crash
+        // neither loses rotated credentials nor creates a second session on recovery.
+        self.login_result(&response, &session.context).await?;
         Ok((201, response))
     }
+    async fn login_result(&self, response: &Value, context: &str) -> Result<()> {
+        let token = response["session_token"]
+            .as_str()
+            .ok_or_else(|| storage("missing login token"))?;
+        let id = hash(token.as_bytes());
+        let checked = self.live(&id).await.and_then(|(session, _)| {
+            if session.context != context
+                || response["id"] != session.id
+                || response["kind"] != session.kind
+            {
+                Err(expired())
+            } else {
+                Ok(())
+            }
+        });
+        if checked
+            .as_ref()
+            .is_err_and(|error| matches!(error.status, 401 | 403))
+        {
+            self.db
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE sessions SET revoked=1,revoke_pending=1 WHERE id=? AND revoked=0",
+                    [&id],
+                )
+                .map_err(storage)?;
+        }
+        checked
+    }
+    pub fn session_id(token: &str) -> Result<String> {
+        if !token.strip_prefix("ting_").is_some_and(|value| {
+            value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err(expired());
+        }
+        Ok(hash(token.as_bytes()))
+    }
+    #[cfg(test)]
     pub async fn logout(&self, p: &Principal) -> Result<Value> {
-        let lock = self.lock(&p.session);
+        self.logout_by_id(&p.session).await
+    }
+    /// Possession of the opaque local token authorizes cleanup even after IAM authority expires.
+    pub async fn logout_by_id(&self, id: &str) -> Result<Value> {
+        let lock = self.lock(id);
         let _guard = lock.lock().await;
-        let session = self.session(&p.session)?;
+        let row: Option<(Vec<u8>, bool, bool)> = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload,revoked,revoke_pending FROM sessions WHERE id=?",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+        let (payload, revoked, pending) = row.ok_or_else(expired)?;
+        if revoked && !pending {
+            return Ok(json!({"authenticated":false}));
+        }
+        let session: Session = self.open(id, &payload)?;
         self.db
             .lock()
             .unwrap()
             .execute(
                 "UPDATE sessions SET revoked=1,revoke_pending=1 WHERE id=?",
-                [&p.session],
+                [id],
             )
             .map_err(storage)?;
-        self.revoke(&p.session, &session).await?;
+        self.revoke(id, &session).await?;
         Ok(json!({"authenticated":false}))
     }
     async fn revoke(&self, id: &str, s: &Session) -> Result<()> {
@@ -771,27 +903,39 @@ impl Auth {
     }
     /// Called by the server's maintenance task; logout is already locally final.
     pub async fn retry_revocations(&self) {
-        let pending: Vec<(String, Vec<u8>)> = {
+        let pending: Vec<String> = {
             let db = self.db.lock().unwrap();
-            let Ok(mut q) =
-                db.prepare("SELECT id,payload FROM sessions WHERE revoke_pending=1 LIMIT 100")
+            let Ok(mut q) = db.prepare("SELECT id FROM sessions WHERE revoke_pending=1 LIMIT 100")
             else {
                 return;
             };
-            let Ok(rows) = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?))) else {
+            let Ok(rows) = q.query_map([], |r| r.get(0)) else {
                 return;
             };
             rows.filter_map(std::result::Result::ok).collect()
         };
-        for (id, bytes) in pending {
-            if let Ok(s) = self.open::<Session>(&id, &bytes) {
-                let _ = self.revoke(&id, &s).await;
+        for id in pending {
+            let lock = self.lock(&id);
+            let _guard = lock.lock().await;
+            // A refresh may have completed while this cleanup waited for the session.
+            let bytes: rusqlite::Result<Option<Vec<u8>>> = self
+                .db
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT payload FROM sessions WHERE id=? AND revoke_pending=1",
+                    [&id],
+                    |r| r.get(0),
+                )
+                .optional();
+            if let Ok(Some(bytes)) = bytes {
+                if let Ok(s) = self.open::<Session>(&id, &bytes) {
+                    let _ = self.revoke(&id, &s).await;
+                }
             }
         }
-        let _ = self.db.lock().unwrap().execute(
-            "UPDATE logins SET response=NULL,payload=NULL WHERE created<?",
-            [now() - 120],
-        );
+        // ponytail: encrypted login receipts live with session rows; collect both together
+        // if session garbage collection is added. SLT expiry must not strand a live session.
     }
     async fn authority(
         &self,
@@ -931,6 +1075,7 @@ impl Auth {
         let proof = bearer(headers)?;
         let endpoint = match path {
             "/v1/tings" => "tings.send",
+            "/v1/receivers/bootstrap" => "receivers.bootstrap",
             "/v1/subscriptions" => "subscriptions.register",
             "/v1/subscriptions/query" => "subscriptions.query",
             "/v1/subscriptions/revoke" => "subscriptions.revoke",
@@ -955,6 +1100,7 @@ impl Auth {
             _=>Error::new(503,"proof_verification_uncertain","IAM proof verification could not be confirmed; nothing was executed.","Retry the same Ting operation using a fresh proof."),
         })?;
         let a = &verified.authorization;
+        let actor_kind = serde_json::to_value(&verified.actor.type_field).map_err(storage)?;
         if verified.valid != true
             || verified.audience != self.app_id
             || a.audience != self.app_id
@@ -963,7 +1109,11 @@ impl Auth {
             || (verified.org_id != org && a.organization_id.to_string() != org)
             || a.org_id != verified.org_id
             || a.public_id.as_deref() != Some(&verified.actor.public_id)
+            || serde_json::to_value(&a.actor_type).map_err(storage)? != actor_kind
             || verified.actor.public_id.is_empty()
+            || !actor_kind
+                .as_str()
+                .is_some_and(|kind| matches!(kind, "carbon" | "silicon"))
             || a.testing_environment_id.map(|v| v.to_string()).as_deref()
                 != test.as_ref().map(|v| v.id.as_str())
             || verified.expires_at.unix_timestamp() <= now()
@@ -1000,6 +1150,8 @@ impl Auth {
             org_id: a.organization_id.to_string(),
             app_id: verified.issuer_app_id,
             actor_id: verified.actor.public_id,
+            actor_kind: actor_kind.as_str().unwrap().into(),
+            expires_at: verified.expires_at.unix_timestamp(),
             test,
         })
     }
@@ -1180,8 +1332,16 @@ pub(crate) mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
+    fn token_reply(access: &str, refresh: &str, expires_in: i64) -> Value {
+        json!({"access_token":access,"refresh_token":refresh,"expires_in":expires_in,
+            "token_type":"Bearer","scope":"","actor":{"type":"silicon","public_id":"si_fixture"}})
+    }
+
     pub(crate) struct MockIam {
         pub reply: Mutex<Value>,
+        pub token_replies: Mutex<std::collections::VecDeque<Value>>,
+        pub token_requests: Mutex<Vec<(String, HashMap<String, String>)>>,
+        pub revoke_requests: Mutex<Vec<(String, Vec<u8>)>>,
         pub status: AtomicU16,
         pub calls: Mutex<Vec<String>>,
         pub block_next: AtomicBool,
@@ -1255,6 +1415,9 @@ pub(crate) mod tests {
                 "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
             ),
             status: AtomicU16::new(200),
+            token_replies: Mutex::new(std::collections::VecDeque::new()),
+            token_requests: Mutex::new(vec![]),
+            revoke_requests: Mutex::new(vec![]),
             calls: Mutex::new(vec![]),
             block_next: AtomicBool::new(false),
             block_path: Mutex::new(None),
@@ -1282,8 +1445,36 @@ pub(crate) mod tests {
             let body = match path.as_str() {
                 "/api/v1/oauth/introspect" => iam.reply.lock().unwrap().clone(),
                 "/api/v1/app-auth/tokens" => {
-                    json!({"access_token":"fixture-access", "refresh_token":"fixture-refresh", "expires_in":3600,
-                    "token_type":"Bearer", "scope":"", "actor":{"type":"silicon", "public_id":"si_fixture"}})
+                    let key = request.headers()["idempotency-key"]
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    let raw = axum::body::to_bytes(request.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    iam.token_requests.lock().unwrap().push((
+                        key,
+                        url::form_urlencoded::parse(&raw).into_owned().collect(),
+                    ));
+                    iam.token_replies
+                        .lock()
+                        .unwrap()
+                        .pop_front()
+                        .unwrap_or_else(|| token_reply("fixture-access", "fixture-refresh", 3600))
+                }
+                "/api/v1/oauth/revoke" => {
+                    let key = request.headers()["idempotency-key"]
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    let raw = axum::body::to_bytes(request.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    iam.revoke_requests
+                        .lock()
+                        .unwrap()
+                        .push((key, raw.to_vec()));
+                    json!({})
                 }
                 "/api/v1/obo-access/verify" => {
                     let raw = axum::body::to_bytes(request.into_body(), 1024 * 1024)
@@ -1293,6 +1484,7 @@ pub(crate) mod tests {
                     let target = request["request"]["path"].as_str().unwrap();
                     let endpoint = match target {
                         "/v1/tings" => "tings.send",
+                        "/v1/receivers/bootstrap" => "receivers.bootstrap",
                         "/v1/subscriptions" => "subscriptions.register",
                         "/v1/subscriptions/query" => "subscriptions.query",
                         "/v1/subscriptions/revoke" => "subscriptions.revoke",
@@ -1313,11 +1505,14 @@ pub(crate) mod tests {
                 }
                 _ => panic!("unexpected IAM route: {path}"),
             };
-            (
-                axum::http::StatusCode::from_u16(iam.status.load(Ordering::SeqCst)).unwrap(),
-                Json(body),
-            )
-                .into_response()
+            let status =
+                axum::http::StatusCode::from_u16(iam.status.load(Ordering::SeqCst)).unwrap();
+            let body = if status.is_success() {
+                body
+            } else {
+                json!({"error":{"code":"fixture_error","message":"Mock IAM rejected this request."}})
+            };
+            (status, Json(body)).into_response()
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let iam_url = format!("http://{}", listener.local_addr().unwrap());
@@ -1367,6 +1562,7 @@ pub(crate) mod tests {
                 generation: Some(1),
             }),
             refresh_key: None,
+            refresh_started: None,
             revoke_key: secret(),
         };
         auth.db
@@ -1388,6 +1584,8 @@ pub(crate) mod tests {
             org_id: org,
             app_id: "tos>example".into(),
             actor_id: principal.id.clone(),
+            actor_kind: principal.kind.clone(),
+            expires_at: now() + 60,
             test: session.test,
         };
         let store = crate::store::Store::open(&config.database_path).unwrap();
@@ -1435,6 +1633,572 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn aged_login_replay_survives_maintenance_restart_and_never_revives_revoked_authority() {
+        let f = fixture(false).await;
+        let key = uuid::Uuid::new_v4().to_string();
+        let operation = hash(format!("production:{key}").as_bytes());
+        let (status, original) = f
+            .app
+            .auth
+            .login("original-slt", &key, &HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(status, 201);
+        f.app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE logins SET created=? WHERE id=?",
+                params![now() - 7200, operation],
+            )
+            .unwrap();
+        f.app.auth.retry_revocations().await;
+        let reopened = Auth::new(&f.app.config).unwrap();
+        assert_eq!(
+            reopened
+                .login("original-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap(),
+            (200, original.clone())
+        );
+        assert_eq!(
+            reopened
+                .login("changed-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status,
+            409
+        );
+        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
+
+        f.iam.reply.lock().unwrap()["active"] = false.into();
+        assert_eq!(
+            reopened
+                .login("original-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status,
+            401
+        );
+        let session_id = hash(original["session_token"].as_str().unwrap().as_bytes());
+        let flags: (bool, bool) = reopened
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT revoked,revoke_pending FROM sessions WHERE id=?",
+                [&session_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(flags, (true, true));
+        f.iam.reply.lock().unwrap()["active"] = true.into();
+        reopened.retry_revocations().await;
+        assert_eq!(
+            reopened
+                .login("original-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status,
+            401
+        );
+        assert!(f.take_calls().iter().any(|p| p == "/api/v1/oauth/revoke"));
+        let pending: bool = reopened
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT revoke_pending FROM sessions WHERE id=?",
+                [&session_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!pending);
+    }
+
+    #[tokio::test]
+    async fn login_replay_cannot_relabel_a_consumed_slt_after_environment_clean() {
+        let f = fixture(true).await;
+        let mut headers = HeaderMap::new();
+        headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+        headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+        let key = uuid::Uuid::new_v4().to_string();
+        let original = f
+            .app
+            .auth
+            .login("before-clean-slt", &key, &headers)
+            .await
+            .unwrap()
+            .1;
+        let original_token = original["session_token"].as_str().unwrap();
+        f.app
+            .auth
+            .fence_context(
+                &f.principal.context,
+                "active",
+                &hash("k".repeat(32).as_bytes()),
+                true,
+            )
+            .unwrap();
+        Connection::open(&f.app.config.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
+                [&f.principal.context],
+            )
+            .unwrap();
+        // IAM can still return the old exchange while upstream revocation is pending.
+        let reopened = Auth::new(&f.app.config).unwrap();
+        for retry_key in [&key, &uuid::Uuid::new_v4().to_string()] {
+            assert_eq!(
+                reopened
+                    .login("before-clean-slt", retry_key, &headers)
+                    .await
+                    .unwrap_err()
+                    .status,
+                409
+            );
+        }
+        // Pre-upgrade duplicates cannot turn a saved old result or exchange into new authority.
+        let new_operation = hash(format!("{}:2:{key}", f.principal.context).as_bytes());
+        reopened
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO logins(id,slt_hash,created,response) VALUES(?,?,?,?)",
+                params![
+                    new_operation,
+                    hash(b"before-clean-slt"),
+                    now(),
+                    reopened.seal(&new_operation, &original).unwrap()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            reopened
+                .login("before-clean-slt", &key, &headers)
+                .await
+                .unwrap_err()
+                .status,
+            401
+        );
+        reopened
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE logins SET response=NULL,payload=? WHERE id=?",
+                params![
+                    reopened
+                        .seal(
+                            &new_operation,
+                            &token_reply("fixture-access", "fixture-refresh", 3600)
+                        )
+                        .unwrap(),
+                    new_operation
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            reopened
+                .login("before-clean-slt", &key, &headers)
+                .await
+                .unwrap_err()
+                .status,
+            409
+        );
+        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
+        assert_eq!(
+            reopened
+                .authenticate(original_token, &HeaderMap::new())
+                .await
+                .err()
+                .unwrap()
+                .status,
+            401
+        );
+        let fresh = reopened
+            .login(
+                "after-clean-slt",
+                &uuid::Uuid::new_v4().to_string(),
+                &headers,
+            )
+            .await
+            .unwrap()
+            .1;
+        let principal = reopened
+            .authenticate(fresh["session_token"].as_str().unwrap(), &HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.me(&principal).unwrap()["environment"]["generation"],
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn aged_exchanged_login_recovers_expired_access_and_keeps_uncertain_results() {
+        let f = fixture(false).await;
+        let key = uuid::Uuid::new_v4().to_string();
+        let operation = hash(format!("production:{key}").as_bytes());
+        let tokens: models::OAuthTokenResponse =
+            serde_json::from_value(token_reply("old-access", "old-refresh", 3600)).unwrap();
+        f.app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO logins(id,slt_hash,created,payload) VALUES(?,?,?,?)",
+                params![
+                    operation,
+                    hash(b"original-slt"),
+                    now() - 7200,
+                    f.app.auth.seal(&operation, &tokens).unwrap()
+                ],
+            )
+            .unwrap();
+        f.app.auth.retry_revocations().await;
+        let reopened = Auth::new(&f.app.config).unwrap();
+        let (status, response) = reopened
+            .login("original-slt", &key, &HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(status, 201);
+        {
+            let requests = f.iam.token_requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(
+                requests[0].1.get("refresh_token").map(String::as_str),
+                Some("old-refresh")
+            );
+            assert!(!requests[0].1.contains_key("slt"));
+        }
+        let session_id = hash(response["session_token"].as_str().unwrap().as_bytes());
+        assert_eq!(
+            reopened.session(&session_id).unwrap().refresh,
+            "fixture-refresh"
+        );
+        f.iam.status.store(503, Ordering::SeqCst);
+        assert_eq!(
+            reopened
+                .login("original-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status,
+            503
+        );
+        reopened.retry_revocations().await;
+        f.iam.status.store(200, Ordering::SeqCst);
+        assert_eq!(
+            reopened
+                .login("original-slt", &key, &HeaderMap::new())
+                .await
+                .unwrap(),
+            (200, response)
+        );
+
+        let good = f.iam.reply.lock().unwrap().clone();
+        *f.iam.reply.lock().unwrap() = json!({"invalid_introspection":"fixture"});
+        let uncertain_key = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            reopened
+                .login("uncertain-slt", &uncertain_key, &HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status,
+            503
+        );
+        let op = hash(format!("production:{uncertain_key}").as_bytes());
+        let bytes: Vec<u8> = reopened
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT response FROM logins WHERE id=?", [&op], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let retained: Value = reopened.open(&op, &bytes).unwrap();
+        reopened.retry_revocations().await;
+        *f.iam.reply.lock().unwrap() = good;
+        let restarted = Auth::new(&f.app.config).unwrap();
+        assert_eq!(
+            restarted
+                .login("uncertain-slt", &uncertain_key, &HeaderMap::new())
+                .await
+                .unwrap(),
+            (200, retained)
+        );
+
+        // An old row whose credentials were erased by an earlier release cannot prove cleanup.
+        let missing_key = uuid::Uuid::new_v4().to_string();
+        reopened
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO logins(id,slt_hash,created) VALUES(?,?,?)",
+                params![
+                    hash(format!("production:{missing_key}").as_bytes()),
+                    hash(b"lost-slt"),
+                    now() - 7200
+                ],
+            )
+            .unwrap();
+        f.iam.status.store(401, Ordering::SeqCst);
+        let error = reopened
+            .login("lost-slt", &missing_key, &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.body["error"]["code"], "login_recovery_unresolved");
+    }
+
+    #[tokio::test]
+    async fn refresh_recovery_uses_original_attempt_time_and_rotates_expired_or_legacy_results() {
+        for started in [Some(now() - 7200), None, Some(now() - 100)] {
+            let f = fixture(false).await;
+            let mut session = f.app.auth.session(&f.principal.session).unwrap();
+            let original_key = uuid::Uuid::new_v4().to_string();
+            session.refresh_key = Some(original_key.clone());
+            session.refresh_started = started;
+            session.expires = now() - 3600;
+            f.app.auth.save(&f.principal.session, &session).unwrap();
+            f.iam.token_replies.lock().unwrap().extend([
+                token_reply("recovered-access", "recovered-refresh", 3600),
+                token_reply("fresh-access", "fresh-refresh", 3600),
+            ]);
+            let reopened = Auth::new(&f.app.config).unwrap();
+            let before = now();
+            reopened
+                .authenticate(&f.token, &HeaderMap::new())
+                .await
+                .unwrap();
+            let saved = reopened.session(&f.principal.session).unwrap();
+            let expired = started.is_none_or(|start| start + 3600 <= before);
+            assert_eq!(
+                saved.access,
+                if expired {
+                    "fresh-access"
+                } else {
+                    "recovered-access"
+                }
+            );
+            assert_eq!(
+                saved.refresh,
+                if expired {
+                    "fresh-refresh"
+                } else {
+                    "recovered-refresh"
+                }
+            );
+            if expired {
+                assert!(saved.expires >= before + 3600 && saved.expires <= now() + 3600);
+            } else {
+                assert_eq!(saved.expires, started.unwrap() + 3600);
+            }
+            assert!(saved.refresh_key.is_none() && saved.refresh_started.is_none());
+            let requests = f.iam.token_requests.lock().unwrap();
+            assert_eq!(requests.len(), if expired { 2 } else { 1 });
+            assert_eq!(requests[0].0, original_key);
+            assert_eq!(
+                requests[0].1.get("refresh_token").map(String::as_str),
+                Some("fixture-refresh")
+            );
+            if expired {
+                assert_ne!(requests[1].0, original_key);
+                assert_eq!(
+                    requests[1].1.get("refresh_token").map(String::as_str),
+                    Some("recovered-refresh")
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn logout_needs_only_local_token_and_retries_durable_cleanup_without_restarting_it() {
+        for unavailable in [false, true] {
+            let f = fixture(false).await;
+            let id = Auth::session_id(&f.token).unwrap();
+            let original = f.app.auth.session(&id).unwrap();
+            f.iam.reply.lock().unwrap()["active"] = false.into();
+            assert_eq!(
+                f.app
+                    .auth
+                    .authenticate(&f.token, &HeaderMap::new())
+                    .await
+                    .err()
+                    .unwrap()
+                    .status,
+                401
+            );
+            f.iam.calls.lock().unwrap().clear();
+            if unavailable {
+                f.iam.status.store(503, Ordering::SeqCst);
+            }
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "authorization",
+                format!("Bearer {}", f.token).parse().unwrap(),
+            );
+            let result = crate::http(
+                axum::extract::State(f.app.clone()),
+                axum::extract::Path("session".into()),
+                axum::extract::RawQuery(None),
+                axum::http::Method::DELETE,
+                headers,
+                Ok(axum::body::Bytes::new()),
+            )
+            .await;
+            if unavailable {
+                assert_eq!(result.unwrap_err().status, 503);
+            } else {
+                assert_eq!(result.unwrap().status(), 200);
+            }
+            let state = || {
+                f.app
+                    .auth
+                    .db
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT revoked,revoke_pending FROM sessions WHERE id=?",
+                        [&id],
+                        |r| Ok((r.get::<_, bool>(0)?, r.get::<_, bool>(1)?)),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(state(), (true, unavailable));
+            assert!(
+                f.iam
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|path| path == "/api/v1/oauth/revoke")
+            );
+            let reopened = Auth::new(&f.app.config).unwrap();
+            f.iam.status.store(200, Ordering::SeqCst);
+            assert_eq!(
+                reopened.logout_by_id(&id).await.unwrap(),
+                json!({"authenticated":false})
+            );
+            assert_eq!(state(), (true, false));
+            let requests = f.iam.revoke_requests.lock().unwrap();
+            assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
+            assert_eq!(requests[0].0, original.revoke_key);
+            assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
+            if unavailable {
+                assert_eq!(requests[0], requests[1]);
+            }
+            drop(requests);
+            f.iam.status.store(503, Ordering::SeqCst);
+            assert_eq!(
+                reopened.logout(&f.principal).await.unwrap(),
+                json!({"authenticated":false})
+            );
+            assert_eq!(state(), (true, false));
+            assert_eq!(
+                f.iam.revoke_requests.lock().unwrap().len(),
+                if unavailable { 2 } else { 1 }
+            );
+            assert_eq!(
+                reopened
+                    .logout_by_id(&hash(b"missing"))
+                    .await
+                    .unwrap_err()
+                    .status,
+                401
+            );
+        }
+        for token in [
+            format!("ting_{}", "x".repeat(64)),
+            format!("ting_recv_{}", "a".repeat(64)),
+        ] {
+            assert_eq!(Auth::session_id(&token).unwrap_err().status, 401);
+        }
+    }
+
+    #[tokio::test]
+    async fn revocation_cleanup_waits_for_inflight_refresh_and_reads_rotated_credentials() {
+        let f = fixture(true).await;
+        let mut session = f.app.auth.session(&f.principal.session).unwrap();
+        session.expires = now() - 1;
+        f.app.auth.save(&f.principal.session, &session).unwrap();
+        f.iam.token_replies.lock().unwrap().push_back(token_reply(
+            "rotated-access",
+            "rotated-refresh",
+            3600,
+        ));
+        *f.iam.block_path.lock().unwrap() = Some("/api/v1/app-auth/tokens".into());
+        let app = f.app.clone();
+        let token = f.token.clone();
+        let refresh =
+            tokio::spawn(async move { app.auth.authenticate(&token, &HeaderMap::new()).await });
+        tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
+            .await
+            .unwrap();
+        f.app
+            .auth
+            .fence_context(
+                &f.principal.context,
+                "retired",
+                &hash(session.test.as_ref().unwrap().key.as_bytes()),
+                true,
+            )
+            .unwrap();
+        let app = f.app.clone();
+        let mut cleanup = tokio::spawn(async move { app.auth.retry_revocations().await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut cleanup)
+                .await
+                .is_err()
+        );
+        assert!(
+            !f.iam
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path == "/api/v1/oauth/revoke")
+        );
+        f.iam.release.notify_one();
+        assert_eq!(refresh.await.unwrap().err().unwrap().status, 401);
+        cleanup.await.unwrap();
+        let (bytes, pending): (Vec<u8>, bool) = f
+            .app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload,revoke_pending FROM sessions WHERE id=?",
+                [&f.principal.session],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            f.app
+                .auth
+                .open::<Session>(&f.principal.session, &bytes)
+                .unwrap()
+                .refresh,
+            "rotated-refresh"
+        );
+        assert!(!pending);
+        assert!(
+            f.iam
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path == "/api/v1/oauth/revoke")
+        );
+    }
+
     #[tokio::test]
     async fn me_attests_the_live_session_environment_and_fences_stale_generations() {
         use axum::{
@@ -1720,6 +2484,7 @@ pub(crate) mod tests {
             expires: now() + 3600,
             test: None,
             refresh_key: None,
+            refresh_started: None,
             revoke_key: secret(),
         };
         let id = hash(b"opaque-test-session");

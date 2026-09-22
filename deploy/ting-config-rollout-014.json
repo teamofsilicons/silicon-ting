@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-09-22T20:46:35.871605+00:00",
+  "app_id": "tos>ting",
+  "actor": {
+    "principal_id": "shubham",
+    "actor_type": "carbon",
+    "tos_role": "org_admin",
+    "honeycomb_validator": false
+  },
+  "configuration": {
+    "before_revision": 2,
+    "requested_revision": 3,
+    "effective_revision": 2,
+    "iam_revision": 22,
+    "changed_fields": [
+      "description",
+      "obo_endpoints",
+      "obo_review_message"
+    ],
+    "all_original_other_fields_preserved": true,
+    "webhook_url_preserved": true,
+    "payload_sha256": "3de46a5a75f5922c4e8d2dc7ca52d1b0a81f22f6d49b61bd23841ace25c8c664",
+    "added_endpoint": {
+      "endpoint_id": "receivers.bootstrap",
+      "path": "/v1/receivers/bootstrap",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
+    },
+    "endpoint_effective": false
+  },
+  "configure_operation": {
+    "id": "4befe311-4aa2-4d29-98da-1c1301a79794",
+    "state": "pending",
+    "resource": "tos>ting",
+    "revision": 3,
+    "error": "IAM has not accepted this configuration"
+  },
+  "publication": {
+    "id": "10338617-2f27-4e82-b0cd-848751f18913",
+    "state": "awaiting_validator",
+    "revision": 3,
+    "error": null,
+    "gates": [
+      {
+        "provider": "honeycomb",
+        "scopes": [],
+        "state": "pending"
+      }
+    ],
+    "current_actor_can_decide": false
+  },
+  "consent_created": false,
+  "notifications_sent": false,
+  "notification_types_or_grants_created": false,
+  "real_bootstrap_proved": false,
+  "remaining_actions": [
+    "An authorized Honeycomb validator must inspect and approve publication 10338617-2f27-4e82-b0cd-848751f18913 for provider honeycomb at revision 3; the current actor is not authorized.",
+    "After approval, finish the original configure operation and publication activation through the official workflow; verify effective_revision=3 and receivers.bootstrap critical=true before claiming the scope is available."
+  ]
+}

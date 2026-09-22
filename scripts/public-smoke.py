@@ -23,6 +23,10 @@ checks = [
     ('telemetry byte limit', 'POST', '/v1/telemetry', json.dumps({'table': 'tingfrontendevents', 'events': [{'type': 'test', 'data': 'x' * 65536}]}).encode(), {}, 413, 'payload_too_large'),
     ('HTTP body byte limit', 'POST', '/v1/session', b'x' * (1024 * 1024 + 1), {}, 413, 'payload_too_large'),
     ('untrusted session', 'GET', '/v1/me', None, {'Authorization': 'Bearer invalid'}, 401, 'session_expired'),
+    ('scoped receiver requires capability', 'GET', '/v1/receivers/me', None, {}, 401, 'receiver_expired'),
+    ('full session cannot substitute for receiver capability', 'GET', '/v1/receivers/me', None, {'Authorization': 'Bearer ting_' + 'a' * 64}, 401, 'receiver_expired'),
+    ('receiver capability cannot substitute for full session', 'GET', '/v1/me', None, {'Authorization': 'Bearer ting_recv_' + 'a' * 64}, 401, 'session_expired'),
+    ('receiver bootstrap validates signed input', 'POST', '/v1/receivers/bootstrap', b'{}', {}, 400, 'invalid_input'),
     ('unknown route', 'GET', '/not-a-ting-route', None, {}, 404, 'not_found'),
 ]
 for browser_origin in args.browser_origin:

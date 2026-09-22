@@ -1,0 +1,29 @@
+{
+  "checked_at": "2026-09-22T20:56:38.510750+00:00",
+  "version": "0.1.4",
+  "source_scope": "source committed with this report",
+  "workspace_tests": {
+    "cli": 1,
+    "client": 13,
+    "daemon": 6,
+    "server": 40,
+    "compiling_doctests": 1,
+    "failures": 0
+  },
+  "auth_tests": 12,
+  "receiver_tests": 6,
+  "store_tests": 13,
+  "package_tests": 5,
+  "unix_installer_tests": 1,
+  "frontend_unit_tests": 2,
+  "frontend_build": true,
+  "frontend_browser_checks": "passed deterministic mocked HTTP/WebSocket Chrome checks; not live IAM or Hook end-to-end",
+  "format_check": true,
+  "documentation_mirrors": true,
+  "credential_pattern_scan": {
+    "files": 39,
+    "matches": 0,
+    "scope": "common credential shapes, not an exhaustive secret audit"
+  },
+  "live_checks": "Recorded separately after deployment"
+}

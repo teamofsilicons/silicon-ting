@@ -72,7 +72,7 @@ Use exactly one login source: positional `TOKEN` or `--token-stdin`. Only an IAM
 
 Flow: CLI posts `{ "slt": "..." }` to `POST /v1/session` → Ting exchanges it with IAM using Ting's app secret → Ting keeps IAM access and refresh tokens on the backend → CLI privately stores the returned opaque Ting session token. Login prints only authentication status and identity. Later recipient requests use that Ting session token in `Authorization: Bearer ...`.
 
-Before session exchange, generate and privately persist an `Idempotency-Key` for that login attempt. If the response is lost, reuse the same key and exact SLT request for at most two minutes; recover the original session instead of creating another. Do not generate a new key for an uncertain attempt. After the replay window expires, obtain a new SLT. Never print the SLT, idempotent secret-bearing response or session token.
+Before session exchange, generate and privately persist an `Idempotency-Key` for that login attempt. If the response is lost, `ting login --recover` reuses the privately saved key and exact SLT request, even after two minutes. Keep the original API and testing selector. Do not generate a new key or replace an uncertain attempt. A failed recovery remains pending; a new login does not cancel it. Logout preserves credentials until revocation is confirmed and reports `login_cleanup_pending` when an unresolved login must first be recovered. Never print the SLT, idempotent secret-bearing response or session token.
 
 `login status` checks the saved session through `GET /v1/me` without starting the daemon. No saved or valid session returns `{ "authenticated": false, "id": null }` with exit `0`; a network or server failure returns an error, not a false logged-out result. Expired backend IAM credentials are refreshed by Ting where IAM permits; the CLI never receives them.
 
@@ -378,3 +378,9 @@ Example error:
 ```
 
 Errors identify the cause and the next step. Typical cases include missing login, missing org, denied permission, invalid JSON, reused key with different content, missing webhook registration and incompatible protocol version.
+
+## Required automation delivery
+
+Use `ting subscriptions required-delivery SUBSCRIPTION_ID` to inspect the current choice. The owning recipient can explicitly set `--enabled true` or `--enabled false`; this requires an existing active grant and never changes notification preferences. Revoking the grant clears this choice.
+
+An app prepares an automation event with `ting send --delivery required` and its usual type, recipient, key and data flags. The exact request still needs a fresh `tings.send` proof. A recipient who has not opted in receives no required event: Ting rejects the new send instead of treating silent storage as delivery. Retention and destination acknowledgment semantics remain unchanged.

@@ -92,6 +92,19 @@ impl Store {
             .optional()?
             .unwrap_or(false))
     }
+    fn required_delivery_enabled(
+        db: &Connection,
+        ctx: &str,
+        org: &str,
+        app: &str,
+        recipient: &str,
+    ) -> Result<bool> {
+        Ok(db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM preferences WHERE ctx=? AND org=? AND app=? AND recipient=? AND scope='delivery:required' AND enabled=1)",
+            params![ctx, org, app, recipient],
+            |r| r.get(0),
+        )?)
+    }
     pub fn register_type(
         &self,
         p: &Principal,
@@ -201,7 +214,7 @@ impl Store {
         };
         Ok((
             status,
-            json!({"id":sid,"app_id":p.app_id,"for":p.actor_id,"active":true}),
+            json!({"id":sid,"app_id":p.app_id,"for":p.actor_id,"active":true,"required_delivery":Self::required_delivery_enabled(&db,&p.context,&p.org_id,&p.app_id,&p.actor_id)?}),
         ))
     }
     pub fn grants(
@@ -212,8 +225,49 @@ impl Store {
         app: Option<&str>,
     ) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT id,app,recipient,active FROM grants WHERE ctx=? AND org=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?) ORDER BY id")?;
-        Ok(q.query_map(params![ctx,org,recipient,recipient,app,app],|r|Ok(json!({"id":r.get::<_,String>(0)?,"app_id":r.get::<_,String>(1)?,"for":r.get::<_,String>(2)?,"active":r.get::<_,bool>(3)?})))?.collect::<std::result::Result<_,_>>()?)
+        let mut q=db.prepare("SELECT g.id,g.app,g.recipient,g.active,g.active AND COALESCE(p.enabled,0) FROM grants g LEFT JOIN preferences p ON p.ctx=g.ctx AND p.org=g.org AND p.app=g.app AND p.recipient=g.recipient AND p.scope='delivery:required' WHERE g.ctx=? AND g.org=? AND (? IS NULL OR g.recipient=?) AND (? IS NULL OR g.app=?) ORDER BY g.id")?;
+        Ok(q.query_map(params![ctx,org,recipient,recipient,app,app],|r|Ok(json!({"id":r.get::<_,String>(0)?,"app_id":r.get::<_,String>(1)?,"for":r.get::<_,String>(2)?,"active":r.get::<_,bool>(3)?,"required_delivery":r.get::<_,bool>(4)?})))?.collect::<std::result::Result<_,_>>()?)
+    }
+    pub fn required_delivery(
+        &self,
+        p: &Principal,
+        org: &str,
+        sid: &str,
+        enabled: Option<bool>,
+    ) -> Result<Value> {
+        let db = self.lock()?;
+        let grant: Option<(String, bool)> = db
+            .query_row(
+                "SELECT app,active FROM grants WHERE ctx=? AND org=? AND id=? AND recipient=?",
+                params![p.context, org, sid, p.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let (app, active) = grant.ok_or_else(Error::not_found)?;
+        if enabled == Some(true) && !active {
+            return Err(Error::new(
+                403,
+                "recipient_not_registered",
+                "Required delivery needs an active recipient registration.",
+                "Register through IAM OBO, then explicitly enable required delivery.",
+            ));
+        }
+        if let Some(enabled) = enabled {
+            if enabled {
+                db.execute(
+                    "INSERT OR REPLACE INTO preferences VALUES(?,?,?,?,'delivery:required',1)",
+                    params![p.context, org, p.id, app],
+                )?;
+            } else {
+                db.execute(
+                    "DELETE FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope='delivery:required'",
+                    params![p.context, org, p.id, app],
+                )?;
+            }
+        }
+        Ok(
+            json!({"id":sid,"app_id":app,"for":p.id,"enabled":active && Self::required_delivery_enabled(&db,&p.context,org,&app,&p.id)?}),
+        )
     }
     pub fn revoke(
         &self,
@@ -223,16 +277,24 @@ impl Store {
         recipient: Option<&str>,
         app: Option<&str>,
     ) -> Result<(Value, String)> {
-        let db = self.lock()?;
-        let owner:Option<String>=db.query_row("SELECT recipient FROM grants WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?)",params![ctx,org,sid,recipient,recipient,app,app],|r|r.get(0)).optional()?;
-        let owner = owner.ok_or_else(Error::not_found)?;
-        db.execute("UPDATE grants SET active=0 WHERE id=?", [sid])?;
-        Ok((json!({"id":sid,"active":false}), owner))
+        let mut db = self.lock()?;
+        let tx = db.transaction()?;
+        let grant:Option<(String,String)>=tx.query_row("SELECT recipient,app FROM grants WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?)",params![ctx,org,sid,recipient,recipient,app,app],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let (owner, app) = grant.ok_or_else(Error::not_found)?;
+        tx.execute("UPDATE grants SET active=0 WHERE id=?", [sid])?;
+        tx.execute("DELETE FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope='delivery:required'",params![ctx,org,owner,app])?;
+        tx.commit()?;
+        Ok((
+            json!({"id":sid,"active":false,"required_delivery":false}),
+            owner,
+        ))
     }
     pub fn send(&self, p: &Proof, b: &Value) -> Result<(u16, Value)> {
         v::fields(
             b,
-            &["org_id", "type", "data", "metadata", "for", "key"],
+            &[
+                "org_id", "type", "data", "metadata", "for", "key", "delivery",
+            ],
             &["org_id", "type", "data", "for", "key"],
         )?;
         let typ = v::string(b, "type", 255)?;
@@ -247,6 +309,11 @@ impl Store {
         }
         let recipient = v::string(b, "for", 255)?;
         let key = v::string(b, "key", 200)?;
+        let required = match b.get("delivery") {
+            None => false,
+            Some(Value::String(mode)) if mode == "required" => true,
+            Some(_) => return Err(v_err("delivery must be 'required' when specified.")),
+        };
         if !b["data"].is_object() || b.get("metadata").is_some_and(|x| !x.is_object()) {
             return Err(v_err("data and metadata must be JSON objects."));
         }
@@ -275,16 +342,31 @@ impl Store {
                 "Register the recipient through a fresh IAM OBO proof.",
             ));
         }
+        if required && !Self::required_delivery_enabled(&tx, &p.context, &p.org_id, app, recipient)?
+        {
+            return Err(Error::new(
+                403,
+                "required_delivery_not_enabled",
+                "The recipient has not enabled required delivery for this app.",
+                "The recipient must explicitly enable required delivery on their subscription.",
+            ));
+        }
         let silent = !Self::enabled(&tx, &p.context, &p.org_id, recipient, typ)?;
         let mid = id("msg");
         let created = stamp();
-        let full = json!({"id":mid,"created_at":created,"type":typ,"data":b["data"],"metadata":normalized["metadata"],"for":recipient,"key":key,"silent":silent,"read":false});
+        let mut full = json!({"id":mid,"created_at":created,"type":typ,"data":b["data"],"metadata":normalized["metadata"],"for":recipient,"key":key,"silent":silent,"read":false});
+        if required {
+            full["delivery"] = "required".into();
+        }
         tx.execute("INSERT INTO tings(id,ctx,org,app,recipient,type,created,body,silent) VALUES(?,?,?,?,?,?,?,?,?)",params![mid,p.context,p.org_id,app,recipient,typ,created,full.to_string(),silent])?;
-        if !silent {
+        if !silent || required {
             tx.execute("INSERT INTO deliveries(hook,message) SELECT id,? FROM hooks WHERE ctx=? AND org=? AND recipient=?",params![mid,p.context,p.org_id,recipient])?;
         }
-        let response =
+        let mut response =
             json!({"id":mid,"created_at":created,"status":"accepted","key":key,"silent":silent});
+        if required {
+            response["delivery"] = "required".into();
+        }
         tx.execute(
             "INSERT OR REPLACE INTO keys VALUES(?,?,?,'send',?,?,?,?)",
             params![
@@ -408,7 +490,7 @@ impl Store {
     }
     pub fn preferences(&self, p: &Principal, org: &str, f: &Value) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT app,scope,enabled FROM preferences WHERE ctx=? AND org=? AND recipient=? ORDER BY app,scope")?;
+        let mut q=db.prepare("SELECT app,scope,enabled FROM preferences WHERE ctx=? AND org=? AND recipient=? AND scope<>'delivery:required' ORDER BY app,scope")?;
         let rows = q.query_map(params![p.context, org, p.id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -610,11 +692,12 @@ impl Store {
             "INSERT INTO hooks VALUES(?,?,?,?,'connected',?,?)",
             params![hid, p.context, org, p.id, receiver, p.session],
         )?;
-        tx.execute("INSERT INTO deliveries(hook,message) SELECT ?1,t.id FROM tings t WHERE t.ctx=?2 AND t.org=?3 AND t.recipient=?4 AND t.silent=0 AND t.read=0 AND t.created>=?5
+        tx.execute("INSERT INTO deliveries(hook,message) SELECT ?1,t.id FROM tings t WHERE t.ctx=?2 AND t.org=?3 AND t.recipient=?4 AND t.read=0 AND t.created>=?5 AND (t.silent=0 OR t.created>=?6)
         AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.org=t.org AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
-        AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
+        AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
+        OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
           AND p.scope IN ('type:'||t.type,'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
-          ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1",params![hid,p.context,org,p.id,retention_cutoff(3)])?;
+          ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))",params![hid,p.context,org,p.id,retention_cutoff(3),retention_cutoff(1)])?;
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM deliveries WHERE hook=?",
             [&hid],
@@ -793,12 +876,13 @@ impl Store {
         )?;
         let rows = {
             let mut q=tx.prepare("SELECT t.body FROM deliveries d JOIN tings t ON t.id=d.message
-              WHERE d.hook=?1 AND d.read=0 AND t.silent=0 AND t.created>=?5 AND (t.read=0 OR t.created>=?6)
+              WHERE d.hook=?1 AND d.read=0 AND t.created>=?5 AND ((t.read=0 AND t.silent=0) OR t.created>=?6)
               AND (?2=0 OR (d.offer_receiver=?3 AND d.delivery=0 AND d.last_offer<=?4))
               AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.org=t.org AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
-              AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
+              AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
+              OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
                 AND p.scope IN ('type:'||t.type, 'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
-                ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1
+                ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))
               ORDER BY t.created,t.id LIMIT 100")?;
             q.query_map(
                 params![
@@ -986,6 +1070,8 @@ mod tests {
             org_id: "org-uuid".into(),
             app_id: "tos>example".into(),
             actor_id: p.id.clone(),
+            actor_kind: p.kind.clone(),
+            expires_at: now() + 300,
             test: None,
         };
         s.register_type(
@@ -1210,6 +1296,8 @@ mod tests {
                     org_id: "org-uuid".into(),
                     app_id: "tos>example".into(),
                     actor_id: "si_test".into(),
+                    actor_kind: "silicon".into(),
+                    expires_at: now() + 300,
                     test: None,
                 };
                 s.send(&proof, &body("concurrent")).unwrap()
@@ -1333,6 +1421,216 @@ mod tests {
             "read",
         )
         .unwrap();
+    }
+    #[test]
+    fn required_delivery_needs_recipient_opt_in_and_preserves_notification_mutes() {
+        for preference in [
+            json!({"app_id":"tos>example","enabled":false}),
+            json!({"app_id":"tos>example","service":"msg","enabled":false}),
+            json!({"app_id":"tos>example","type":"tos>example.msg.received","enabled":false}),
+        ] {
+            let (s, p, proof) = fixture();
+            let h = hook(&s, &p, "r");
+            let grant = s
+                .grants(&p.context, &proof.org_id, Some(&p.id), None)
+                .unwrap()[0]
+                .clone();
+            let sid = grant["id"].as_str().unwrap();
+            assert_eq!(grant["required_delivery"], false);
+            let mut request = body("required");
+            request["delivery"] = "required".into();
+            assert_eq!(
+                s.send(&proof, &request).unwrap_err().body["error"]["code"],
+                "required_delivery_not_enabled"
+            );
+            s.preference(&p, &proof.org_id, &preference, false).unwrap();
+            let before = s.preferences(&p, &proof.org_id, &json!({})).unwrap();
+            let ordinary = s.send(&proof, &body("ordinary")).unwrap().1;
+            assert_eq!(ordinary["silent"], true);
+            assert_eq!(
+                s.required_delivery(&p, &proof.org_id, sid, None).unwrap()["enabled"],
+                false
+            );
+            let other = Principal {
+                id: "si_other".into(),
+                ..p.clone()
+            };
+            assert_eq!(
+                s.required_delivery(&other, &proof.org_id, sid, Some(true))
+                    .unwrap_err()
+                    .status,
+                404
+            );
+            assert_eq!(
+                s.required_delivery(&p, "other-org", sid, Some(true))
+                    .unwrap_err()
+                    .status,
+                404
+            );
+            let other_context = Principal {
+                context: "other-context".into(),
+                ..p.clone()
+            };
+            assert_eq!(
+                s.required_delivery(&other_context, &proof.org_id, sid, Some(true))
+                    .unwrap_err()
+                    .status,
+                404
+            );
+            assert_eq!(
+                s.required_delivery(&p, &proof.org_id, sid, Some(true))
+                    .unwrap()["enabled"],
+                true
+            );
+            assert_eq!(
+                s.preferences(&p, &proof.org_id, &json!({})).unwrap(),
+                before
+            );
+            let sent = s.send(&proof, &request).unwrap().1;
+            assert_eq!(sent["silent"], true);
+            assert_eq!(sent["delivery"], "required");
+            let new_hook = hook(&s, &p, "new");
+            for (receiver, hook) in [("r", h), ("new", new_hook)] {
+                let batch = s.offer(receiver, &hook).unwrap().unwrap();
+                assert_eq!(batch["tings"].as_array().unwrap().len(), 1);
+                assert_eq!(batch["tings"][0]["id"], sent["id"]);
+                assert_eq!(batch["tings"][0]["delivery"], "required");
+            }
+            assert!(
+                s.deliveries(ordinary["id"].as_str().unwrap())
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut reset = preference.clone();
+            reset.as_object_mut().unwrap().remove("enabled");
+            s.preference(&p, &proof.org_id, &reset, true).unwrap();
+            let after_unmute = hook(&s, &p, "unmuted");
+            assert_eq!(
+                s.offer("unmuted", &after_unmute).unwrap().unwrap()["tings"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn required_delivery_opt_out_and_grant_revocation_stop_pending_without_losing_replays() {
+        let (s, p, proof) = fixture();
+        let h = hook(&s, &p, "r");
+        let grant = s
+            .grants(&p.context, &proof.org_id, Some(&p.id), None)
+            .unwrap()[0]
+            .clone();
+        let sid = grant["id"].as_str().unwrap();
+        s.required_delivery(&p, &proof.org_id, sid, Some(true))
+            .unwrap();
+        let mut request = body("required");
+        request["delivery"] = "required".into();
+        let accepted = s.send(&proof, &request).unwrap().1;
+        assert_eq!(accepted["silent"], false);
+        assert!(s.offer("r", &h).unwrap().is_some());
+        s.required_delivery(&p, &proof.org_id, sid, Some(false))
+            .unwrap();
+        s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
+        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
+            .unwrap();
+        assert!(s.offer("r", &h).unwrap().is_none());
+        let new_hook = hook(&s, &p, "new");
+        assert!(s.offer("new", &new_hook).unwrap().is_none());
+        assert_eq!(s.send(&proof, &request).unwrap(), (200, accepted.clone()));
+        assert_eq!(s.send(&proof, &body("required")).unwrap_err().status, 409);
+        request["key"] = "new-required".into();
+        assert_eq!(s.send(&proof, &request).unwrap_err().status, 403);
+        let ordinary = s.send(&proof, &body("ordinary")).unwrap().1;
+        assert_eq!(
+            s.offer("r", &h).unwrap().unwrap()["tings"][0]["id"],
+            ordinary["id"]
+        );
+        s.required_delivery(&p, &proof.org_id, sid, Some(true))
+            .unwrap();
+        let registration = s
+            .subscribe_app(
+                &proof,
+                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
+            )
+            .unwrap()
+            .1;
+        assert_eq!(registration["required_delivery"], true);
+        s.revoke(&p.context, &proof.org_id, sid, Some(&p.id), None)
+            .unwrap();
+        s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
+        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
+            .unwrap();
+        assert!(s.offer("r", &h).unwrap().is_none());
+        assert_eq!(
+            s.required_delivery(&p, &proof.org_id, sid, Some(true))
+                .unwrap_err()
+                .status,
+            403
+        );
+        assert_eq!(
+            s.required_delivery(&p, &proof.org_id, sid, None).unwrap()["enabled"],
+            false
+        );
+        let registration = s
+            .subscribe_app(
+                &proof,
+                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
+            )
+            .unwrap()
+            .1;
+        assert_eq!(registration["required_delivery"], false);
+        assert_eq!(
+            s.send(&proof, &request).unwrap_err().body["error"]["code"],
+            "required_delivery_not_enabled"
+        );
+        request["delivery"] = "invalid".into();
+        assert_eq!(s.send(&proof, &request).unwrap_err().status, 400);
+    }
+    #[test]
+    fn required_delivery_keeps_silent_retention_and_unread_backlog_rules() {
+        let (s, p, proof) = fixture();
+        let grant = s
+            .grants(&p.context, &proof.org_id, Some(&p.id), None)
+            .unwrap()[0]
+            .clone();
+        s.required_delivery(&p, &proof.org_id, grant["id"].as_str().unwrap(), Some(true))
+            .unwrap();
+        s.preference(
+            &p,
+            &proof.org_id,
+            &json!({"app_id":proof.app_id,"enabled":false}),
+            false,
+        )
+        .unwrap();
+        let h = hook(&s, &p, "r");
+        let mut request = body("required");
+        request["delivery"] = "required".into();
+        let mid = s.send(&proof, &request).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        s.read(&p, &proof.org_id, &[mid.clone()]).unwrap();
+        let after_read = hook(&s, &p, "after-read");
+        assert!(s.offer("after-read", &after_read).unwrap().is_none());
+        assert!(s.offer("r", &h).unwrap().is_some());
+        s.release_receiver("r").unwrap();
+        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
+            .unwrap();
+        let created = (chrono::Utc::now() - chrono::Months::new(2))
+            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+        s.lock()
+            .unwrap()
+            .execute(
+                "UPDATE tings SET created=?,read=0 WHERE id=?",
+                params![created, mid],
+            )
+            .unwrap();
+        assert!(s.offer("r", &h).unwrap().is_none());
+        let after_expiry = hook(&s, &p, "after-expiry");
+        assert!(s.offer("after-expiry", &after_expiry).unwrap().is_none());
+        assert_eq!(s.prune().unwrap(), 1);
     }
     #[test]
     fn ack_and_read_are_atomic() {

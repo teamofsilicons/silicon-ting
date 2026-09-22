@@ -1,0 +1,191 @@
+{
+  "checked_at": "2026-09-22T20:46:35.871605+00:00",
+  "app_id": "tos>hook",
+  "actor": {
+    "principal_id": "shubham",
+    "actor_type": "carbon",
+    "tos_role": "org_admin",
+    "honeycomb_validator": false
+  },
+  "configuration": {
+    "before_revision": 1,
+    "requested_revision": 2,
+    "effective_revision": 1,
+    "iam_revision": 15,
+    "changed_fields": [
+      "app_scope"
+    ],
+    "all_original_other_fields_preserved": true,
+    "webhook_url_preserved": true,
+    "payload_sha256": "a798ac7f2e9e5e3f1e6454ea7d034877398b49da8b0d83ca8f8c2fb8340f8c7a",
+    "requested_external_scopes": [
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "subscriptions.register"
+      },
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "tings.send"
+      },
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "sent.query"
+      },
+      {
+        "app_id": "tos>ting",
+        "endpoint_id": "receivers.bootstrap"
+      }
+    ],
+    "effective_external_scopes": []
+  },
+  "configure_operation": {
+    "id": "a3812b06-544e-4058-8bbc-b19d81a737c0",
+    "state": "pending",
+    "resource": "tos>hook",
+    "revision": 2,
+    "error": "IAM has not accepted this configuration"
+  },
+  "publication": {
+    "id": "e1bbe1d8-9f50-4140-a327-0533940bf065",
+    "state": "awaiting_review_plan",
+    "revision": 2,
+    "error": "IAM review planning is unavailable",
+    "gates": []
+  },
+  "consent_created": false,
+  "notifications_sent": false,
+  "notification_types_or_grants_created": false,
+  "real_bootstrap_proved": false,
+  "provider_review": {
+    "provider": "tos>ting",
+    "available": false,
+    "read_status": 404,
+    "decision_submitted": false,
+    "reason": "IAM has not supplied the review plan, so there is no provider gate to decide yet."
+  },
+  "remaining_actions": [
+    "After Ting receivers.bootstrap becomes effective, retry the Hook review plan for publication e1bbe1d8-9f50-4140-a327-0533940bf065 revision 2, and inspect its gates. Current IAM review-planning failure is recorded without assuming its cause.",
+    "Approve the exact Ting provider scope set only when the authenticated provider administrator can_decide is true; an eligible Honeycomb validator must independently approve the public revision.",
+    "Finish configure operation a3812b06-544e-4058-8bbc-b19d81a737c0 and publication activation after review, then verify all four external scopes are effective.",
+    "Each intended actor must explicitly consent to the accepted scopes through IAM. Required delivery additionally needs an existing recipient registration and separate recipient opt-in; none was created during this rollout."
+  ],
+  "lifecycle_preflight": {
+    "services": {
+      "silicon-hook-api.service": "active",
+      "silicon-hook-worker.service": "active"
+    },
+    "release": "/opt/silicon-hook/releases/dc9c2e39dddc",
+    "api_configuration": {
+      "honeycomb_token_configured": false,
+      "honeycomb_url": null,
+      "test_database_configured": true,
+      "iam_app_id": "tos>hook"
+    },
+    "running_configuration": {
+      "honeycomb_token_configured": false,
+      "honeycomb_url": null,
+      "test_database_configured": true
+    },
+    "databases": {
+      "production": {
+        "query_succeeded": true,
+        "migrations": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      },
+      "testing": {
+        "query_succeeded": true,
+        "migrations": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    "test_runtime_privileges": {
+      "environments": true,
+      "lifecycle_operations": true,
+      "mutation_results": true,
+      "activity_reports": true,
+      "clean_environment": true
+    },
+    "ssm_command_id": "af90e3a6-2091-4dc0-9443-d346e0b85512",
+    "source_revision": "dc9c2e39dddc21e629e26c3f57b8d0f137625b87",
+    "protected_route_present": true,
+    "honeycomb_registry_contained_hook": false
+  },
+  "lifecycle_rollout": {
+    "checked_at": "2026-09-22T20:51:12.676254+00:00",
+    "hook": {
+      "status": "success",
+      "release_preserved": "/opt/silicon-hook/releases/dc9c2e39dddc",
+      "api_restarted": true,
+      "worker_process_preserved": true,
+      "readyz": 200,
+      "authorized_missing_operation_status": 404,
+      "changed_keys": [
+        "HOOK_HONEYCOMB_SERVICE_TOKEN",
+        "HOOK_HONEYCOMB_URL"
+      ],
+      "other_configuration_preserved": true,
+      "backup_path": "/etc/silicon-hook/api.env.before-hook-lifecycle-014",
+      "backup_sha256": "df2fb2365e19386db44ac2333e7d1a68e62fae6d29a71fbcf4059192530a1e91",
+      "ssm_command_id": "e765fa51-3df5-4c05-bd01-c46882df7fe5"
+    },
+    "honeycomb": {
+      "status": "success",
+      "image_preserved": true,
+      "image": "sha256:39d80c8ef7f52cfd4c797bf94a4d991f5deff7f6ea1c82e5ec8f2e0d70b80cf0",
+      "container": "556442d5f021379325f16c0eabc7c3f8fb1f8974ca9289c36b8d61599913626b",
+      "health": 200,
+      "participant_apps": [
+        "tos>briefcase",
+        "tos>remind",
+        "tos>commit",
+        "tos>ting",
+        "tos>dm",
+        "tos>hook"
+      ],
+      "credential_loaded": true,
+      "secret_version": "07a95a2e-5d9d-465f-93cd-c1addd02d145",
+      "data_mount_preserved": true,
+      "ssm_command_id": "cae0d692-9b7e-4208-bec7-a3119996aafe",
+      "backup_path": "/etc/silicon-honeycomb/backend.env.before-hook-lifecycle-014"
+    },
+    "secret_store": {
+      "secret_id": "silicon-honeycomb/production/runtime",
+      "before_version_id": "8c276269-c6a1-4427-8e50-8a43b892398b",
+      "after_version_id": "07a95a2e-5d9d-465f-93cd-c1addd02d145",
+      "changed_keys": [
+        "backend.HOOK_HONEYCOMB_SERVICE_TOKEN",
+        "backend.HONEYCOMB_LIFECYCLE_PARTICIPANTS"
+      ],
+      "participant_apps": [
+        "tos>briefcase",
+        "tos>remind",
+        "tos>commit",
+        "tos>ting",
+        "tos>dm",
+        "tos>hook"
+      ],
+      "all_other_values_preserved": true
+    },
+    "credential_transport": "RSA-3072 OAEP SHA-256; SSM received ciphertext only; ephemeral host key removed",
+    "shared_existing_environments_modified": false,
+    "new_environment_created": false
+  }
+}

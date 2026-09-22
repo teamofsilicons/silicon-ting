@@ -8,7 +8,7 @@ This is the contract to build. Examples use sample IDs and timestamps. [cli.md](
 - A disconnected recipient's tings wait quietly. No delivery-failure alerts go to the sender or recipient.
 - Every registered destination receives its own copy. One destination completing delivery does not complete another destination's copy.
 - The sender sees `read: true` after any webhook accepts the ting, or after the carbon views it in the browser. Read state never goes backwards.
-- New types are enabled by default. Existing recipient opt-outs still apply. Silent tings stay in the drawer and are never delivered automatically.
+- New types are enabled by default. Existing recipient opt-outs still apply. Ordinary silent tings stay in the drawer and are never delivered automatically. Required automation delivery needs a separate explicit recipient opt-in, described below.
 - Every ting carries `created_at`, the UTC time Ting first stored it. It stays unchanged during retries and replay. Consumers choose processing order; timestamps do not guarantee delivery order.
 - A local webhook always receives `{ "tings": [...] }`, even for one ting.
 - BYO is outside Ting's v1 scope.
@@ -88,9 +88,11 @@ CLI session response — a secret-bearing response, never logged:
 
 Flow: CLI receives a Ting-bound IAM SLT → Ting backend exchanges it using its app secret → backend keeps IAM access/refresh tokens encrypted → CLI receives only an opaque Ting session credential. Never ship Ting's app secret or IAM refresh tokens in the CLI. The CLI prints only identity/status and saves its session credential privately.
 
-Use IAM's official SLT exchange and rotating refresh APIs, including their idempotency support. Persist one exchange/refresh operation key before calling IAM and reuse it after an uncertain response. Serialize refreshes per session. A repeated session exchange must match the original key and SLT hash; replay the same encrypted response for at most two minutes, never create another session. After that, obtain a new SLT.
+Use IAM's official SLT exchange and rotating refresh APIs, including their idempotency support. Persist one exchange/refresh operation key before calling IAM and reuse it after an uncertain response. Serialize refreshes per session. A repeated session exchange must match the original key, SLT hash and testing context. Retain the encrypted exchange and completed response for the lifetime of the session, including beyond the SLT expiry; replay returns the original opaque token after current authority checks, never a second session. Logout, revocation and lifecycle fences prevent resurrection. An SLT already used under another operation or test generation returns `409 login_context_conflict`; a reset requires a fresh SLT. Retry dependency failures with the original input and key. Older releases may already have erased an uncertain result: `409 login_recovery_unresolved` preserves that uncertainty and does not prove that no session exists. A fresh login does not cancel an unresolved earlier attempt.
 
-Revalidate IAM authority before protected HTTP operations and every 30 seconds for a live receiver. Refresh expired app access tokens server-side. IAM unavailability returns `503` and pauses delivery; it must not be reported as a successful logout. A definitively revoked session returns `401 session_expired`, stops its subscriptions, and requires login again. Logout invalidates the Ting session first and durably schedules IAM refresh-family revocation; it affects no other identity's session.
+Persist the original refresh attempt timestamp with its operation key. Calculate recovered access expiry from that timestamp, not replay time. Save a recovered rotated refresh family before attempting another rotation when its access token is already expired. Legacy pending refreshes without a timestamp must recover and rotate conservatively.
+
+Revalidate IAM authority before protected HTTP operations and every 30 seconds for a live receiver. Refresh expired app access tokens server-side. IAM unavailability returns `503` and pauses delivery; it must not be reported as a successful logout. A definitively revoked session returns `401 session_expired`, stops its subscriptions, and requires login again. Logout accepts the original opaque session token even when its IAM access token is inactive. It invalidates the Ting session first and durably schedules IAM refresh-family revocation; an uncertain response can be retried with the same token. It affects no other identity's session.
 
 The browser uses a `ting_session` cookie instead of a readable token: HttpOnly, Secure, SameSite=Lax, Path `/`, with no Domain attribute. Bind the IAM callback to a random one-use state and private browser login cookie; include that state in the callback `redirect_uri` sent to IAM and expire the attempt after ten minutes. Reject callbacks without that binding and reject external `next` URLs. Accept authenticated browser mutations only from explicitly permitted origins and require JSON. `TING_PUBLIC_ORIGIN` and `TING_FRONTEND_ORIGIN` are permitted, along with the comma-separated exact origins in `TING_BROWSER_ORIGINS`. Configuration accepts HTTPS origins (HTTP only on loopback), never wildcards, credentials or paths. Unknown origins receive 403 on HTTP and WebSocket upgrades. Permitted HTTP responses, including errors and preflights, include `Access-Control-Allow-Origin` for that exact origin, `Access-Control-Allow-Credentials: true`, and `Vary: Origin`; `Ting-Request-Id` is exposed to browser clients. Never put Ting sessions or IAM refresh tokens in URLs.
 
@@ -104,6 +106,63 @@ For a testing session, `environment` is `{"kind":"testing","id":"<IAM environmen
 
 Cross-app browsers use `credentials: "include"` when fetching `/v1/me` and connect to the host that issued the Ting cookie. Signing into DM does not create a Ting session. Match both the typed account and the explicit environment; for tests, match both UUID and generation. Missing fields on older servers mean unverified context, never production. This response attests the current session only; it does not extend authority or replace ongoing revalidation and application-side authorization.
 
+### Scoped testing receiver bootstrap
+
+`POST /v1/receivers/bootstrap` accepts a fresh IAM proof for the critical endpoint
+`receivers.bootstrap`. The issuing application must declare that external scope,
+obtain the required provider approval and recipient consent, and hold an active
+Ting subscription for the represented recipient. This endpoint is **testing only**;
+production proofs are rejected. It does not exchange a Hook token for a general
+Ting session or disclose a Ting application secret.
+
+```json
+{"org_id":"tos","app_id":"tos>hook","for":"recipient-id","key":"receiver-attempt-001","environment_id":"<IAM environment UUID>","generation":1}
+```
+
+The signed body explicitly binds the environment and generation. Supply the Ting
+audience testing headers returned by IAM for this exact downstream proof request.
+An enclosing runtime can obtain them through the normal OBO exchange using its
+own application selector; it must not reuse them for a separate SLT login. Ting
+verifies actor kind, issuing app, organization, consent and its active Honeycomb
+lifecycle fence. The response has `receiver_id`, secret `receiver_token`, `for`,
+`kind`, `app_id`, canonical `org_id`, `expires_at`, and an explicit
+`environment: {"kind":"testing","id":"...","generation":1}`.
+
+The capability lasts at most **30 seconds**, never beyond proof expiry. It can only
+query/watch this application's records for this actor, organization and testing
+generation. It cannot send, enroll, change preferences, create a general hook,
+acknowledge records, or access another application's inbox. It is not accepted by
+ordinary Ting session routes. Each use checks the active grant and lifecycle;
+consent or IAM authority loss prevents the next renewal, and existing authority
+expires within 30 seconds. Clean, rotation, disablement and local capability
+revocation fail closed without production fallback.
+
+Each create/recovery/renewal call needs a fresh proof. Repeating the exact request
+bytes and `key` returns the original capability and original expiry. Changed bytes
+under that key return `409 idempotency_conflict`; replay never extends or
+resurrects authority. The recovered historical capability may already be expired, replaced or revoked. To renew, use a **new key**, fresh proof and the original
+`receiver_id` in the body. Renewal replaces its old token. An explicitly revoked
+receiver cannot be renewed; a new receiver is a new explicit operation.
+
+| Route | Authority and result |
+| --- | --- |
+| `GET /v1/receivers/me` | Bearer receiver capability; current scope and expiry. |
+| `GET /v1/receivers/inbox` | Same capability; own app only. Filters: `type`, `read`, `silent`, `limit`, `cursor`. |
+| `GET /v1/receivers/inbox/{id}` | Same capability; own app and recipient record, never a read ACK. |
+| `DELETE /v1/receivers/session` | Bearer capability; idempotent revocation, available even after expiry or environment disablement. |
+| `GET /v1/receivers/ws?protocol=v1` | Scoped watch transport. A permitted browser Origin is required when supplied; no full Ting cookie is needed. |
+
+The scoped socket returns the usual `ready` frame. Within five seconds send
+`{"op":"watch","request_id":"watch-1","receiver_token":"<capability>"}`;
+its correlated response is `watching_inbox`. Only scoped `inbox_changed` hints and
+protocol ping/pong follow. Renew using a fresh proof and reconnect with the new
+capability before expiry. Query the scoped inbox after connecting/reconnecting,
+and hydrate references under the source application's current authorization.
+Ordinary silent arrivals do not trigger hints; explicitly enabled required events
+can. No credentials belong in a URL. The Rust client provides
+`ProofOperation::ReceiverBootstrap`, `WebSocket::connect_receiver` and
+`watch_receiver`; renewal and reconnection remain explicit.
+
 ### Proof-bound app calls
 
 IAM binds a proof to the exact method, registered path and SHA-256 of the body bytes. App endpoints therefore use fixed paths and put `org_id` in the JSON body:
@@ -115,6 +174,7 @@ IAM binds a proof to the exact method, registered path and SHA-256 of the body b
 | `subscriptions.query` | `/v1/subscriptions/query` | `POST` |
 | `subscriptions.revoke` | `/v1/subscriptions/revoke` | `POST` |
 | `sent.query` | `/v1/sent/query` | `POST` |
+| `receivers.bootstrap` | `/v1/receivers/bootstrap` | `POST` (testing only) |
 
 Publish these in Ting's IAM OBO catalog, with empty metadata schemas and explicit `critical: true`. Calling apps declare the matching external scopes, obtain required review and user consent, then mint proofs with the official IAM SDK. Recipient registration derives consent and identity from the verified proof actor. Later app sends still require their own proof and an active stored recipient grant.
 
@@ -205,7 +265,7 @@ Requires an IAM App Proof Token. The signed body is:
 }
 ```
 
-All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Reject caller-assigned `id`, `created_at`, `silent` or `read`.
+All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Optional `delivery: "required"` selects the separately authorized automation path below; omit it for ordinary notification delivery. Reject other delivery values and caller-assigned `id`, `created_at`, `silent` or `read`.
 
 Apps submit one ting at a time. Ting batches complete records during delivery; it never appends later events to the original ting's data or metadata.
 
@@ -221,7 +281,7 @@ First acceptance — `202`:
 }
 ```
 
-Flow: verify proof → verify type ownership and recipient grant → apply preferences → atomically save ting, intended deliveries and idempotency result → return acceptance → deliver when eligible. Acceptance means durable storage, not receipt or reading. Muted tings are still accepted with `silent: true`.
+Flow: verify proof → verify type ownership and recipient grant → apply preferences → atomically save ting, intended deliveries and idempotency result → return acceptance → deliver when eligible. Acceptance means durable storage, not receipt or reading. Muted ordinary tings are still accepted with `silent: true`. For an explicitly authorized required event, `silent` still describes notification visibility; the additive `delivery: "required"` field identifies its independent automation delivery policy. Neither field proves destination acceptance.
 
 ### Idempotency
 
@@ -296,7 +356,41 @@ Ting session required; all operations affect only its recipient.
 
 Writes require `app_id`. Set neither service nor type for an app-wide override; never set both. A type must belong to the named app. `enabled` is a boolean. Repeated reset succeeds even if no override exists.
 
-Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent tings remain silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
+Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent ordinary tings remain silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
+
+### Required automation delivery
+
+Notification preferences control attention; an application cannot override them.
+A recipient may separately opt in to required automation events for an existing
+active subscription:
+
+| Route | Result |
+| --- | --- |
+| `GET /v1/orgs/{org}/subscriptions/{id}/required-delivery` | Own Ting session; `{id, app_id, for, enabled}`, default `false`. |
+| `PUT /v1/orgs/{org}/subscriptions/{id}/required-delivery` | Own Ting session and `{"enabled":true}` or `false`; never creates/reactivates a grant. |
+
+The Ting website exposes this choice under Connections. CLI:
+`ting subscriptions required-delivery SUBSCRIPTION_ID --enabled true`.
+Subscription listings include `required_delivery`. Only the recipient can change
+this choice; ordinary app registration and notification preference changes cannot.
+Grant revocation clears it, and re-enrollment does not restore it. Shared clean
+also requires a fresh explicit opt-in.
+
+An application requests this path by signing a send body containing
+`"delivery":"required"`. Without an active grant and explicit opt-in, a new send
+returns `403 required_delivery_not_enabled` (or `recipient_not_registered`) instead
+of silently falling back to ordinary delivery. The mode is part of the immutable
+idempotency fingerprint. Accepted retries return the original result even if
+permission later changes; they create no new delivery.
+
+Required events create independent destination copies and remain eligible despite
+notification muting, while current grant and required-delivery permission still
+control every offer. Opting out pauses their pending automatic delivery; it cannot
+retract an already accepted callback. The usual batch ACK, destination recovery,
+retention and deduplication limits remain: silent/read records last one calendar
+month, unread non-silent records three. A required flag is not an unlimited
+retention or successful-processing guarantee. Ordinary notification behavior and
+its muted history are unchanged.
 
 ## Webhook registrations
 
@@ -327,7 +421,7 @@ One hook has one active receiver binding. A different live binding returns `409 
 
 Creation uses a client-generated idempotency key retained for 14 days within recipient/org/context. Save the key and original body before the HTTP request so a lost response cannot create duplicate destinations. Commit the creation and cached result together. Same key with a changed request returns `409 idempotency_conflict`. After recipient authentication, look up an accepted creation before checking receiver liveness: an exact retry can recover the stable hook ID even after its original receiver disconnects. Then PATCH that ID onto the current receiver. If no creation exists and the original receiver is gone, return `409 receiver_gone` without creating a hook; the caller may start a fresh creation attempt. Repeating PATCH with the same binding is harmless. Use ownership checks before returning any cached result.
 
-New hooks get all eligible overall-unread history plus new tings. Existing hooks resume their own unfinished copies, even if another destination already made the ting globally read. Preserved hooks accumulate eligible copies during disconnection or detachment. Creating the initial backlog and assigning concurrent new sends must have no gap. Silent tings are excluded; grants and preferences govern whether pending copies may currently be forwarded.
+New hooks get all eligible overall-unread history plus new tings. Existing hooks resume their own unfinished copies, even if another destination already made the ting globally read. Preserved hooks accumulate eligible copies during disconnection or detachment. Creating the initial backlog and assigning concurrent new sends must have no gap. Ordinary silent tings are excluded. Required events use their separate explicit opt-in; grants and the applicable delivery preference govern whether pending copies may currently be forwarded.
 
 Unhook detaches the route, retaining its ID and pending state. It invalidates any active binding and notifies its receiver with `reason: "hook_detached"`. That receiver stops forwarding and must not automatically resubscribe. Explicit PATCH reattaches it. After local disk loss, list existing hooks and reattach their IDs with newly supplied local URLs. Creating replacement IDs would not recover copies already globally read elsewhere.
 

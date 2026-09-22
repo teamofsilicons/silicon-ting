@@ -390,6 +390,8 @@ pub enum ProofOperation {
     Revoke,
     SentList,
     SentGet,
+    /// A test-only, app-scoped receiver capability; never a full Ting session.
+    ReceiverBootstrap,
 }
 impl ProofOperation {
     pub fn path(self) -> &'static str {
@@ -399,6 +401,7 @@ impl ProofOperation {
             Self::Subscriptions => "/v1/subscriptions/query",
             Self::Revoke => "/v1/subscriptions/revoke",
             Self::SentList | Self::SentGet => "/v1/sent/query",
+            Self::ReceiverBootstrap => "/v1/receivers/bootstrap",
         }
     }
 }
@@ -427,7 +430,10 @@ impl Prepared {
             .as_object()
             .ok_or_else(|| Error::input("Request must be a JSON object."))?;
         let (required, optional): (&[&str], &[&str]) = match operation {
-            ProofOperation::Send => (&["org_id", "type", "for", "key", "data"], &["metadata"]),
+            ProofOperation::Send => (
+                &["org_id", "type", "for", "key", "data"],
+                &["metadata", "delivery"],
+            ),
             ProofOperation::Register => (&["org_id", "app_id"], &["for"]),
             ProofOperation::Subscriptions => (&["org_id", "app_id"], &["for", "limit", "cursor"]),
             ProofOperation::Revoke => (&["org_id", "id"], &[]),
@@ -436,6 +442,17 @@ impl Prepared {
                 &["for", "type", "read", "limit", "cursor"],
             ),
             ProofOperation::SentGet => (&["org_id", "app_id", "id"], &["deliveries_cursor"]),
+            ProofOperation::ReceiverBootstrap => (
+                &[
+                    "org_id",
+                    "app_id",
+                    "for",
+                    "key",
+                    "environment_id",
+                    "generation",
+                ],
+                &["receiver_id"],
+            ),
         };
         for k in required {
             if !obj.contains_key(*k) {
@@ -460,6 +477,18 @@ impl Prepared {
                 "limit" => {
                     if !value.as_u64().is_some_and(|n| (1..=100).contains(&n)) {
                         return Err(Error::input("limit must be an integer from 1 to 100."));
+                    }
+                }
+                "generation" => {
+                    if !value.as_i64().is_some_and(|n| n > 0) {
+                        return Err(Error::input("generation must be a positive integer."));
+                    }
+                }
+                "delivery" => {
+                    if value.as_str() != Some("required") {
+                        return Err(Error::input(
+                            "delivery must be required, or omitted for ordinary notifications.",
+                        ));
                     }
                 }
                 _ => nonempty(
@@ -854,6 +883,28 @@ mod tests {
         assert_eq!(p.body, b);
         assert!(Prepared::new(ProofOperation::Send, b, Some("other")).is_err());
         assert!(type_app("tos>dm.Msg.received").is_err());
+    }
+    #[test]
+    fn scoped_receiver_and_required_delivery_requests_are_explicit() {
+        let body = br#"{"org_id":"tos","type":"tos>hook.webhook.received","for":"recipient","key":"event","data":{},"delivery":"required"}"#.to_vec();
+        assert!(Prepared::new(ProofOperation::Send, body, None).is_ok());
+        let mut body = json!({"org_id":"tos","app_id":"tos>hook","for":"recipient","key":"bootstrap-key-001","environment_id":"env","generation":1});
+        let prepared = Prepared::new(
+            ProofOperation::ReceiverBootstrap,
+            serde_json::to_vec(&body).unwrap(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(prepared.operation.path(), "/v1/receivers/bootstrap");
+        body["generation"] = 0.into();
+        assert!(
+            Prepared::new(
+                ProofOperation::ReceiverBootstrap,
+                serde_json::to_vec(&body).unwrap(),
+                None
+            )
+            .is_err()
+        );
     }
 }
 

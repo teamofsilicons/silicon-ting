@@ -2,7 +2,7 @@
   "org_id": "tos",
   "local_app_id": "ting",
   "name": "Silicon Ting",
-  "description": "Silicon Ting is the notification service for people and software agents in the Silicon ecosystem. Applications register event types and obtain explicit IAM consent before notifying a recipient. Ting durably retains notifications, applies recipient preferences, and delivers independent copies to registered local webhooks through one system daemon. The command line supports inbox access, subscriptions, preferences, delivery setup, and bug reports. A SolidJS web application provides a companion inbox and configuration interface. All application sends use single-use IAM proofs bound to the exact request. Silent notifications remain available in the inbox without automatic delivery.",
+  "description": "Silicon Ting is the notification service for people and software agents in the Silicon ecosystem. Applications register event types and obtain explicit IAM consent before notifying a recipient. Ting durably retains notifications, applies recipient preferences, and delivers independent copies to registered local webhooks through one system daemon. The command line supports inbox access, subscriptions, preferences, delivery setup, and bug reports. A SolidJS web application provides a companion inbox and configuration interface. All application sends use single-use IAM proofs bound to the exact request. Ordinary silent notifications remain available in the inbox without automatic delivery. Required automation events need a separate explicit recipient opt-in and an active subscription; notification preferences are preserved. Testing integrations can obtain short-lived, proof-bound receivers limited to their own application, recipient, organization and environment.",
   "website_url": "https://ting.teamofsilicons.com",
   "docs_url": "https://ting.teamofsilicons.com/docs",
   "base_url": "https://backend.ting.teamofsilicons.com",
@@ -63,8 +63,16 @@
       "critical": true,
       "ttl_seconds": 60,
       "enabled": true
+    },
+    {
+      "endpoint_id": "receivers.bootstrap",
+      "path": "/v1/receivers/bootstrap",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60,
+      "enabled": true
     }
   ],
-  "obo_review_message": "Applications must notify only recipients who explicitly granted consent. Register the represented recipient through subscriptions.register, send only your own registered event types with unique idempotency keys, and query or revoke only your own grants and sent notifications. Every endpoint requires a single-use IAM proof bound to the exact method, path, organization and body.",
+  "obo_review_message": "Applications must notify only recipients who explicitly granted consent. Register the represented recipient through subscriptions.register, send only your own registered event types with unique idempotency keys, and query or revoke only your own grants and sent notifications. Every endpoint requires a single-use IAM proof bound to the exact method, path, organization and body. The test-only receivers.bootstrap endpoint permits a short-lived receiver limited to the issuing application, represented recipient, organization and testing generation; it grants no full Ting session, general webhook or read-acknowledgment authority. Required automation delivery additionally needs the recipient's explicit opt-in in Ting and an active subscription; notification preferences are unchanged.",
   "testing_idle_days": 30
 }

@@ -72,13 +72,13 @@ fn cli() -> Command {
  .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'tos>dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain an IAM App Proof Token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
  .subcommand(command("iam","Show Ting application information"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
- .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).subcommand(command("status","Check this profile's saved session")))
+ .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
  .subcommand(group("org","Choose an IAM organisation").subcommand(page(command("list","List accessible organisations"))).subcommand(command("current","Show effective organisation and selection source")).subcommand(command("use","Validate and save an organisation").arg(arg("id").required(true))))
  .subcommand(group("apps","Inspect visible Honeycomb applications").subcommand(page(command("list","List visible applications"))))
  .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
- .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(command("revoke","Revoke a grant as recipient or proof-authorized app").arg(arg("id")),false)))
- .subcommand(proof(command("send","Prepare or submit one proof-bound notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
+ .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(command("revoke","Revoke a grant as recipient or proof-authorized app").arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
+ .subcommand(proof(command("send","Prepare or submit one proof-bound notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
  .subcommand(group("sent","Inspect application sent history using fresh proofs").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
@@ -179,6 +179,7 @@ async fn execute_proof(
         "key",
         "data",
         "metadata",
+        "delivery",
         "id",
         "read",
         "cursor",
@@ -252,6 +253,7 @@ async fn execute_proof(
         ("type", "type"),
         ("for", "for"),
         ("key", "key"),
+        ("delivery", "delivery"),
         ("id", "id"),
         ("cursor", "cursor"),
         ("deliveries-cursor", "deliveries_cursor"),
@@ -437,15 +439,21 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 "This profile already holds a session. Run logout or use another SILICON_HOME.",
             ));
         }
-        let slt = match (s(m, "token"), b(m, "token-stdin")) {
-            (Some(t), false) => {
+        let previous = profile.read::<Value>("login-attempt.json")?;
+        let slt = match (s(m, "token"), b(m, "token-stdin"), b(m, "recover")) {
+            (Some(t), false, false) => {
                 nonempty(t, "Token")?;
                 t.to_owned()
             }
-            (None, true) => secret(None)?,
+            (None, true, false) => secret(None)?,
+            (None, false, true) => previous
+                .as_ref()
+                .and_then(|a| a["slt"].as_str())
+                .ok_or_else(|| Error::input("This profile has no pending login to recover."))?
+                .to_owned(),
             _ => {
                 return Err(Error::input(
-                    "Supply exactly one login token or --token-stdin.",
+                    "Supply one login token, --token-stdin, or --recover for a pending attempt.",
                 ));
             }
         };
@@ -453,29 +461,24 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let previous = profile.read::<Value>("login-attempt.json")?;
         let attempt = match previous {
-            Some(a) if now.saturating_sub(a["created"].as_u64().unwrap_or(0)) <= 120 => {
-                if a["api_url"] != api || a["slt"] != slt {
+            Some(a) => {
+                let same_test = a.get("test").map_or(
+                    test.app_secret.is_none() && test.key.is_none(),
+                    |original| original == &json!(test),
+                );
+                if a["api_url"] != api || a["slt"] != slt || !same_test {
                     return Err(Error::new(
                         "login_attempt_pending",
                         "The previous login attempt has an uncertain outcome.",
-                        "Retry its exact SLT against the original API within two minutes; then obtain a new SLT.",
+                        "Use login --recover with the original API and testing selector. A new login cannot cancel the earlier attempt.",
                         false,
                     ));
                 }
                 a
             }
-            Some(a) if a["slt"] == slt => {
-                return Err(Error::new(
-                    "login_attempt_expired",
-                    "The login replay window expired.",
-                    "Obtain a new IAM short-lived token to begin another login attempt.",
-                    false,
-                ));
-            }
-            _ => {
-                let a = json!({"api_url":api,"slt":slt,"key":uuid::Uuid::new_v4().to_string(),"created":now});
+            None => {
+                let a = json!({"api_url":api,"slt":slt,"key":uuid::Uuid::new_v4().to_string(),"created":now,"test":test});
                 profile.save("login-attempt.json", &a)?;
                 a
             }
@@ -507,6 +510,14 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         let sess = match profile.session(&api) {
             Ok(s) => s,
             Err(e) if e.code == "authentication_required" => {
+                if profile.read::<Value>("login-attempt.json")?.is_some() {
+                    return Err(Error::new(
+                        "login_cleanup_pending",
+                        "A previous login still has an uncertain outcome.",
+                        "Use login --recover with the original API and selector, then log out the recovered session.",
+                        false,
+                    ));
+                }
                 return Ok(json!({"authenticated":false}));
             }
             Err(e) => return Err(e),
@@ -518,14 +529,18 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         let remote = client
             .json("DELETE", "/v1/session", None, Some(&sess.token), &test)
             .await;
-        profile.remove("session.json")?;
-        profile.remove("login-attempt.json")?;
         if let Err(e) = local {
             if e.code != "daemon_unavailable" {
                 return Err(e);
             }
         }
-        remote?;
+        if let Err(error) = remote {
+            if !["session_expired", "authentication_required"].contains(&error.code.as_str()) {
+                return Err(error);
+            }
+        }
+        profile.remove("session.json")?;
+        profile.remove("login-attempt.json")?;
         return Ok(json!({"authenticated":false}));
     }
     if name == "bug" {
@@ -664,7 +679,21 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         }
         "subscriptions" => {
             let (sub, m) = m.subcommand().unwrap();
-            if sub == "list" {
+            if sub == "required-delivery" {
+                let enabled = s(m, "enabled");
+                recipient(
+                    &client,
+                    &profile,
+                    &test,
+                    if enabled.is_some() { "PUT" } else { "GET" },
+                    &format!(
+                        "{base}/subscriptions/{}/required-delivery",
+                        segment(required(m, "id")?)
+                    ),
+                    enabled.map(|value| json!({"enabled": value == "true"})),
+                )
+                .await
+            } else if sub == "list" {
                 recipient(
                     &client,
                     &profile,

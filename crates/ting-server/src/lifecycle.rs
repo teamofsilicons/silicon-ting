@@ -111,6 +111,12 @@ pub async fn handle(
     }
     if old.as_ref().is_none_or(|(_, state, _)| state == "pending") {
         let tx = db.transaction()?;
+        crate::receiver::fence(
+            &tx,
+            &environment,
+            &command.action,
+            &command.body["retired_apps"],
+        )?;
         if matches!(command.action.as_str(), "clean" | "purge") {
             tx.execute("DELETE FROM deliveries WHERE hook IN(SELECT id FROM hooks WHERE ctx=?) OR message IN(SELECT id FROM tings WHERE ctx=?)",params![environment,environment])?;
             for table in ["hooks", "tings", "types", "grants", "preferences", "keys"] {
@@ -126,6 +132,10 @@ pub async fn handle(
                 // Retained history remains readable; retired issuers cannot resume pending delivery.
                 tx.execute(
                     "UPDATE grants SET active=0 WHERE ctx=? AND app=?",
+                    params![environment, retired.as_str().unwrap()],
+                )?;
+                tx.execute(
+                    "DELETE FROM preferences WHERE ctx=? AND app=? AND scope='delivery:required'",
                     params![environment, retired.as_str().unwrap()],
                 )?;
             }

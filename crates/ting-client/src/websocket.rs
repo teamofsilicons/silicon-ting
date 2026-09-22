@@ -92,10 +92,20 @@ impl WebSocket {
     /// Connect without granting authority. Each send/subscription supplies its own
     /// proof/session and optional verified Ting audience testing credentials.
     pub async fn connect(client: &Client) -> Result<Self> {
+        Self::connect_path(client, "/v1/ws").await
+    }
+
+    /// Connect to the restricted testing receiver transport. Authenticate with
+    /// `watch_receiver` within five seconds. This transport cannot send or ACK.
+    pub async fn connect_receiver(client: &Client) -> Result<Self> {
+        Self::connect_path(client, "/v1/receivers/ws").await
+    }
+
+    async fn connect_path(client: &Client, path: &str) -> Result<Self> {
         // Client.origin is public, so validate again before building a credential-free URL.
         let origin = crate::api_origin(&client.origin)?;
         let url = format!(
-            "{}/v1/ws?protocol=v1",
+            "{}{path}?protocol=v1",
             origin
                 .replacen("https://", "wss://", 1)
                 .replacen("http://", "ws://", 1)
@@ -188,6 +198,18 @@ impl WebSocket {
         bounded(session, "Session token", 32768)?;
         self.request(
             json!({"op":"watch_inbox","org_id":org,"session_token":session}),
+            "watching_inbox",
+        )
+        .await
+    }
+
+    /// Start a scoped receiver watch using a capability from
+    /// `receivers.bootstrap`. Obtain a fresh proof and a new operation key for
+    /// renewal, then reconnect; an old operation never extends its original expiry.
+    pub async fn watch_receiver(&mut self, receiver_token: &str) -> Result<Value> {
+        bounded(receiver_token, "Receiver token", 32768)?;
+        self.request(
+            json!({"op":"watch","receiver_token":receiver_token}),
             "watching_inbox",
         )
         .await
@@ -436,6 +458,54 @@ mod tests {
             .unwrap()
             .unwrap();
         strict_json(frame.to_text().unwrap().as_bytes()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn scoped_receiver_uses_its_own_route_and_keeps_capability_out_of_url() {
+        let (listener, client) = fixture().await;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                    assert_eq!(request.uri().to_string(), "/v1/receivers/ws?protocol=v1");
+                    assert!(!request.headers().contains_key("authorization"));
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            respond(
+                &mut socket,
+                json!({"op":"ready","protocol":"v1","receiver_id":"scoped"}),
+            )
+            .await;
+            let request = receive(&mut socket).await;
+            assert_eq!(request["op"], "watch");
+            assert_eq!(request["receiver_token"], "private-capability");
+            respond(
+                &mut socket,
+                json!({"op":"watching_inbox","request_id":request["request_id"],"org_id":"org"}),
+            )
+            .await;
+            respond(
+                &mut socket,
+                json!({"op":"inbox_changed","org_id":"org","app_id":"tos>hook"}),
+            )
+            .await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), socket.next())
+                    .await
+                    .is_err(),
+                "A scoped watch must not send automatic ACKs"
+            );
+        });
+        let mut socket = WebSocket::connect_receiver(&client).await.unwrap();
+        socket.watch_receiver("private-capability").await.unwrap();
+        assert!(
+            matches!(socket.next_event().await.unwrap(), Event::InboxChanged {org_id} if org_id == "org")
+        );
+        server.await.unwrap();
     }
 
     #[tokio::test]

@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-22T20:52:26.472040+00:00",
+  "secret_name": "silicon-ting/production/runtime",
+  "region": "us-east-1",
+  "previous_version": "1294c65e-e2d0-4f9d-87e7-7a737da4523f",
+  "version": "9b9f51f5-f151-4b39-a80d-14afc85ef061",
+  "changed_fields": [
+    "TING_BROWSER_ORIGINS"
+  ],
+  "browser_origins": [
+    "https://dm.teamofsilicons.com",
+    "https://interface.teamofsilicons.com",
+    "https://hook.teamofsilicons.com"
+  ],
+  "runtime_reload": "pending 0.1.4 deployment",
+  "other_settings_preserved": true
+}

@@ -9,6 +9,9 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let readCalls = 0, authenticated = false, read = false;
+  let requiredDelivery = false, failRequiredDelivery = false;
+  const requiredDeliveryWrites = [];
+  const subscription = { id: 'sub-smoke-original', app_id: 'tos>demo', for: 'c_smoke', active: true };
   const ting = { id: 'smoke-ting', created_at: new Date().toISOString(), type: 'tos>demo.messages.received', for: 'c_smoke', key: 'smoke-key', silent: false };
   await page.route('**/v1/**', async route => {
     const url = new URL(route.request().url()), path = decodeURIComponent(url.pathname);
@@ -16,6 +19,15 @@ try {
     if (path === '/v1/me') { status = authenticated ? 200 : 401; body = authenticated ? { id: 'c_smoke', kind: 'carbon', authenticated: true } : { error: { code: 'authentication_required', message: 'Sign in required.' } }; }
     else if (path === '/v1/orgs') body = { items: [{ id: 'tos', name: 'TOS' }] };
     else if (path.endsWith('/apps')) body = { items: [{ app_id: 'tos>demo', name: 'Demo', can_manage_tings: true }] };
+    else if (route.request().method() === 'PUT') {
+      const write = { path, body: route.request().postDataJSON() };
+      requiredDeliveryWrites.push(write);
+      assert.equal(path, `/v1/orgs/tos/subscriptions/${subscription.id}/required-delivery`, 'Consent must target the original subscription');
+      assert.equal(typeof write.body.enabled, 'boolean');
+      if (failRequiredDelivery) { status = 503; body = { error: { code: 'dependency_unavailable', message: 'Required delivery could not be updated.', hint: 'Try again later.' } }; }
+      else { requiredDelivery = write.body.enabled; body = { id: subscription.id, app_id: subscription.app_id, for: subscription.for, enabled: requiredDelivery }; }
+    }
+    else if (path.endsWith('/subscriptions')) body = { items: [{ ...subscription, required_delivery: requiredDelivery }] };
     else if (path.endsWith('/inbox/read')) { readCalls++; read = true; body = { message_ids: ['smoke-ting'], read: true }; }
     else if (path.endsWith('/inbox/smoke-ting')) body = { ...ting, read, data: { text: 'Smoke test payload', url: 'javascript:alert(1)' }, metadata: {} };
     else if (path.endsWith('/inbox')) body = { items: url.searchParams.get('silent') === 'true' ? [] : [{ ...ting, read }] };
@@ -53,6 +65,37 @@ try {
   await page.getByRole('textbox', { name: 'Description', exact: true }).fill('Description');
   await page.getByRole('button', { name: 'Register type', exact: true }).last().click();
   await page.getByText('Use app_id.service.event, with lowercase service and event names.').waitFor();
+  await page.getByRole('button', { name: 'Close type editor' }).click();
+  await page.getByRole('link', { name: 'Connections', exact: true }).click();
+  const consent = page.getByRole('checkbox', { name: 'Allow required automation delivery, even when notifications are muted', exact: true });
+  await consent.waitFor();
+  assert.equal(await consent.isChecked(), false, 'Required delivery must start disabled');
+  assert.deepEqual(requiredDeliveryWrites, [], 'Listing connections must not grant required delivery');
+  await consent.click();
+  await page.getByText('Required automation delivery enabled.', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.required-delivery input')?.checked === true);
+  assert.deepEqual(requiredDeliveryWrites, [{ path: `/v1/orgs/tos/subscriptions/${subscription.id}/required-delivery`, body: { enabled: true } }]);
+  await consent.click();
+  await page.getByText('Required automation delivery disabled.', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.required-delivery input')?.checked === false);
+  assert.deepEqual(requiredDeliveryWrites[1], { path: `/v1/orgs/tos/subscriptions/${subscription.id}/required-delivery`, body: { enabled: false } });
+  failRequiredDelivery = true;
+  await consent.click();
+  await page.getByRole('alert').filter({ hasText: 'Required delivery could not be updated.' }).waitFor();
+  assert.equal(await consent.isChecked(), false, 'Failed consent updates must preserve the confirmed setting');
+  assert.equal(requiredDelivery, false);
+  assert.deepEqual(requiredDeliveryWrites[2], { path: `/v1/orgs/tos/subscriptions/${subscription.id}/required-delivery`, body: { enabled: true } });
+  assert.equal(requiredDeliveryWrites.length, 3, 'Only explicit consent actions may write');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().right <= 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Connections must not overflow at ${width}px`);
+    assert.equal(await page.locator('.required-delivery').evaluate(label => {
+      const box = label.getBoundingClientRect();
+      return box.left >= 0 && box.right <= innerWidth && label.scrollWidth <= label.clientWidth;
+    }), true, `Required-delivery consent must fit at ${width}px`);
+  }
+  await page.screenshot({ path: '/tmp/ting-mobile-connections.png', fullPage: true });
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log('Chrome browser checks passed: public/mobile/docs, authenticated inbox with test API responses, no background read ACK, visible read ACK, safe URLs, silent filtering, type ownership validation.');
+  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible read ACK, safe URLs, silent filtering, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
 } finally { await browser.close(); }
