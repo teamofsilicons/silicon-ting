@@ -281,7 +281,13 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             if op == "ack" {
                 let message_ids = v::ids(b, "message_ids", false)?;
                 let kind = v::string(b, "kind", 16)?;
-                let (ctx, owner) = app.store.ack(rid, &org, &ids[0], &message_ids, kind)?;
+                let (ctx, owner, expired) =
+                    app.store.ack(rid, &org, &ids[0], &message_ids, kind)?;
+                if expired {
+                    app.hub
+                        .invalidate(app, &ctx, &org, &owner, "preference_changed")
+                        .await?;
+                }
                 if kind == "read" {
                     app.hub.inbox_changed(&ctx, &org, &owner).await;
                     app.changed.notify_waiters();

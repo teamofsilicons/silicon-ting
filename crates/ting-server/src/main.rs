@@ -515,9 +515,15 @@ async fn http(
         )),
         ("POST", ["inbox", "read"]) => {
             v::fields(&b, &["message_ids"], &["message_ids"])?;
-            let out = app
+            let _gate = app.mutations.lock().await;
+            let (out, expired) = app
                 .store
                 .read(&p, &org, &v::ids(&b, "message_ids", false)?)?;
+            if expired {
+                app.hub
+                    .invalidate(&app, &p.context, &org, &p.id, "preference_changed")
+                    .await?;
+            }
             app.hub.inbox_changed(&p.context, &org, &p.id).await;
             Ok(response(200, out))
         }

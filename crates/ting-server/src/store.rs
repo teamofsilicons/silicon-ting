@@ -384,24 +384,27 @@ impl Store {
             db.prepare("SELECT hook,delivery,read FROM deliveries WHERE message=? ORDER BY hook")?;
         Ok(q.query_map([mid],|r|Ok(json!({"webhook_id":r.get::<_,String>(0)?,"delivery_acked":r.get::<_,bool>(1)?,"read_acked":r.get::<_,bool>(2)?})))?.collect::<std::result::Result<_,_>>()?)
     }
-    pub fn read(&self, p: &Principal, org: &str, ids: &[String]) -> Result<Value> {
+    pub fn read(&self, p: &Principal, org: &str, ids: &[String]) -> Result<(Value, bool)> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
+        let cutoff = retention_cutoff(1);
+        let mut expired = false;
         for mid in ids {
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tings WHERE id=? AND ctx=? AND org=? AND recipient=?)",
-                params![mid, p.context, org, p.id],
-                |r| r.get(0),
-            )?;
-            if !exists {
-                return Err(Error::not_found());
-            }
+            let row: Option<(String, bool)> = tx
+                .query_row(
+                    "SELECT created,read FROM tings WHERE id=? AND ctx=? AND org=? AND recipient=?",
+                    params![mid, p.context, org, p.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let (created, read) = row.ok_or_else(Error::not_found)?;
+            expired |= !read && created < cutoff;
         }
         for mid in ids {
             tx.execute("UPDATE tings SET read=1 WHERE id=?", [mid])?;
         }
         tx.commit()?;
-        Ok(json!({"message_ids":ids,"read":true}))
+        Ok((json!({"message_ids":ids,"read":true}), expired))
     }
     pub fn preferences(&self, p: &Principal, org: &str, f: &Value) -> Result<Vec<Value>> {
         let db = self.lock()?;
@@ -569,8 +572,8 @@ impl Store {
     }
     pub fn hooks(&self, p: &Principal, org: &str) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT h.id,h.receiver,h.state,(SELECT COUNT(*) FROM deliveries d WHERE d.hook=h.id AND d.read=0) FROM hooks h WHERE ctx=? AND org=? AND recipient=? ORDER BY id")?;
-        Ok(q.query_map(params![p.context,org,p.id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"receiver_id":r.get::<_,Option<String>>(1)?,"for":p.id,"state":r.get::<_,String>(2)?,"pending":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<_,_>>()?)
+        let mut q=db.prepare("SELECT h.id,h.receiver,h.state,(SELECT COUNT(*) FROM deliveries d JOIN tings t ON t.id=d.message WHERE d.hook=h.id AND d.read=0 AND t.created>=? AND ((t.read=0 AND t.silent=0) OR t.created>=?)) FROM hooks h WHERE ctx=? AND org=? AND recipient=? ORDER BY id")?;
+        Ok(q.query_map(params![retention_cutoff(3),retention_cutoff(1),p.context,org,p.id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"receiver_id":r.get::<_,Option<String>>(1)?,"for":p.id,"state":r.get::<_,String>(2)?,"pending":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<_,_>>()?)
     }
     pub fn hook_retry(
         &self,
@@ -843,7 +846,7 @@ impl Store {
         hid: &str,
         ids: &[String],
         kind: &str,
-    ) -> Result<(String, String)> {
+    ) -> Result<(String, String, bool)> {
         if kind != "read" && kind != "delivery" {
             return Err(v_err("ACK kind must be delivery or read."));
         }
@@ -851,6 +854,8 @@ impl Store {
         let tx = db.transaction()?;
         let owner:Option<(String,String)>=tx.query_row("SELECT ctx,recipient FROM hooks WHERE id=? AND org=? AND receiver=? AND state='connected'",params![hid,org,receiver],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let owner = owner.ok_or_else(Error::not_found)?;
+        let cutoff = retention_cutoff(1);
+        let mut expired = false;
         for mid in ids {
             let row: Option<(bool, Option<String>, bool)> = tx
                 .query_row(
@@ -877,6 +882,10 @@ impl Store {
                     "UPDATE deliveries SET read=1,delivery=1 WHERE hook=? AND message=?",
                     params![hid, mid],
                 )?;
+                expired |= tx.execute(
+                    "UPDATE tings SET read=1 WHERE id=? AND read=0 AND created<?",
+                    params![mid, cutoff],
+                )? > 0;
                 tx.execute("UPDATE tings SET read=1 WHERE id=?", [mid])?;
             } else {
                 tx.execute(
@@ -886,7 +895,7 @@ impl Store {
             }
         }
         tx.commit()?;
-        Ok(owner)
+        Ok((owner.0, owner.1, expired))
     }
     pub fn expired_owners(&self) -> Result<Vec<(String, String, String)>> {
         let db = self.lock()?;
@@ -1093,7 +1102,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        s.read(&p, "org-uuid", &[read.clone()]).unwrap();
+        assert!(!s.read(&p, "org-uuid", &[read.clone()]).unwrap().1);
         s.preference(
             &p,
             "org-uuid",
@@ -1134,11 +1143,58 @@ mod tests {
         let batch = s.offer("r", &h).unwrap().unwrap();
         assert_eq!(batch["tings"].as_array().unwrap().len(), 1);
         assert_eq!(batch["tings"][0]["id"], unread);
+        assert_eq!(s.hooks(&p, "org-uuid").unwrap()[0]["pending"], 1);
         assert_eq!(s.prune().unwrap(), 2);
         assert!(s.deliveries(&read).unwrap().is_empty());
         assert!(s.deliveries(&unread).unwrap().len() == 1);
-        s.read(&p, "org-uuid", &[unread.clone()]).unwrap();
+        assert!(s.read(&p, "org-uuid", &[unread.clone()]).unwrap().1);
+        assert_eq!(s.hooks(&p, "org-uuid").unwrap()[0]["pending"], 0);
         assert_eq!(s.prune().unwrap(), 1);
+    }
+    #[test]
+    fn read_ack_expires_old_copies_on_other_hooks() {
+        let (s, p, proof) = fixture();
+        let a = hook(&s, &p, "a");
+        let b = hook(&s, &p, "b");
+        let mid = s.send(&proof, &body("old-copy")).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        s.offer("a", &a).unwrap().unwrap();
+        s.offer("b", &b).unwrap().unwrap();
+        let created = (chrono::Utc::now() - chrono::Months::new(2))
+            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+        s.lock()
+            .unwrap()
+            .execute(
+                "UPDATE tings SET created=? WHERE id=?",
+                params![created, mid],
+            )
+            .unwrap();
+        assert!(
+            !s.ack("a", "org-uuid", &a, &[mid.clone()], "delivery")
+                .unwrap()
+                .2
+        );
+        assert!(
+            s.ack("a", "org-uuid", &a, &[mid.clone()], "read")
+                .unwrap()
+                .2
+        );
+        assert_eq!(
+            s.ting(&p.context, "org-uuid", &mid, Some(&p.id), None)
+                .unwrap_err()
+                .status,
+            404
+        );
+        assert!(
+            s.hooks(&p, "org-uuid")
+                .unwrap()
+                .iter()
+                .all(|h| h["pending"] == 0)
+        );
+        assert!(!s.ack("a", "org-uuid", &a, &[mid], "read").unwrap().2);
+        assert!(s.offer("b", &b).unwrap().is_none());
     }
     #[test]
     fn concurrent_keys_and_expiry_create_only_intended_records() {

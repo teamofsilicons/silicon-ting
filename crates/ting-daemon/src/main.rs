@@ -783,6 +783,13 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
     if now() < hook.next_attempt {
         return Ok(());
     }
+    let month_cutoff = Utc::now().checked_sub_months(Months::new(1)).unwrap();
+    if batch.iter().any(|ting| !retained(ting, month_cutoff)) {
+        // Another destination may have read an old ting since this copy was queued.
+        // Uncertain checks must not forward it; only authenticated absence permits deletion.
+        cleanup_missing(&shared, &hook).await?;
+        batch = shared.store.batch(&hook.id, false)?;
+    }
     if !shared.socket.read().await.authorized.contains(&hook.id) {
         return Ok(());
     }
@@ -1513,6 +1520,170 @@ mod tests {
         assert_eq!(remaining[0]["id"], "unread");
         server.await.unwrap();
         drop(shared);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[tokio::test]
+    async fn aged_pending_rechecks_retention_before_forwarding() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for attempt in 0..6 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let header_end = loop {
+                    let mut buf = [0u8; 1024];
+                    let n = socket.read(&mut buf).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buf[..n]);
+                    if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
+                        break end + 4;
+                    }
+                };
+                let headers = String::from_utf8(bytes[..header_end].to_vec()).unwrap();
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                while bytes.len() < header_end + length {
+                    let mut buf = [0u8; 1024];
+                    let n = socket.read(&mut buf).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buf[..n]);
+                }
+                let (status, body) = if headers.starts_with("GET ") {
+                    assert!(
+                        headers
+                            .to_ascii_lowercase()
+                            .contains("authorization: bearer private-test")
+                    );
+                    assert!(
+                        attempt < 3 || attempt == 5,
+                        "Fresh notifications must not need retention GETs"
+                    );
+                    if attempt == 0 {
+                        ("503 Service Unavailable", json!({"error":{"code":"unavailable","message":"uncertain","hint":"","retryable":true}}).to_string())
+                    } else if headers.starts_with("GET /v1/orgs/tos/inbox/expired ")
+                        || headers.starts_with("GET /v1/orgs/tos/inbox/onlyexpired ")
+                    {
+                        ("404 Not Found", json!({"error":{"code":"not_found","message":"Read elsewhere and expired","hint":"","retryable":false}}).to_string())
+                    } else {
+                        assert!(headers.starts_with("GET /v1/orgs/tos/inbox/unread "));
+                        ("200 OK", json!({"id":"unread","read":false}).to_string())
+                    }
+                } else {
+                    assert!(headers.starts_with("POST /hook "));
+                    assert!(attempt >= 3, "Uncertain retention must not forward a batch");
+                    let payload: Value =
+                        serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap();
+                    assert_eq!(payload["tings"].as_array().unwrap().len(), 1);
+                    assert_eq!(
+                        payload["tings"][0]["id"],
+                        if attempt == 3 { "unread" } else { "fresh" }
+                    );
+                    ("204 No Content", String::new())
+                };
+                socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err(),
+                "An emptied batch must not make a webhook POST"
+            );
+        });
+        let dir =
+            std::env::temp_dir().join(format!("ting-pending-retention-{}", uuid::Uuid::new_v4()));
+        private_dir(&dir).unwrap();
+        let profile = Profile {
+            dir: fs::canonicalize(&dir).unwrap(),
+        };
+        profile
+            .save(
+                "session.json",
+                &Session {
+                    api_url: api.clone(),
+                    id: "si_test".into(),
+                    token: "private-test".into(),
+                    context: None,
+                },
+            )
+            .unwrap();
+        profile
+            .save(
+                "settings.json",
+                &Settings {
+                    telemetry: Some(false),
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        let store = Arc::new(Store::open(&dir.join("queue.sqlite")).unwrap());
+        let queue = |id: &str, created: String| {
+            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"tos>dm.msg.received","for":"si_test","key":id,"data":{},"metadata":{}}]}), &api).unwrap();
+        };
+        let old = Utc::now()
+            .checked_sub_months(Months::new(2))
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        queue("expired", old.clone());
+        queue("unread", old.clone());
+        let (tx, mut rx) = mpsc::channel::<SocketCommand>(2);
+        let acknowledgements = tokio::spawn(async move {
+            for id in ["unread", "fresh"] {
+                let command = rx.recv().await.unwrap();
+                assert_eq!(command.body["kind"], "read");
+                assert_eq!(command.body["message_ids"], json!([id]));
+                command.reply.send(Ok(json!({"op":"acked"}))).unwrap();
+            }
+        });
+        let shared = Shared {
+            store: store.clone(),
+            tx,
+            socket: Arc::new(RwLock::new(SocketStatus {
+                authorized: HashSet::from(["hook".into()]),
+                ..SocketStatus::default()
+            })),
+            wake: Arc::new(Notify::new()),
+            leases: Arc::new(Mutex::new((None, 0))),
+        };
+        let hook = Hook {
+            id: "hook".into(),
+            profile: profile.dir.to_string_lossy().into(),
+            api: api.clone(),
+            org: "tos".into(),
+            token_hash: digest("private-test"),
+            url: format!("{api}/hook"),
+            secret: None,
+            health: None,
+            state: "attached".into(),
+            first_failure: None,
+            next_attempt: 0,
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            assert!(forward(shared.clone(), hook.clone()).await.is_err());
+            assert_eq!(store.batch("hook", false).unwrap().len(), 2);
+            forward(shared.clone(), hook.clone()).await.unwrap();
+            assert!(store.batch("hook", false).unwrap().is_empty());
+            queue(
+                "fresh",
+                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            );
+            forward(shared.clone(), hook.clone()).await.unwrap();
+            queue("onlyexpired", old);
+            forward(shared.clone(), hook).await.unwrap();
+            assert!(store.batch("hook", false).unwrap().is_empty());
+            server.await.unwrap();
+            acknowledgements.await.unwrap();
+        })
+        .await
+        .unwrap();
+        drop(shared);
+        drop(store);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "app_id": "tos>ting",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "bin": { "ting": "main", "ting-daemon": "daemon" },
   "targets": {
     "linux-x86_64": { "root": "targets/linux-x86_64", "executables": { "main": "ting", "daemon": "ting-daemon" } },
