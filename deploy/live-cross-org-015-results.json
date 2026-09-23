@@ -1,0 +1,277 @@
+{
+  "environment_id": "d44e1c97-837f-4882-9b8c-5ae593aafa53",
+  "generation": 2,
+  "source_commit": "3537f90e98147acaf3ad42c2f8b80bc505ab2357",
+  "production_notifications_sent": false,
+  "production_grants_or_preferences_modified": false,
+  "transport": "Public HTTPS and WebSocket using real isolated IAM OBO authority; not a Hook adapter or browser end-to-end run.",
+  "checks": [
+    "Recipient belongs only to recipient organization; app owner is a separate organization",
+    "Type exists under app owner; foreign recipient cannot list or redefine owner catalog",
+    "Global type lookup still requires an actor-bound recipient registration",
+    "Foreign-owned app sends and delivers over WebSocket; recipient inbox filtering and subscription data retain it",
+    "Receipt and read ACKs remain distinct; other actor and other organization cannot read delivery; retry deduplicates",
+    "Recipient preferences control foreign-app silence; revocation blocks subsequent sends"
+  ],
+  "complete": true,
+  "backend_version": "0.1.5",
+  "accepted_test_tings": 2,
+  "passed": 6,
+  "latency_samples": [
+    {
+      "method": "POST",
+      "path": "/v1/session",
+      "status": 201,
+      "milliseconds": 975.4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/session",
+      "status": 201,
+      "milliseconds": 954.1
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs",
+      "status": 200,
+      "milliseconds": 1032.2
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/01a0cdbf-e535-7153-ac49-fa8e4fcc2752/apps/tos%3Ehook/types",
+      "status": 201,
+      "milliseconds": 1856.9
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/apps/tos%3Ehook/types",
+      "status": 403,
+      "milliseconds": 2322.8
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/apps/tos%3Ehook/types",
+      "status": 403,
+      "milliseconds": 1652.3
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e535-7153-ac49-fa8e4fcc2752/inbox",
+      "status": 403,
+      "milliseconds": 932.1
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 403,
+      "milliseconds": 946.4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "status": 201,
+      "milliseconds": 944.9
+    },
+    {
+      "method": "POST",
+      "path": "/v1/subscriptions",
+      "status": 403,
+      "milliseconds": 943.7
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/subscriptions",
+      "status": 200,
+      "milliseconds": 916.5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/webhooks",
+      "status": 201,
+      "milliseconds": 897.1
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 929.2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/inbox",
+      "status": 200,
+      "milliseconds": 983.0
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/apps",
+      "status": 200,
+      "milliseconds": 1526.1
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/inbox/msg_ebe243b27c48426b811a02cc5a6e94be",
+      "status": 200,
+      "milliseconds": 911.4
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/inbox/msg_ebe243b27c48426b811a02cc5a6e94be",
+      "status": 404,
+      "milliseconds": 954.3
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e535-7153-ac49-fa8e4fcc2752/inbox/msg_ebe243b27c48426b811a02cc5a6e94be",
+      "status": 404,
+      "milliseconds": 928.1
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sent/query",
+      "status": 200,
+      "milliseconds": 978.9
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 200,
+      "milliseconds": 940.2
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/preferences",
+      "status": 200,
+      "milliseconds": 981.3
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 202,
+      "milliseconds": 954.4
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/preferences",
+      "status": 200,
+      "milliseconds": 897.8
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/subscriptions/sub_57fc1e2ec8b84c659923b77516bcf346",
+      "status": 200,
+      "milliseconds": 929.3
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tings",
+      "status": 403,
+      "milliseconds": 943.9
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/orgs/01a0cdbf-e837-77d1-8c16-9e47b0e3534d/webhooks/hook_22804dfa2dfc4686af2dab70c3156fc8",
+      "status": 200,
+      "milliseconds": 961.9
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/session",
+      "status": 200,
+      "milliseconds": 767.4
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/session",
+      "status": 200,
+      "milliseconds": 718.7
+    }
+  ],
+  "completed_at": "2026-09-23T10:16:11Z",
+  "cleanup": {
+    "clean": {
+      "environment_id": "d44e1c97-837f-4882-9b8c-5ae593aafa53",
+      "state": "ready",
+      "generation": 3,
+      "revision": 5,
+      "operation_pending": false,
+      "imports": [],
+      "services": [
+        {
+          "app_id": "tos>briefcase",
+          "error": null,
+          "operation_id": "2dfd3782-f6bc-4060-916b-a6c00c863552",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>honeycomb",
+          "error": null,
+          "operation_id": "2dfd3782-f6bc-4060-916b-a6c00c863552",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>hook",
+          "error": null,
+          "operation_id": "2dfd3782-f6bc-4060-916b-a6c00c863552",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>iam",
+          "error": null,
+          "operation_id": "2dfd3782-f6bc-4060-916b-a6c00c863552",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>ting",
+          "error": null,
+          "operation_id": "2dfd3782-f6bc-4060-916b-a6c00c863552",
+          "state": "ready"
+        }
+      ]
+    },
+    "delete": {
+      "environment_id": "d44e1c97-837f-4882-9b8c-5ae593aafa53",
+      "state": "deleted",
+      "generation": 3,
+      "revision": 6,
+      "operation_pending": false,
+      "imports": [],
+      "services": [
+        {
+          "app_id": "tos>briefcase",
+          "error": null,
+          "operation_id": "c4169d09-e57c-4d19-92ca-e1781bde07f3",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>honeycomb",
+          "error": null,
+          "operation_id": "c4169d09-e57c-4d19-92ca-e1781bde07f3",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>hook",
+          "error": null,
+          "operation_id": "c4169d09-e57c-4d19-92ca-e1781bde07f3",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>iam",
+          "error": null,
+          "operation_id": "c4169d09-e57c-4d19-92ca-e1781bde07f3",
+          "state": "ready"
+        },
+        {
+          "app_id": "tos>ting",
+          "error": null,
+          "operation_id": "c4169d09-e57c-4d19-92ca-e1781bde07f3",
+          "state": "ready"
+        }
+      ],
+      "purge_after": 1792750604
+    },
+    "complete": true,
+    "completed_at": "2026-09-23T10:16:46.556776+00:00",
+    "private_credential_staging_removed": true
+  }
+}

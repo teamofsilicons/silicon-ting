@@ -1,0 +1,261 @@
+{
+  "checked_at": "2026-09-23T10:18:49.920462+00:00",
+  "version": "0.1.5",
+  "source_commit": "3537f90e98147acaf3ad42c2f8b80bc505ab2357",
+  "scope": "Native GitHub distribution download and digest verification; local six-target Honeycomb assembly/validation; authorized production upload and anonymous listing verification.",
+  "github": {
+    "release_url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5",
+    "tag": "v0.1.5",
+    "tag_commit": "3537f90e98147acaf3ad42c2f8b80bc505ab2357",
+    "published_at": "2026-09-23T10:13:46Z",
+    "draft": false,
+    "prerelease": false,
+    "workflow": {
+      "conclusion": "success",
+      "headSha": "3537f90e98147acaf3ad42c2f8b80bc505ab2357",
+      "jobs": [
+        {
+          "conclusion": "success",
+          "name": "build (ubuntu-24.04-arm, aarch64-unknown-linux-gnu)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135759647"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (macos-15, aarch64-apple-darwin)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135759877"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (windows-2025, x86_64-pc-windows-msvc)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135759981"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (macos-15-intel, x86_64-apple-darwin)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135759984"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (windows-11-arm, aarch64-pc-windows-msvc)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135759993"
+        },
+        {
+          "conclusion": "success",
+          "name": "build (ubuntu-24.04, x86_64-unknown-linux-gnu)",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107135760043"
+        },
+        {
+          "conclusion": "success",
+          "name": "publish",
+          "status": "completed",
+          "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562/job/107137296165"
+        }
+      ],
+      "status": "completed",
+      "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35847096562"
+    },
+    "all_six_native_archives_and_checksums_downloaded": true,
+    "all_archive_checksums_match_SHA256SUMS": true,
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "size": 643,
+        "sha256": "46405cc44904f739f7fa5042ebfdc613908594ea3c2ec8851e833efd49b1834e",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/SHA256SUMS"
+      },
+      {
+        "name": "ting-v0.1.5-aarch64-apple-darwin.tar.gz",
+        "size": 5048675,
+        "sha256": "cf0932864b574d0be776871e8187960c7d32d6c3b855e2ed4f6ae019c0d981d8",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-aarch64-apple-darwin.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.5-aarch64-pc-windows-msvc.zip",
+        "size": 5029403,
+        "sha256": "5c10b5593d99446d64582fbfb310a3860bddde554cb965ea9b19c686529b9bc2",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-aarch64-pc-windows-msvc.zip"
+      },
+      {
+        "name": "ting-v0.1.5-aarch64-unknown-linux-gnu.tar.gz",
+        "size": 5271879,
+        "sha256": "32d2f920c3c215a47520fa7e844d7d6c2bb86e05f68fee05e4a9918b9719c862",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-aarch64-unknown-linux-gnu.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.5-x86_64-apple-darwin.tar.gz",
+        "size": 5326816,
+        "sha256": "bb0b87bfc1f4dcf6dcf1a19cafac97bcff6974fb1281ce1757e5364492976298",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-x86_64-apple-darwin.tar.gz"
+      },
+      {
+        "name": "ting-v0.1.5-x86_64-pc-windows-msvc.zip",
+        "size": 5414500,
+        "sha256": "e68b38fb15acbf1252cef803f0bb8ffc38312afb06dfe4459232e105e4f0418c",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-x86_64-pc-windows-msvc.zip"
+      },
+      {
+        "name": "ting-v0.1.5-x86_64-unknown-linux-gnu.tar.gz",
+        "size": 5560280,
+        "sha256": "0eb737c78ea9f6844a4eafd5b0d4345eb6345d84dfe7ee94acbed672610b9e9f",
+        "digest_matches_github": true,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.5/ting-v0.1.5-x86_64-unknown-linux-gnu.tar.gz"
+      }
+    ],
+    "older_releases_preserved": [
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T21:03:18Z",
+        "tagName": "v0.1.4"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T19:46:18Z",
+        "tagName": "v0.1.3"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T09:17:37Z",
+        "tagName": "v0.1.2"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T08:54:37Z",
+        "tagName": "v0.1.1"
+      },
+      {
+        "isDraft": false,
+        "isPrerelease": false,
+        "publishedAt": "2026-09-22T00:14:10Z",
+        "tagName": "v0.1.0"
+      }
+    ]
+  },
+  "package": {
+    "path": "dist/ting-honeycomb-0.1.5.tar.gz",
+    "sha256": "3b35e0b45cb3ec2df2e1f4e04af796dbfdeecda1d9b15d9d48a9eb11ca33acbb",
+    "size": 31282504,
+    "source_inputs_match_release_commit": true,
+    "assembly_command": "python3 scripts/package-honeycomb.py --assets dist/releases/v0.1.5 --output dist/ting-honeycomb-0.1.5.tar.gz",
+    "validation_command": "honeycomb validate dist/ting-honeycomb-0.1.5.tar.gz --json",
+    "valid": true,
+    "validation_errors": [],
+    "platforms": [
+      "linux-aarch64",
+      "linux-x86_64",
+      "macos-aarch64",
+      "macos-x86_64",
+      "windows-aarch64",
+      "windows-x86_64"
+    ],
+    "bin": {
+      "ting": "main",
+      "ting-daemon": "daemon"
+    },
+    "licenses_and_service_instructions_verified": true
+  },
+  "honeycomb": {
+    "app_id": "tos>ting",
+    "api": "https://backend.honeycomb.teamofsilicons.com",
+    "channel": "prod",
+    "production_revision_fetched_immediately_before_upload": 3,
+    "effective_revision_before": 3,
+    "upload_idempotency_key_persisted_privately": true,
+    "upload_attempts": 1,
+    "upload_exit_code": 0,
+    "release_receipt": {
+      "app_id": "tos>ting",
+      "channel": "prod",
+      "id": "78186812-f8c0-4b18-ba96-cfbc43cf817e",
+      "promoted_from": null,
+      "publication": {
+        "id": "10338617-2f27-4e82-b0cd-848751f18913",
+        "state": "published"
+      },
+      "sha256": "3b35e0b45cb3ec2df2e1f4e04af796dbfdeecda1d9b15d9d48a9eb11ca33acbb",
+      "size": 31282504,
+      "state": "accepted",
+      "version": "0.1.5"
+    },
+    "anonymous_app_status": 200,
+    "anonymous_releases_status": 200,
+    "anonymous_app_url": "https://backend.honeycomb.teamofsilicons.com/api/v1/apps/tos%3Eting",
+    "anonymous_releases_url": "https://backend.honeycomb.teamofsilicons.com/api/v2/apps/tos%3Eting/releases?channel=prod",
+    "anonymous_latest_version": "0.1.5",
+    "public_release_matches_upload_receipt": true,
+    "public_releases": [
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790158682,
+        "sha256": "3b35e0b45cb3ec2df2e1f4e04af796dbfdeecda1d9b15d9d48a9eb11ca33acbb",
+        "size": 31282504,
+        "version": "0.1.5"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790111175,
+        "sha256": "7dad6fccf7d92b50137dfa437926c4d54d30402d616b17b7b3c9d73bef69c9bd",
+        "size": 31270174,
+        "version": "0.1.4"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790106556,
+        "sha256": "a2d8e22f66114a6a8595da8e68c8f864f569fede4b7efda3bbc6c42c44645d93",
+        "size": 31193461,
+        "version": "0.1.3"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790073592,
+        "sha256": "13cb185e429fa234eb9f6a09e6ca767fa072783411abc0b24731317144a87031",
+        "size": 31059794,
+        "version": "0.1.2"
+      },
+      {
+        "app_id": "tos>ting",
+        "channel": "prod",
+        "created_at": 1790036337,
+        "sha256": "1d3a5329f2796197c5174fa34f2f5bf9b24b285eadf4b93e174d9ffd4db0d751",
+        "size": 31059118,
+        "version": "0.1.0"
+      }
+    ],
+    "older_releases_preserved": [
+      "0.1.4",
+      "0.1.3",
+      "0.1.2",
+      "0.1.0"
+    ],
+    "revision_after": 3,
+    "effective_revision_after": 3,
+    "configuration_publication": {
+      "id": "10338617-2f27-4e82-b0cd-848751f18913",
+      "state": "published"
+    },
+    "configuration_review_bypassed": false
+  },
+  "limitations": [
+    "Native asset checksums and public release listings verify distribution; they do not establish installation or execution on every platform locally."
+  ],
+  "remaining_actions": []
+}

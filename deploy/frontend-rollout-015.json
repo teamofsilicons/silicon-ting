@@ -1,0 +1,144 @@
+{
+  "checked_at": "2026-09-23T10:17:36.838467+00:00",
+  "release": "0.1.5",
+  "source_commit": "3537f90e98147acaf3ad42c2f8b80bc505ab2357",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_CQZ4oConrEsMb63aUbNkE1Af5XL4",
+    "url": "https://silicon-ting-jcgkktqky-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/CQZ4oConrEsMb63aUbNkE1Af5XL4",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "promoted": true,
+    "project_and_domains_preserved": true,
+    "promotion_waited_for_native_release_and_backend": true
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "chrome_browser_checks_with_mocked_api": "passed",
+    "production_telemetry_tables_preserved": true
+  },
+  "public_home": {
+    "https://ting.teamofsilicons.com": {
+      "status": 200,
+      "javascript": [
+        "/assets/index-V-_FCMwP.js"
+      ],
+      "stylesheets": [
+        "/assets/index-BbForarz.css"
+      ],
+      "matches_tested_production_build": true
+    },
+    "https://silicon-ting.vercel.app": {
+      "status": 200,
+      "javascript": [
+        "/assets/index-V-_FCMwP.js"
+      ],
+      "stylesheets": [
+        "/assets/index-BbForarz.css"
+      ],
+      "matches_tested_production_build": true
+    }
+  },
+  "public_resources": {
+    "/docs/api.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "14249866425230f1ee7bd8d60d4eadc328f258de52d07331e2b4d93ccd8801a5",
+      "source": "udd/api.md"
+    },
+    "/docs/cli.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "8a1145ddaf79944cdb42774f8dfbb7d32dc9f2e24ffee9b62e0ff8006f5d2652",
+      "source": "udd/cli.md"
+    },
+    "/docs/understanding.md": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "85363379d27d6b7c33acc8aaf4c0d9e4e8ec6997a8e8ddc486fd1dc5820e1df0",
+      "source": "udd/understanding.md"
+    },
+    "/install.sh": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "c97da5ed4f331cb9117f3a25c0ff1c43f3baad235a5313e7a59a5180278c90a0",
+      "source": "scripts/install.sh",
+      "default_version": "0.1.5"
+    },
+    "/install.ps1": {
+      "status": 200,
+      "matches_source": true,
+      "sha256": "8e30e666f4a31321e22725612f8f263941d1a9193761db4eb53500c149f5cd50",
+      "source": "scripts/install.ps1",
+      "default_version": "0.1.5"
+    }
+  },
+  "public_assets": {
+    "/assets/index-V-_FCMwP.js": {
+      "url": "https://ting.teamofsilicons.com/assets/index-V-_FCMwP.js",
+      "status": 200,
+      "sha256": "94c86719a20aeb74f6dc963d6fc7f16d332aa566986239dd4b8fea31f180abc0",
+      "matches_tested_production_build": true,
+      "telemetry_tables": [
+        "tingfrontendanalytics",
+        "tingfrontendevents"
+      ],
+      "cross_org_filter_and_preference_ui_present": true
+    },
+    "/assets/index-BbForarz.css": {
+      "url": "https://ting.teamofsilicons.com/assets/index-BbForarz.css",
+      "status": 200,
+      "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+      "matches_tested_production_build": true
+    }
+  },
+  "api_checks": {
+    "https://ting.teamofsilicons.com/v1/iam": {
+      "status": 200,
+      "content_type": "application/json",
+      "app_id": "tos>ting",
+      "api_version": "v1"
+    },
+    "https://backend.ting.teamofsilicons.com/healthz": {
+      "status": 200,
+      "content_type": "application/json",
+      "version": "0.1.5",
+      "service": "ting"
+    }
+  },
+  "limitations": [
+    "Browser interaction checks use mocked API and WebSocket responses; they do not establish a live authenticated IAM delivery flow."
+  ],
+  "production_browser_checks": {
+    "origin": "https://ting.teamofsilicons.com",
+    "browser": "Chrome",
+    "passed": true,
+    "api_and_websocket_responses": "mocked",
+    "checks": [
+      "Public desktop and mobile layout",
+      "Documentation navigation",
+      "Inbox fetching does not mark read",
+      "Opening a visible notification marks read once",
+      "Unsafe payload links do not render",
+      "Silent inbox filtering",
+      "Foreign app ID suggestions and arbitrary app IDs filter recipient org inbox",
+      "Foreign app preference changes use recipient org without requiring app-management catalog access",
+      "Inbox filters fit 390px and 320px viewports",
+      "Type ownership validation",
+      "Required-delivery consent defaults off and writes only on explicit actions",
+      "Required-delivery enable/disable targets the original recipient subscription",
+      "Failed consent updates preserve the confirmed setting",
+      "Connections layout fits 390px and 320px viewports",
+      "No browser runtime errors"
+    ]
+  }
+}

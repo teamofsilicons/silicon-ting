@@ -1,8 +1,20 @@
 # Deployment verification
 
-Updated 2026-09-22 UTC (2026-09-23 Asia/Kolkata). Backend **0.1.4**, release source `3253ea193c9fc244e6ef7e5fd818240ae0ad4782`, is [deployed and healthy](backend-014-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
+Updated 2026-09-23 UTC. Backend **0.1.5**, release source `3537f90e98147acaf3ad42c2f8b80bc505ab2357`, is [deployed and healthy](backend-015-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.1.4 release
+## Current 0.1.5 release
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [62 workspace unit tests and one compiling doctest passed](release-validation-015.json), including cross-org recipient isolation and owner-only type management. Workspace build, CLI smoke, five packaging tests, one installer test, formatting and documentation mirrors passed. |
+| Native and Honeycomb | [All six native platforms passed and the production package is published](native-honeycomb-release-015-results.json). Downloaded archives match their checksums; prior releases remain available. |
+| Crates | [Client and CLI 0.1.5 are published and non-yanked](crates-release-015-results.json). Downloaded checksums and clean embedded source commits match the release. |
+| Backend | [All three backend workflow jobs and SSM deployment checks passed](backend-015-deployment-results.json). The archive checksum and embedded commit were verified; public health reports 0.1.5. |
+| Frontend | [Vercel production promotion and public asset checks passed](frontend-rollout-015.json). JavaScript, CSS, docs and 0.1.5 installers match the tested source/build, and telemetry configuration is preserved. Chrome UI checks cover cross-org filters/preferences and mobile layout with mocked API/WebSocket responses. |
+| Public boundaries | [45 live HTTP/CORS checks passed](public-browser-smoke-015-results.json) across backend and frontend proxy. These checks require no credentials and do not mutate recipient state. |
+| Cross-org delivery | [Six live acceptance groups passed](live-cross-org-015-results.json) using real IAM authority and public HTTPS/WebSocket. A recipient belonging only to a foreign org received a type registered under the app owner. Grant requirements, catalog authority, inbox filtering, receipts, read ACKs, retry dedupe, preferences and revocation were verified. Two isolated test tings, zero production sends. The task-owned environment was cleaned and deleted; all lifecycle services are ready with no pending operation. This is protocol evidence, not a Hook adapter/browser end-to-end run. |
+
+## Historical 0.1.4 release
 
 | Check | Evidence and scope |
 | --- | --- |
