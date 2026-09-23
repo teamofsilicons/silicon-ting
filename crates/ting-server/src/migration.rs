@@ -272,6 +272,20 @@ pub fn ensure_current(db: &Connection) -> Result<()> {
             );
         }
     }
+    if table(db, "main", "keys")? {
+        let mut q = db.prepare("SELECT DISTINCT kind,owner FROM keys")?;
+        for row in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (kind, owner) = row?;
+            ensure!(
+                match kind.as_str() {
+                    "send" => crate::validation::app_id(&owner),
+                    "hook" => crate::validation::actor_kind(&owner).is_some(),
+                    _ => false,
+                },
+                "legacy or unknown replay owner; run --migrate-public-identifiers before starting Ting"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1016,6 +1030,17 @@ mod tests {
             assert!(run(&f.db, KEY, &f.map, true).is_err(), "case {case}");
             f.legacy();
         }
+    }
+    #[test]
+    fn legacy_replay_owner_blocks_startup_without_other_legacy_rows() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE keys(kind TEXT,owner TEXT); INSERT INTO keys VALUES('send','tos>hook');",
+        )
+        .unwrap();
+        assert!(ensure_current(&db).is_err());
+        db.execute("UPDATE keys SET owner='hook'", []).unwrap();
+        ensure_current(&db).unwrap();
     }
     #[test]
     fn uncertain_upstream_operations_block_cutover() {
