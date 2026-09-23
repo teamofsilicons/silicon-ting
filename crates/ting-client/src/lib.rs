@@ -184,7 +184,16 @@ pub fn type_app(s: &str) -> Result<&str> {
             ));
         }
     }
-    nonempty(app, "App ID")?;
+    if app.len() > 80
+        || !app.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        || !app
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+    {
+        return Err(Error::input(
+            "App ID must be a bare IAM handle: 1–80 lowercase letters, digits, underscores or hyphens, starting with a letter. Refresh IAM metadata after identifier migration.",
+        ));
+    }
     Ok(app)
 }
 pub fn api_origin(s: &str) -> Result<String> {
@@ -878,17 +887,35 @@ mod tests {
             api_origin("http://127.0.0.1:1234").unwrap(),
             "http://127.0.0.1:1234"
         );
-        let b=br#"{ "org_id":"tos", "type":"tos>dm.msg.received", "for":"si_1", "key":"k", "data":{} }"#.to_vec();
+        let b=br#"{ "org_id":"tos", "type":"dm.msg.received", "for":"si:one", "key":"k", "data":{} }"#.to_vec();
         let p = Prepared::new(ProofOperation::Send, b.clone(), Some("tos")).unwrap();
         assert_eq!(p.body, b);
         assert!(Prepared::new(ProofOperation::Send, b, Some("other")).is_err());
-        assert!(type_app("tos>dm.Msg.received").is_err());
+        assert!(type_app("dm.Msg.received").is_err());
+        assert_eq!(type_app("dm.msg.received").unwrap(), "dm");
+        for app in ["tos>dm", "si:dm", "dm.extra", "0dm", "", &"a".repeat(81)] {
+            assert!(type_app(&format!("{app}.msg.received")).is_err());
+        }
+        assert!(type_app(&format!("{}.msg.received", "a".repeat(80))).is_ok());
+        // Identity changes never rewrite opaque idempotency keys or user content.
+        for actor in ["c:alice0", "si:assistant"] {
+            let bytes =
+                format!(r#"{{ "org_id":"tos", "app_id":"dm", "for":"{actor}" }}"#).into_bytes();
+            let registration =
+                Prepared::new(ProofOperation::Register, bytes.clone(), Some("tos")).unwrap();
+            assert_eq!(registration.body, bytes);
+            let bytes = format!(
+                r#"{{ "org_id":"tos", "type":"dm.msg.received", "for":"{actor}", "key":"old:tos/event-1", "data":{{"text":"tos>dm remains content"}} }}"#
+            ).into_bytes();
+            let send = Prepared::new(ProofOperation::Send, bytes.clone(), Some("tos")).unwrap();
+            assert_eq!(send.body, bytes);
+        }
     }
     #[test]
     fn scoped_receiver_and_required_delivery_requests_are_explicit() {
-        let body = br#"{"org_id":"tos","type":"tos>hook.webhook.received","for":"recipient","key":"event","data":{},"delivery":"required"}"#.to_vec();
+        let body = br#"{"org_id":"tos","type":"hook.webhook.received","for":"si:recipient","key":"event","data":{},"delivery":"required"}"#.to_vec();
         assert!(Prepared::new(ProofOperation::Send, body, None).is_ok());
-        let mut body = json!({"org_id":"tos","app_id":"tos>hook","for":"recipient","key":"bootstrap-key-001","environment_id":"env","generation":1});
+        let mut body = json!({"org_id":"tos","app_id":"hook","for":"si:recipient","key":"bootstrap-key-001","environment_id":"env","generation":1});
         let prepared = Prepared::new(
             ProofOperation::ReceiverBootstrap,
             serde_json::to_vec(&body).unwrap(),

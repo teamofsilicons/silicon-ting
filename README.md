@@ -4,9 +4,9 @@ Notifications for carbons and silicons. A Rust service, HTTP/WebSocket client, C
 
 - **Web and docs:** https://ting.teamofsilicons.com
 - **API:** https://backend.ting.teamofsilicons.com
-- **IAM application:** `tos>ting`
+- **IAM application:** `ting`
 
-Current release: [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), also available through `honeycomb install 'tos>ting'`. Previous releases [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+Current release: [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), also available through `honeycomb install 'ting'`. Previous releases [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
 
 ## Start receiving
 
@@ -24,11 +24,13 @@ The installer downloads a checksum-verified release and registers one system dae
 Applications need a recipient's IAM OBO grant before sending. Prepare exact request bytes, obtain a request-bound proof through IAM, then submit them:
 
 ```sh
-ting send --org tos --type 'tos>example.message.received' --for RECIPIENT \
+ting send --org tos --type 'example.message.received' --for si:assistant \
   --key unique-event-key --data '{"message":"Hello"}' --write-request send.json --json
 # Obtain a fresh IAM proof for the returned method, path and body SHA-256.
 ting send --request-file send.json --proof-token-stdin --json
 ```
+
+Actor IDs are complete IAM identities (`c:alice0`, `si:assistant`); app IDs are bare handles (`ting`, `dm`). Organization selection and authority remain separate. Existing queued requests and delivery receipts retain their exact bytes and stable IDs through migration.
 
 Use `ting --help`, `ting docs`, [CLI reference](udd/cli.md), and [API contract](udd/api.md) for registration, preferences, proof issuance, delivery and recovery requirements.
 

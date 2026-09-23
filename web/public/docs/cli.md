@@ -34,7 +34,7 @@ Active subscriptions or requests pin the shared socket to one API origin. A WebS
 ```sh
 ting login --token-stdin
 ting org use tos
-ting webhook http://si_123.localhost/ting
+ting webhook http://localhost:3000/ting
 ting daemon status
 ting inbox list --all
 ```
@@ -43,7 +43,9 @@ Provide a short-lived login token from the official IAM CLI or IAM consent flow 
 
 Flow: login → select org → register a local webhook → daemon subscribes for this identity → Ting sends eligible past unread tings and new tings → daemon calls the webhook → webhook ACK completes delivery.
 
-An app must also have permission to send to this identity through an OBO subscription.
+Use complete IAM actor IDs such as `c:alice0` or `si:assistant` for `--for`, and bare application IDs such as `dm` for `--app`. Select the organization separately; a Silicon ID no longer contains its organization. An app must also have permission to send to this identity through an OBO subscription.
+
+After identifier migration, log out and log in again with current IAM metadata, using the same `SILICON_HOME` and API origin. Keep queued daemon deliveries, stable webhook IDs and saved exact request files intact. Reconcile uncertain operations before changing identity-bearing request bytes or retrying under a new key. An old testing selector must be refreshed for that same IAM world; never fall back to production.
 
 ## Help and app information
 
@@ -52,7 +54,7 @@ An app must also have permission to send to this identity through an OBO subscri
 | `ting --help` | Root help, common flows and command groups. |
 | `ting COMMAND --help` | Help for that command or group. |
 | `ting --version` | Installed CLI version, for example `0.1.0`; with `--json`, `{ "version": "0.1.0" }`. |
-| `ting iam --json` | `{ "app_id": "tos>ting", "api_version": "v1", "repository_url": null, "docs_url": null, "rust_package": null }` |
+| `ting iam --json` | `{ "app_id": "ting", "api_version": "v1", "repository_url": null, "docs_url": null, "rust_package": null }` |
 | `ting docs` | Bundled usage documentation. |
 | `ting docs --topic development` | Bundled API and integration documentation. |
 | `ting docs --topic usage --json` | `{ "topic": "usage", "content": "..." }` |
@@ -63,9 +65,9 @@ An app must also have permission to send to this identity through an OBO subscri
 
 | Command | Output |
 | --- | --- |
-| `ting login TOKEN` | `{ "authenticated": true, "id": "si_123" }` |
+| `ting login TOKEN` | `{ "authenticated": true, "id": "si:assistant" }` |
 | `ting login --token-stdin` | Same output; reads the short-lived IAM token from stdin. |
-| `ting login status` | `{ "authenticated": true, "id": "si_123" }` |
+| `ting login status` | `{ "authenticated": true, "id": "si:assistant" }` |
 | `ting logout` | `{ "authenticated": false }` |
 
 Use exactly one login source: positional `TOKEN` or `--token-stdin`. Only an IAM short-lived login token can log in; a password, OBO proof or App Proof Token cannot. A different identity cannot replace an occupied profile: run `logout` first or select a separate `SILICON_HOME`.
@@ -85,7 +87,7 @@ Before session exchange, generate and privately persist an `Idempotency-Key` for
 | `ting org list` | `{ "items": [{ "id": "tos", "name": "TOS" }] }` |
 | `ting org use tos` | `{ "org_id": "tos", "saved": true }` |
 | `ting org current` | `{ "org_id": "tos", "source": "saved" }` |
-| `ting apps list` | `{ "items": [{ "app_id": "tos>dm", "name": "DM", "can_manage_tings": true }] }` |
+| `ting apps list` | `{ "items": [{ "app_id": "dm", "name": "DM", "can_manage_tings": true }] }` |
 
 Org access comes from IAM. App visibility comes from Honeycomb permissions. Seeing an app does not grant permission to change it or send its tings. `apps list` lists the selected organization’s app catalog, not all apps that can notify its recipients. `app_id` is globally unique; senders can belong to another organization.
 
@@ -96,13 +98,13 @@ Changing org selection does not silently unsubscribe existing receivers in other
 ## Ting types
 
 ```sh
-ting types register --type 'tos>dm.msg.received' \
+ting types register --type 'dm.msg.received' \
   --description 'A new message arrived'
 ```
 
 | Command | Output |
 | --- | --- |
-| `ting types list --app 'tos>dm'` | `{ "items": [{ "type": "tos>dm.msg.received", "description": "A new message arrived", "defaults": { "carbon": true, "silicon": true } }] }` |
+| `ting types list --app 'dm'` | `{ "items": [{ "type": "dm.msg.received", "description": "A new message arrived", "defaults": { "carbon": true, "silicon": true } }] }` |
 | `ting types register --type TYPE --description TEXT` | The registered type record shown above. |
 | `ting types update --type TYPE --description TEXT` | The updated type record. |
 
@@ -111,9 +113,9 @@ ting types register --type 'tos>dm.msg.received' \
 Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the saved Ting session; Ting checks app visibility or management permission through Honeycomb. Only recipients can turn their notifications off or override their settings. Select the app’s owning organization for type management. Select the recipient’s organization for sends, subscriptions, sent status, inboxes, preferences and webhooks. The type stays in its owner catalog; it does not need to be registered again for each recipient organization.
 
 ```sh
-ting --org tos types list --app 'tos>dm'
-ting --org bricks send --type 'tos>dm.msg.received' \
-  --for si_123 --key dm-456 --data '{"message_id":"dm_456"}' \
+ting --org tos types list --app 'dm'
+ting --org bricks send --type 'dm.msg.received' \
+  --for si:assistant --key dm-456 --data '{"message_id":"dm_456"}' \
   --write-request send.json
 ```
 
@@ -123,9 +125,9 @@ Obtain an IAM proof bound to the prepared `bricks` request, then execute it with
 
 | Command | Output |
 | --- | --- |
-| `ting subscriptions register --app 'tos>dm' --for si_123 --write-request register.json` | Request-file information, as described below. |
-| `ting subscriptions register --request-file register.json --obo-stdin` | `{ "id": "sub_123", "app_id": "tos>dm", "for": "si_123", "active": true }` |
-| `ting subscriptions list` | `{ "items": [{ "id": "sub_123", "app_id": "tos>dm", "for": "si_123", "active": true }] }` |
+| `ting subscriptions register --app 'dm' --for si:assistant --write-request register.json` | Request-file information, as described below. |
+| `ting subscriptions register --request-file register.json --obo-stdin` | `{ "id": "sub_123", "app_id": "dm", "for": "si:assistant", "active": true }` |
+| `ting subscriptions list` | `{ "items": [{ "id": "sub_123", "app_id": "dm", "for": "si:assistant", "active": true }] }` |
 | `ting subscriptions revoke sub_123` | `{ "id": "sub_123", "active": false }` |
 
 Registration uses one request-bound IAM OBO App Proof Token. It proves both the issuing app and the recipient's permission; no second app credential or saved recipient login is needed. Read it using exactly one of `--obo-stdin` or `--obo-file PATH`. The recipient comes from its verified actor; an optional prepared `--for` assertion must match. Never put the proof in the request body.
@@ -174,7 +176,7 @@ Do not automatically retry a request with a used proof. If the response is uncer
 ## Send and inspect sent tings
 
 ```sh
-ting send --type 'tos>dm.msg.received' --for si_123 --key dm-456 \
+ting send --type 'dm.msg.received' --for si:assistant --key dm-456 \
   --data @message.json --metadata @metadata.json --write-request send.json --json
 # Obtain an IAM App Proof Token for the prepared method, path and body.
 ting send --request-file send.json --proof-token-stdin --json
@@ -194,9 +196,9 @@ Reuse the same key and a fresh proof when retrying the same send. Ting retains t
 
 | Command | Output |
 | --- | --- |
-| `ting sent list --app 'tos>dm' --write-request sent-list.json` | Request-file information. |
-| `ting sent list --request-file sent-list.json --proof-token-stdin` | `{ "items": [{ "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "type": "tos>dm.msg.received", "for": "si_123", "key": "dm-456", "silent": false, "read": false }] }` |
-| `ting sent get msg_123 --app 'tos>dm' --write-request sent-get.json` | Request-file information. |
+| `ting sent list --app 'dm' --write-request sent-list.json` | Request-file information. |
+| `ting sent list --request-file sent-list.json --proof-token-stdin` | `{ "items": [{ "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "type": "dm.msg.received", "for": "si:assistant", "key": "dm-456", "silent": false, "read": false }] }` |
+| `ting sent get msg_123 --app 'dm' --write-request sent-get.json` | Request-file information. |
 | `ting sent get --request-file sent-get.json --proof-token-stdin` | The full ting record and its delivery status, shown below. |
 
 Sent-list preparation accepts `--for ID`, `--type TYPE`, `--read true|false` and pagination flags. Each query execution needs fresh app proof; a saved recipient session cannot inspect the app's sent history. `--proof-token-file PATH` is an alternative to stdin for both list and get.
@@ -207,10 +209,10 @@ Sent detail returns at most 100 entries in `deliveries`. If more remain, preserv
 {
   "id": "msg_123",
   "created_at": "2026-09-22T10:00:00Z",
-  "type": "tos>dm.msg.received",
+  "type": "dm.msg.received",
   "data": { "message_id": "dm_456", "text": "Hello" },
   "metadata": {},
-  "for": "si_123",
+  "for": "si:assistant",
   "key": "dm-456",
   "silent": false,
   "read": false,
@@ -226,7 +228,7 @@ Overall `read` becomes true when any destination sends a read ACK or a carbon ac
 
 | Command | Output |
 | --- | --- |
-| `ting inbox list` | Non-silent tings: `{ "items": [{ "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "type": "tos>dm.msg.received", "for": "si_123", "key": "dm-456", "silent": false, "read": false }] }` |
+| `ting inbox list` | Non-silent tings: `{ "items": [{ "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "type": "dm.msg.received", "for": "si:assistant", "key": "dm-456", "silent": false, "read": false }] }` |
 | `ting inbox list --silent` | Only silent tings, using the same list format. |
 | `ting inbox list --all` | Both silent and non-silent tings, using the same list format. |
 | `ting inbox get msg_123` | Full ting: `id`, `created_at`, `type`, `data`, `metadata`, `for`, `key`, `silent`, `read`. |
@@ -242,11 +244,11 @@ Ting retains read or silent tings for one calendar month, and unread non-silent 
 
 | Command | Output |
 | --- | --- |
-| `ting preferences list` | `{ "items": [{ "app_id": "tos>dm", "service": null, "type": null, "enabled": false }] }` |
-| `ting preferences set --app 'tos>dm' --enabled false` | `{ "app_id": "tos>dm", "service": null, "type": null, "enabled": false }` |
-| `ting preferences set --app 'tos>dm' --service msg --enabled false` | `{ "app_id": "tos>dm", "service": "msg", "type": null, "enabled": false }` |
-| `ting preferences set --app 'tos>dm' --type 'tos>dm.msg.received' --enabled true` | `{ "app_id": "tos>dm", "service": null, "type": "tos>dm.msg.received", "enabled": true }` |
-| `ting preferences reset --app 'tos>dm' --type 'tos>dm.msg.received'` | `{ "app_id": "tos>dm", "service": null, "type": "tos>dm.msg.received", "reset": true }` |
+| `ting preferences list` | `{ "items": [{ "app_id": "dm", "service": null, "type": null, "enabled": false }] }` |
+| `ting preferences set --app 'dm' --enabled false` | `{ "app_id": "dm", "service": null, "type": null, "enabled": false }` |
+| `ting preferences set --app 'dm' --service msg --enabled false` | `{ "app_id": "dm", "service": "msg", "type": null, "enabled": false }` |
+| `ting preferences set --app 'dm' --type 'dm.msg.received' --enabled true` | `{ "app_id": "dm", "service": null, "type": "dm.msg.received", "enabled": true }` |
+| `ting preferences reset --app 'dm' --type 'dm.msg.received'` | `{ "app_id": "dm", "service": null, "type": "dm.msg.received", "reset": true }` |
 
 Set and reset require `--app`; set also requires `--enabled true|false`. Optionally add either `--service` or `--type`, never both; a full type must belong to the selected app. Without either, set/reset applies to the app-level override. List accepts these optional filters and pagination; `--app` is optional for list.
 
@@ -258,13 +260,13 @@ Turning a preference off stores new tings silently. It does not revoke the app's
 
 | Command | Output |
 | --- | --- |
-| `ting webhook http://si_123.localhost/ting` | `{ "id": "hook_123", "for": "si_123", "url": "http://si_123.localhost/ting", "state": "connected", "pending": 0 }` |
+| `ting webhook http://localhost:3000/ting` | `{ "id": "hook_123", "for": "si:assistant", "url": "http://localhost:3000/ting", "state": "connected", "pending": 0 }` |
 | `ting webhook URL --secret-stdin` | Same output; reads an optional webhook secret from stdin. |
 | `ting webhook URL --id hook_123` | Same output; updates the URL or reattaches this existing registration and resumes delivery. |
 | `ting webhook URL --id hook_123 --clear-secret` | Same output; removes that registration's local webhook secret. |
 | `ting webhook URL --health-url HEALTH_URL` | Same output; enables the optional health probe described below. |
 | `ting webhook URL --id hook_123 --takeover` | Same output; explicitly transfers an active registration from another receiver. |
-| `ting webhook list` | `{ "items": [{ "id": "hook_123", "for": "si_123", "url": "http://si_123.localhost/ting", "state": "connected", "pending": 0 }] }` |
+| `ting webhook list` | `{ "items": [{ "id": "hook_123", "for": "si:assistant", "url": "http://localhost:3000/ting", "state": "connected", "pending": 0 }] }` |
 | `ting unhook hook_123` | `{ "id": "hook_123", "removed": true }` |
 | `ting daemon status` | `{ "running": true, "socket_connected": true, "pending": 0 }` |
 | `ting daemon reconnect` | `{ "reconnected": true }` |
@@ -315,7 +317,7 @@ The local webhook body keeps complete tings together. WebSocket delivery adds ro
     {
       "id": "msg_123",
       "created_at": "2026-09-22T10:00:00Z",
-      "type": "tos>dm.msg.received",
+      "type": "dm.msg.received",
       "data": { "message_id": "dm_456", "text": "Hello" },
       "metadata": {},
       "key": "dm-456"
@@ -379,7 +381,7 @@ Example error:
 {
   "error": {
     "code": "recipient_not_registered",
-    "message": "tos>dm does not have permission to send to si_123 in tos.",
+    "message": "dm does not have permission to send to si:assistant in tos.",
     "hint": "Register this recipient with a valid IAM OBO token first.",
     "retryable": false
   }

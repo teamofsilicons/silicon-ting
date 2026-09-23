@@ -6,10 +6,12 @@ import { telemetryTransport } from './telemetry.ts';
 test('browser request and validation boundaries', () => {
   assert.equal(orgPath('tos/a', 'apps'), '/v1/orgs/tos%2Fa/apps');
   assert.equal(query({ silent: false, read: undefined, cursor: 'a+b/c' }), '?silent=false&cursor=a%2Bb%2Fc');
-  assert.equal(typeError('tos>dm', 'tos>dm.msg.received', 'Message arrived'), undefined);
-  assert.ok(typeError('tos>dm', 'tos>other.msg.received', 'Message arrived'));
-  assert.ok(typeError('tos>dm', 'tos>dm.msg.received', ''));
-  assert.ok(typeError('tos>dm', 'tos>dm.msg.received', '😊'.repeat(251)));
+  assert.equal(typeError('dm', 'dm.msg.received', 'Message arrived'), undefined);
+  assert.ok(typeError('tos>dm', 'tos>dm.msg.received', 'Message arrived'));
+  assert.ok(typeError('a'.repeat(81), `${'a'.repeat(81)}.msg.received`, 'Message arrived'));
+  assert.ok(typeError('dm', 'other.msg.received', 'Message arrived'));
+  assert.ok(typeError('dm', 'dm.msg.received', ''));
+  assert.ok(typeError('dm', 'dm.msg.received', '😊'.repeat(251)));
   assert.equal(safeLink('javascript:alert(1)'), undefined);
   assert.equal(safeLink('https://example.com/a'), 'https://example.com/a');
   assert.equal(watchDelay(0, 0), 1000);

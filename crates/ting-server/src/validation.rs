@@ -127,11 +127,26 @@ pub fn segment(s: &str) -> bool {
     c.next().is_some_and(|c| c.is_ascii_lowercase())
         && c.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
+pub fn app_id(s: &str) -> bool {
+    s.len() <= 80 && segment(s)
+}
+pub fn actor_kind(s: &str) -> Option<&'static str> {
+    let (kind, handle, max) = if let Some(handle) = s.strip_prefix("c:") {
+        ("carbon", handle, 30)
+    } else {
+        ("silicon", s.strip_prefix("si:")?, 50)
+    };
+    ((3..=max).contains(&handle.len())
+        && handle
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-'))
+    .then_some(kind)
+}
 pub fn type_parts(s: &str) -> Result<(&str, &str, &str)> {
     let p: Vec<_> = s.rsplitn(3, '.').collect();
     if s.len() > 255
         || p.len() != 3
-        || p[2].is_empty()
+        || !app_id(p[2])
         || !segment(p[0])
         || !segment(p[1])
         || p[2].chars().any(char::is_control)
@@ -186,6 +201,9 @@ pub fn preference(v: &Value, write: bool) -> Result<()> {
         },
     )?;
     let app = string(v, "app_id", 255)?;
+    if !app_id(app) {
+        return Err(Error::invalid("app_id must be a bare IAM application ID."));
+    }
     let service = v.get("service").filter(|v| !v.is_null());
     let typ = v.get("type").filter(|v| !v.is_null());
     if service.is_some() && typ.is_some() {
@@ -219,13 +237,47 @@ mod tests {
         assert!(parse(br#"{"a":1,"a":2}"#, 100).is_err());
         assert!(parse(br#"{"a":{"b":1,"b":2}}"#, 100).is_err());
         assert!(parse(br#"{"a":1} trailing"#, 100).is_err());
-        assert!(type_parts("tos>dm.msg.received").is_ok());
-        assert!(type_parts("tos>dm.Bad.received").is_err());
-        assert!(preference(&serde_json::json!({"app_id":"tos>dm","type":"tos>other.msg.received","enabled":false}),true).is_err());
+        assert!(type_parts("dm.msg.received").is_ok());
+        assert!(type_parts("tos>dm.msg.received").is_err());
+        assert!(type_parts("dm.Bad.received").is_err());
+        assert!(
+            preference(
+                &serde_json::json!({"app_id":"dm","type":"other.msg.received","enabled":false}),
+                true
+            )
+            .is_err()
+        );
+        assert!(app_id(&"a".repeat(80)));
+        assert!(!app_id(&"a".repeat(81)));
+        assert!(!app_id("0app"));
+        assert_eq!(actor_kind("c:alice0"), Some("carbon"));
+        assert_eq!(actor_kind("si:assistant"), Some("silicon"));
+        for invalid in [
+            "alice",
+            "assistant:tos",
+            "c:c:alice",
+            "si:si:assistant",
+            "c:ab",
+            "si:ab",
+        ] {
+            assert_eq!(actor_kind(invalid), None);
+        }
     }
 }
 
 pub fn filters(b: &Value) -> Result<()> {
+    if b.get("app_id")
+        .is_some_and(|v| !v.as_str().is_some_and(app_id))
+    {
+        return Err(Error::invalid("app_id must be a bare IAM application ID."));
+    }
+    if b.get("for")
+        .is_some_and(|v| v.as_str().and_then(actor_kind).is_none())
+    {
+        return Err(Error::invalid(
+            "for must be a complete c:<handle> or si:<handle> identity.",
+        ));
+    }
     for k in [
         "org_id",
         "app_id",

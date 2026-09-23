@@ -25,6 +25,13 @@ fn stamp() -> String {
 fn decode(s: String) -> Result<Value> {
     serde_json::from_str(&s).map_err(Into::into)
 }
+// Historical body bytes stay immutable; only typed public fields project current IDs.
+fn current_body(body: String, typ: String, recipient: String) -> Result<Value> {
+    let mut body = decode(body)?;
+    body["type"] = typ.into();
+    body["for"] = recipient.into();
+    Ok(body)
+}
 fn conflict(code: &str, msg: &str) -> Error {
     Error::new(
         409,
@@ -41,6 +48,7 @@ impl Store {
     pub fn open(path: &str) -> anyhow::Result<Self> {
         let c = Connection::open(path)?;
         c.busy_timeout(std::time::Duration::from_secs(5))?;
+        crate::migration::ensure_current(&c)?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS types(ctx TEXT,org TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,org,name));
  CREATE INDEX IF NOT EXISTS types_app ON types(ctx,app,name);
@@ -414,7 +422,7 @@ impl Store {
         let last_created = last.as_ref().and_then(|p| p.first()).map(String::as_str);
         let last_id = last.as_ref().and_then(|p| p.get(1)).map(String::as_str);
         let mut q = db.prepare(
-            "SELECT body,read FROM tings WHERE ctx=?1 AND org=?2
+            "SELECT body,read,type,recipient FROM tings WHERE ctx=?1 AND org=?2
           AND (?3 IS NULL OR recipient=?3) AND (?4 IS NULL OR app=?4)
           AND (?5 IS NULL OR type=?5) AND (?6 IS NULL OR read=?6) AND (?7 IS NULL OR silent=?7)
           AND created<=?8 AND (?9 IS NULL OR (created,id)<(?9,?10))
@@ -436,12 +444,19 @@ impl Store {
                 retention_cutoff(3),
                 retention_cutoff(1)
             ],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)),
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, bool>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
         )?;
         let mut out = vec![];
         for row in rows {
-            let (body, read) = row?;
-            let mut t = decode(body)?;
+            let (body, read, typ, recipient) = row?;
+            let mut t = current_body(body, typ, recipient)?;
             t["read"] = read.into();
             out.push(t);
         }
@@ -456,9 +471,9 @@ impl Store {
         app: Option<&str>,
     ) -> Result<Value> {
         let db = self.lock()?;
-        let row:Option<(String,bool)>=db.query_row("SELECT body,read FROM tings WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?) AND created>=? AND ((read=0 AND silent=0) OR created>=?)",params![ctx,org,mid,recipient,recipient,app,app,retention_cutoff(3),retention_cutoff(1)],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        let (b, read) = row.ok_or_else(Error::not_found)?;
-        let mut b = decode(b)?;
+        let row:Option<(String,bool,String,String)>=db.query_row("SELECT body,read,type,recipient FROM tings WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?) AND created>=? AND ((read=0 AND silent=0) OR created>=?)",params![ctx,org,mid,recipient,recipient,app,app,retention_cutoff(3),retention_cutoff(1)],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let (b, read, typ, recipient) = row.ok_or_else(Error::not_found)?;
+        let mut b = current_body(b, typ, recipient)?;
         b["read"] = read.into();
         Ok(b)
     }
@@ -877,7 +892,7 @@ impl Store {
             |r| r.get(0),
         )?;
         let rows = {
-            let mut q=tx.prepare("SELECT t.body FROM deliveries d JOIN tings t ON t.id=d.message
+            let mut q=tx.prepare("SELECT t.body,t.type,t.recipient FROM deliveries d JOIN tings t ON t.id=d.message
               WHERE d.hook=?1 AND d.read=0 AND t.created>=?5 AND ((t.read=0 AND t.silent=0) OR t.created>=?6)
               AND (?2=0 OR (d.offer_receiver=?3 AND d.delivery=0 AND d.last_offer<=?4))
               AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.org=t.org AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
@@ -895,14 +910,20 @@ impl Store {
                     retention_cutoff(3),
                     retention_cutoff(1)
                 ],
-                |r| r.get::<_, String>(0),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?
         };
         let mut tings = vec![];
         let mut bytes = 256usize;
-        for body in rows {
-            let mut b = decode(body)?;
+        for (body, typ, recipient) in rows {
+            let mut b = current_body(body, typ, recipient)?;
             b.as_object_mut().unwrap().remove("read");
             b.as_object_mut().unwrap().remove("silent");
             let size = b.to_string().len() + 1;
@@ -1063,14 +1084,14 @@ mod tests {
         let s = Store::open(":memory:").unwrap();
         let p = Principal {
             context: "production".into(),
-            id: "si_test".into(),
+            id: "si:fixture".into(),
             kind: "silicon".into(),
             session: "private-session".into(),
         };
         let proof = Proof {
             context: p.context.clone(),
             org_id: "org-uuid".into(),
-            app_id: "tos>example".into(),
+            app_id: "example".into(),
             actor_id: p.id.clone(),
             actor_kind: p.kind.clone(),
             expires_at: now() + 300,
@@ -1080,7 +1101,7 @@ mod tests {
             &p,
             "app-owner-org",
             &proof.app_id,
-            &json!({"type":"tos>example.msg.received","description":"A message arrived."}),
+            &json!({"type":"example.msg.received","description":"A message arrived."}),
             false,
         )
         .unwrap();
@@ -1092,7 +1113,7 @@ mod tests {
         (s, p, proof)
     }
     fn body(key: &str) -> Value {
-        json!({"org_id":"org-uuid","type":"tos>example.msg.received","data":{"message":"hello"},"metadata":{},"for":"si_test","key":key})
+        json!({"org_id":"org-uuid","type":"example.msg.received","data":{"message":"hello"},"metadata":{},"for":"si:fixture","key":key})
     }
     fn hook(s: &Store, p: &Principal, recv: &str) -> String {
         s.create_hook(
@@ -1410,8 +1431,8 @@ mod tests {
                 let proof = Proof {
                     context: "production".into(),
                     org_id: "org-uuid".into(),
-                    app_id: "tos>example".into(),
-                    actor_id: "si_test".into(),
+                    app_id: "example".into(),
+                    actor_id: "si:fixture".into(),
                     actor_kind: "silicon".into(),
                     expires_at: now() + 300,
                     test: None,
@@ -1541,9 +1562,9 @@ mod tests {
     #[test]
     fn required_delivery_needs_recipient_opt_in_and_preserves_notification_mutes() {
         for preference in [
-            json!({"app_id":"tos>example","enabled":false}),
-            json!({"app_id":"tos>example","service":"msg","enabled":false}),
-            json!({"app_id":"tos>example","type":"tos>example.msg.received","enabled":false}),
+            json!({"app_id":"example","enabled":false}),
+            json!({"app_id":"example","service":"msg","enabled":false}),
+            json!({"app_id":"example","type":"example.msg.received","enabled":false}),
         ] {
             let (s, p, proof) = fixture();
             let h = hook(&s, &p, "r");
@@ -1810,7 +1831,7 @@ mod tests {
                 &p,
                 "app-owner-org",
                 &proof.app_id,
-                &json!({"type":"tos>example.msg.received","description":"arrived"}),
+                &json!({"type":"example.msg.received","description":"arrived"}),
                 false,
             )
             .unwrap();

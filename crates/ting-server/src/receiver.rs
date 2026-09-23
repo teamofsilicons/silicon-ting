@@ -651,6 +651,11 @@ mod tests {
         for kind in ["carbon", "silicon"] {
             let mut f = fixture(true).await;
             f.proof.actor_kind = kind.into();
+            f.proof.actor_id = format!("{}:fixture", if kind == "carbon" { "c" } else { "si" });
+            database(&f.app)
+                .unwrap()
+                .execute("UPDATE grants SET recipient=?", [&f.proof.actor_id])
+                .unwrap();
             f.proof.expires_at = store::now() + 10;
             let first = mint(&f, "first");
             let token = first["receiver_token"].as_str().unwrap();
@@ -779,8 +784,8 @@ mod tests {
     async fn receiver_binding_and_inbox_cannot_cross_actor_app_environment_or_ack() {
         let mut f = fixture(true).await;
         for (field, value) in [
-            ("for", json!("si_other")),
-            ("app_id", json!("tos>other")),
+            ("for", json!("si:other")),
+            ("app_id", json!("other")),
             ("environment_id", json!(uuid::Uuid::new_v4())),
             ("generation", json!(2)),
         ] {
@@ -798,7 +803,7 @@ mod tests {
         let own = f.send("own");
         let other = f.send("other");
         let db = database(&f.app).unwrap();
-        db.execute("UPDATE tings SET app='tos>other' WHERE id=?", [&other])
+        db.execute("UPDATE tings SET app='other' WHERE id=?", [&other])
             .unwrap();
         let response = http(
             &f.app,
@@ -832,7 +837,7 @@ mod tests {
                 &Method::GET,
                 "receivers/inbox",
                 &headers(&first),
-                &json!({"for":"si_other"})
+                &json!({"for":"si:other"})
             )
             .await
             .unwrap_err()
@@ -870,7 +875,7 @@ mod tests {
             let original = mint(&f, "before-lifecycle");
             let original_app = f.proof.app_id.clone();
             let mut db = database(&f.app).unwrap();
-            f.proof.app_id = "tos>other".into();
+            f.proof.app_id = "other".into();
             db.execute(
                 "INSERT INTO grants VALUES('other-grant',?,?,?,?,1)",
                 params![
@@ -982,7 +987,7 @@ mod tests {
         let before = snapshot(&f.app, &receiver).unwrap();
         let other = f.send("other-app");
         let db = database(&f.app).unwrap();
-        db.execute("UPDATE tings SET app='tos>other' WHERE id=?", [other])
+        db.execute("UPDATE tings SET app='other' WHERE id=?", [other])
             .unwrap();
         db.execute(
             "INSERT INTO preferences VALUES(?,?,?,?,'app',0)",

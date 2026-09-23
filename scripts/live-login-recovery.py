@@ -2,7 +2,7 @@
 """Verify login recovery after the IAM SLT window, then revoke the test session.
 
 Uses the official IAM CLI's current production login unless --slt-file supplies a
-fresh tos>ting SLT (plain text or IAM's {"slt": ..., "expires_in": ...} JSON).
+fresh ting SLT (plain text or IAM's {"slt": ..., "expires_in": ...} JSON).
 Credentials stay in captured subprocess output, memory, and a private recovery
 file deleted only after confirmed logout; reports contain no tokens, idempotency
 keys, request bodies, or actor IDs. This captures the original
@@ -57,7 +57,7 @@ def load_slt(path):
         require(len(raw) <= 16384, "slt_file_too_large")
     else:
         result = subprocess.run(
-            ["iam", "login", "--app-id", "tos>ting", "--grant-org", "tos",
+            ["iam", "login", "--app-id", "ting", "--grant-org", "tos",
              "--approve-scopes", "--json"],
             capture_output=True, stdin=subprocess.DEVNULL, timeout=90, check=False,
         )
@@ -239,7 +239,7 @@ def main():
     parser.add_argument("--url", default="https://backend.ting.teamofsilicons.com")
     parser.add_argument("--output", type=pathlib.Path, help="Write the same sanitized JSON report to this path")
     parser.add_argument("--delay", type=int, default=125, help="Real seconds after original login, at least 125")
-    parser.add_argument("--slt-file", help="Private file containing a fresh tos>ting SLT; otherwise run official IAM login")
+    parser.add_argument("--slt-file", help="Private file containing a fresh ting SLT; otherwise run official IAM login")
     args = parser.parse_args()
     report = run(args)
     if args.output:

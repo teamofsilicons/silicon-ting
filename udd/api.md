@@ -17,7 +17,7 @@ This is the contract to build. Examples use sample IDs and timestamps. [cli.md](
 
 HTTP uses HTTPS and JSON. WebSockets use WSS. Local development may use HTTP/WS on loopback. JSON object keys are case-sensitive. Reject unknown request fields, duplicate JSON keys, invalid UTF-8, and wrong JSON types with `400 invalid_input`; `data` and `metadata` may contain arbitrary valid JSON values inside their required outer objects. Clients must tolerate new response fields.
 
-IDs are opaque strings. `id` identifies a ting, subscription, or webhook in its own record. Use `org_id` and `app_id` when identifying an org or app. Resolve org handles through IAM and compare/store their canonical identity; changing a display name must not change ownership. Paths must URL-encode IDs; for example, `tos>dm` becomes `tos%3Edm`.
+Resource IDs are opaque strings. Actor IDs are complete IAM identities: `c:alice0` for a Carbon and `si:assistant` for a Silicon. Keep the explicit actor kind; both kinds contain a colon. Application IDs are bare IAM handles such as `ting`, `dm` and `hook`, using 1–80 lowercase letters, digits, underscores or hyphens and starting with a letter. Silicon handles have 3–50 characters; Carbon handles have 3–30, including already registered handles containing zero. Prefixes do not count toward these limits. `id` identifies a ting, subscription, or webhook in its own record. Use separate `org_id` and `app_id` fields, and resolve ownership and current membership through IAM; never infer organization authority from an actor or application ID. Paths must URL-encode IDs; for example, `si:assistant` becomes `si%3Aassistant`.
 
 `app_id` is globally unique. An app owned by one organization can notify consenting recipients in any organization. Type definitions belong to the app within the verified production/testing context; resolve a send’s type by its app ID and type name, independently of the delivery organization. For sends, subscriptions, sent queries, inboxes, preferences and receivers, `org_id` selects the recipient/delivery organization. App catalog and type-management routes use the app’s owning organization and retain their Honeycomb permission checks.
 
@@ -58,16 +58,16 @@ Except for public information, login initiation/session exchange and preflight, 
 | `GET /v1/session/login` | Browser navigation; optional local `next` path, default `/`. | `302` to the configured IAM consent page, with a server-bound login attempt. |
 | `GET /v1/session/callback` | IAM callback `slt` and the login-attempt state. | Exchanges the SLT, sets the session cookie, then `303` to the saved local path. |
 | `POST /v1/session` | CLI: `{ "slt": "<short-lived Ting login token>" }`; required `Idempotency-Key`. | `201` session response below; safe same-attempt replay returns `200`. |
-| `GET /v1/me` | Ting session. | `200 {"id":"si_123","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}`; testing context described below. |
+| `GET /v1/me` | Ting session. | `200 {"id":"si:assistant","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}`; testing context described below. |
 | `DELETE /v1/session` | Ting session. | `200 {"authenticated":false}` after local session revocation. |
 | `GET /v1/orgs` | Ting session; no selected org required. | `200 {"items":[{"id":"tos","name":"TOS"}]}` |
-| `GET /v1/orgs/{org}/apps` | Ting session; optional pagination. | `200 {"items":[{"app_id":"tos>dm","name":"DM","can_manage_tings":true}]}` |
+| `GET /v1/orgs/{org}/apps` | Ting session; optional pagination. | `200 {"items":[{"app_id":"dm","name":"DM","can_manage_tings":true}]}` |
 
 App information:
 
 ```json
 {
-  "app_id": "tos>ting",
+  "app_id": "ting",
   "api_version": "v1",
   "repository_url": null,
   "docs_url": null,
@@ -82,7 +82,7 @@ CLI session response — a secret-bearing response, never logged:
 ```json
 {
   "authenticated": true,
-  "id": "si_123",
+  "id": "si:assistant",
   "kind": "silicon",
   "session_token": "<opaque Ting session credential>"
 }
@@ -101,7 +101,7 @@ The browser uses a `ting_session` cookie instead of a readable token: HttpOnly, 
 `GET /v1/me` revalidates the session and returns an explicit `environment` alongside `id`, `kind` and `authenticated`:
 
 ```json
-{"id":"si_123","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}
+{"id":"si:assistant","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}
 ```
 
 For a testing session, `environment` is `{"kind":"testing","id":"<IAM environment UUID>","generation":1}`. The UUID is verified by IAM; the generation is bound at login to Ting's active Honeycomb lifecycle generation and checked again before returning it. Missing, retired, rotated, pending or stale testing context fails closed. Existing testing sessions without a generation require a new login; production sessions remain valid. A testing environment must be imported through Honeycomb before new testing sessions or proof-bound calls are accepted.
@@ -118,7 +118,7 @@ production proofs are rejected. It does not exchange a Hook token for a general
 Ting session or disclose a Ting application secret.
 
 ```json
-{"org_id":"tos","app_id":"tos>hook","for":"recipient-id","key":"receiver-attempt-001","environment_id":"<IAM environment UUID>","generation":1}
+{"org_id":"tos","app_id":"hook","for":"si:assistant","key":"receiver-attempt-001","environment_id":"<IAM environment UUID>","generation":1}
 ```
 
 The signed body explicitly binds the environment and generation. Supply the Ting
@@ -180,7 +180,7 @@ IAM binds a proof to the exact method, registered path and SHA-256 of the body b
 
 Publish these in Ting's IAM OBO catalog, with empty metadata schemas and explicit `critical: true`. Calling apps declare the matching external scopes, obtain required review and user consent, then mint proofs with the official IAM SDK. Recipient registration derives consent and identity from the verified proof actor. Later app sends still require their own proof and an active stored recipient grant.
 
-Verify audience `tos>ting`, issuing app, selected org, endpoint, exact body bytes and current IAM authorization. Do not infer permission from an unverified token payload. The issuing app must match `app_id` or the type's app prefix. Proof actor and target recipient may differ on sends; the stored app-to-recipient grant authorizes the target. On subscription registration they must match.
+Verify audience `ting`, issuing app, selected org, endpoint, exact body bytes and current IAM authorization. Do not infer permission from an unverified token payload. The issuing app must match `app_id` or the type's app prefix. Proof actor and target recipient may differ on sends; the stored app-to-recipient grant authorizes the target. On subscription registration they must match.
 
 A proof lasts at most 60 seconds and can be consumed once. Do not retry IAM proof verification after an uncertain result. Return `503 proof_verification_uncertain` without executing the operation. A client retry needs a fresh proof over the same operation body, using the same Ting key. Authentication still runs on idempotent replays.
 
@@ -197,7 +197,7 @@ The same endpoints and code handle tests. An explicit test request supplies:
 }
 ```
 
-Both headers are required together on initial test login and proof-bound app calls. The CLI takes their values from `IAM_TEST_APP_SECRET` and `IAM_TEST_KEY`. An incomplete pair returns `400 test_context_required`. The app ID remains server-configured `tos>ting`.
+Both headers are required together on initial test login and proof-bound app calls. The CLI takes their values from `IAM_TEST_APP_SECRET` and `IAM_TEST_KEY`. An incomplete pair returns `400 test_context_required`. The app ID remains server-configured `ting`.
 
 Ask IAM to validate that secret and environment key, using its testing-context API. Use the verified environment UUID to partition Ting sessions, types, grants, tings, keys, preferences, hooks and local state. One deployment/database can serve them all; a test actor never accesses production records. A supplied secret is a verification override, not proof of identity or an auth bypass.
 
@@ -217,7 +217,7 @@ These routes use the app’s owning organization and require a Ting session with
 
 ```json
 {
-  "type": "tos>dm.msg.received",
+  "type": "dm.msg.received",
   "description": "A new direct message arrived.",
   "defaults": {"carbon": true, "silicon": true}
 }
@@ -240,8 +240,8 @@ A subscription is one app's permission to notify one recipient in one org and da
 ```json
 {
   "id": "sub_123",
-  "app_id": "tos>dm",
-  "for": "si_123",
+  "app_id": "dm",
+  "for": "si:assistant",
   "active": true
 }
 ```
@@ -259,15 +259,15 @@ Requires an IAM App Proof Token. The signed body is:
 ```json
 {
   "org_id": "bricks",
-  "type": "tos>dm.msg.received",
+  "type": "dm.msg.received",
   "data": {"message_id": "dm_456", "text": "Hello"},
   "metadata": {},
-  "for": "si_123",
+  "for": "si:assistant",
   "key": "dm-456"
 }
 ```
 
-Here `tos>dm` owns the type, and `bricks` is the recipient’s organization. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
+Here `dm` owns the type, and `bricks` is the recipient’s organization. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
 
 All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Optional `delivery: "required"` selects the separately authorized automation path below; omit it for ordinary notification delivery. Reject other delivery values and caller-assigned `id`, `created_at`, `silent` or `read`.
 
@@ -313,10 +313,10 @@ A full ting:
 {
   "id": "msg_123",
   "created_at": "2026-09-22T10:00:00Z",
-  "type": "tos>dm.msg.received",
+  "type": "dm.msg.received",
   "data": {"message_id": "dm_456", "text": "Hello"},
   "metadata": {},
-  "for": "si_123",
+  "for": "si:assistant",
   "key": "dm-456",
   "silent": false,
   "read": false
@@ -347,13 +347,13 @@ Ting session required; all operations affect only its recipient.
 | --- | --- | --- |
 | `GET /v1/orgs/{org}/preferences` | Optional `app_id`, and either `service` or `type`; pagination. | `200 {"items":[<preference>]}`; only explicit overrides. |
 | `PUT /v1/orgs/{org}/preferences` | Preference object below. | `200` saved override. |
-| `DELETE /v1/orgs/{org}/preferences` | Query `app_id`, optional `service` or `type`. | `200 {"app_id":"tos>dm","service":null,"type":"tos>dm.msg.received","reset":true}` |
+| `DELETE /v1/orgs/{org}/preferences` | Query `app_id`, optional `service` or `type`. | `200 {"app_id":"dm","service":null,"type":"dm.msg.received","reset":true}` |
 
 ```json
 {
-  "app_id": "tos>dm",
+  "app_id": "dm",
   "service": null,
-  "type": "tos>dm.msg.received",
+  "type": "dm.msg.received",
   "enabled": false
 }
 ```
@@ -413,7 +413,7 @@ Ting session required. For a new attachment, the receiver must already have auth
 {
   "id": "hook_123",
   "receiver_id": "recv_123",
-  "for": "si_123",
+  "for": "si:assistant",
   "state": "connected",
   "pending": 0
 }
@@ -451,7 +451,7 @@ Client requests include a nonempty `request_id` of at most 100 bytes; replies re
 
 | Operation | Fields besides `op`, `request_id` | Success reply |
 | --- | --- | --- |
-| `subscribe` | `org_id`, `session_token`, `webhook_ids` (0–100); optional test `headers`. Empty list authenticates before registration. | `{"op":"subscribed","request_id":"req_1","for":"si_123","webhook_ids":["hook_123"]}` |
+| `subscribe` | `org_id`, `session_token`, `webhook_ids` (0–100); optional test `headers`. Empty list authenticates before registration. | `{"op":"subscribed","request_id":"req_1","for":"si:assistant","webhook_ids":["hook_123"]}` |
 | `unsubscribe` | `org_id`, `webhook_ids` (1–100); optional `pause`, default false. `pause: true` records the local retry cutoff until explicit reattachment. | `{"op":"unsubscribed","request_id":"req_2","webhook_ids":["hook_123"]}` |
 | `send` | `proof_token`, `body` (the exact prepared `/v1/tings` JSON as a string); optional test `headers`. | `{"op":"accepted","request_id":"req_3","id":"msg_123","created_at":"2026-09-22T10:00:00Z","status":"accepted","key":"dm-456","silent":false}` |
 | `ack` | `org_id`, `webhook_id`, `message_ids`, `kind`: `delivery` or `read`. | `{"op":"acked","request_id":"req_4","message_ids":["msg_123","msg_124"],"webhook_id":"hook_123","kind":"delivery"}` |
@@ -498,19 +498,19 @@ This is the server-to-daemon format, not the local webhook body. It retains its 
     {
       "id": "msg_123",
       "created_at": "2026-09-22T10:00:00Z",
-      "type": "tos>dm.msg.received",
+      "type": "dm.msg.received",
       "data": {"message_id": "dm_456", "text": "Hello"},
       "metadata": {},
-      "for": "si_123",
+      "for": "si:assistant",
       "key": "dm-456"
     },
     {
       "id": "msg_124",
       "created_at": "2026-09-22T10:00:01Z",
-      "type": "tos>dm.msg.received",
+      "type": "dm.msg.received",
       "data": {"message_id": "dm_457", "text": "Are you there?"},
       "metadata": {"isi": "planner"},
-      "for": "si_123",
+      "for": "si:assistant",
       "key": "dm-457"
     }
   ]
@@ -552,7 +552,7 @@ The daemon POSTs to the locally registered URL with `Content-Type: application/j
     {
       "id": "msg_123",
       "created_at": "2026-09-22T10:00:00Z",
-      "type": "tos>dm.msg.received",
+      "type": "dm.msg.received",
       "data": {"message_id": "dm_456", "text": "Hello"},
       "metadata": {},
       "key": "dm-456"
@@ -560,7 +560,7 @@ The daemon POSTs to the locally registered URL with `Content-Type: application/j
     {
       "id": "msg_124",
       "created_at": "2026-09-22T10:00:01Z",
-      "type": "tos>dm.msg.received",
+      "type": "dm.msg.received",
       "data": {"message_id": "dm_457", "text": "Are you there?"},
       "metadata": {"isi": "planner"},
       "key": "dm-457"
@@ -620,7 +620,7 @@ HTTP errors use the status below and one JSON body:
 {
   "error": {
     "code": "recipient_not_registered",
-    "message": "tos>dm does not have permission to notify si_123 in tos.",
+    "message": "dm does not have permission to notify si:assistant in tos.",
     "hint": "Register this recipient with an IAM OBO proof before sending.",
     "retryable": false
   }

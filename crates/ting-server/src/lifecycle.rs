@@ -208,7 +208,7 @@ impl Command {
         if body["org_id"] != org
             || body["environment_id"] != environment
             || body["operation_id"] != operation
-            || body["app_id"] != "tos>ting"
+            || body["app_id"] != "ting"
         {
             return Err(Error::invalid(
                 "Lifecycle path and application must match the body.",
@@ -248,10 +248,10 @@ impl Command {
                 let retired = body["retired_apps"]
                     .as_array()
                     .ok_or_else(|| Error::invalid("retired_apps must be an array."))?;
-                if retired.iter().any(|x| x.as_str().is_none()) {
+                if retired.iter().any(|x| !x.as_str().is_some_and(v::app_id)) {
                     return Err(Error::invalid("retired_apps must contain app IDs."));
                 }
-                if retired.iter().any(|x| x == "tos>ting") {
+                if retired.iter().any(|x| x == "ting") {
                     "retired"
                 } else {
                     "active"
@@ -337,7 +337,7 @@ mod tests {
     fn lifecycle_rejects_unbound_actions_and_stale_generations() {
         let env = uuid::Uuid::new_v4().to_string();
         let op = uuid::Uuid::new_v4().to_string();
-        let mut body = json!({"app_id":"tos>ting","org_id":"tos","environment_id":env,"operation_id":op,"environment_revision":2,"generation":1,"key_version":1,"action":"import","testing_key":"a".repeat(32)});
+        let mut body = json!({"app_id":"ting","org_id":"tos","environment_id":env,"operation_id":op,"environment_revision":2,"generation":1,"key_version":1,"action":"import","testing_key":"a".repeat(32)});
         let command = Command::parse(&body, "tos", &env, &op).unwrap();
         assert!(command.validate_transition(None).is_ok());
         assert!(command.receipt().get("testing_key").is_none());
@@ -353,7 +353,7 @@ mod tests {
                 .validate_transition(Some(&(1, 1, 1, "active".into())))
                 .is_err()
         );
-        body["app_id"] = json!("tos>other");
+        body["app_id"] = json!("other");
         assert!(Command::parse(&body, "tos", &env, &op).is_err());
     }
 
@@ -362,7 +362,7 @@ mod tests {
         let environment = uuid::Uuid::new_v4().to_string();
         let operation = uuid::Uuid::new_v4().to_string();
         for action in ["rotate-key", "rotate"] {
-            let body = json!({"app_id":"tos>ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":1,"key_version":2,"action":action,"testing_key":"b".repeat(32)});
+            let body = json!({"app_id":"ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":1,"key_version":2,"action":action,"testing_key":"b".repeat(32)});
             let command = Command::parse(&body, "tos", &environment, &operation).unwrap();
             assert_eq!(command.body, body);
             assert_eq!(command.key_hash, digest("b".repeat(32).as_bytes()));
@@ -386,7 +386,7 @@ mod tests {
             assert!(command.receipt().get("testing_key").is_none());
         }
         for action in ["clean", "prepare", "retire-applications"] {
-            let body = json!({"app_id":"tos>ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":2,"key_version":1,"action":action,"testing_key":"a".repeat(32),"retired_apps":["tos>other"]});
+            let body = json!({"app_id":"ting","org_id":"tos","environment_id":environment,"operation_id":operation,"environment_revision":2,"generation":2,"key_version":1,"action":action,"testing_key":"a".repeat(32),"retired_apps":["other"]});
             let command = Command::parse(&body, "tos", &environment, &operation).unwrap();
             for state in ["disabled", "retired"] {
                 assert!(

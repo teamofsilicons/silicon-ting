@@ -509,9 +509,9 @@ mod tests {
             for (field, value, expected) in [
                 ("active", json!(false), 401),
                 ("authorization", Value::Null, 403),
-                ("public_id", json!("si_other"), 401),
+                ("public_id", json!("si:other"), 401),
                 ("actor_type", json!("carbon"), 401),
-                ("client_id", json!("tos>other"), 401),
+                ("client_id", json!("other"), 401),
             ] {
                 let mut reply = good.clone();
                 reply[field] = value;
@@ -605,7 +605,7 @@ mod tests {
         for field in ["id", "context", "kind"] {
             let mut principal = f.principal.clone();
             match field {
-                "id" => principal.id = "si_other".into(),
+                "id" => principal.id = "si:other".into(),
                 "context" => principal.context = "other".into(),
                 _ => principal.kind = "carbon".into(),
             }

@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = os.environ['TING_PROBE_CONTROL_TOKEN']
 ENVIRONMENT = os.environ['TING_PROBE_ENVIRONMENT']
-APP = 'tos>ting-probe'
+APP = 'ting-probe'
 assert len(TOKEN) >= 32
 DB = sqlite3.connect(os.environ.get('TING_PROBE_DATABASE', '/tmp/ting-live-participant.sqlite'))
 DB.execute('PRAGMA synchronous=FULL')

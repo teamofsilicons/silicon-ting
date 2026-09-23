@@ -6,6 +6,7 @@ export function query(values: Record<string, string | number | boolean | undefin
   return result.size ? `?${result}` : '';
 }
 export function typeError(app: string, type: string, description: string): string | undefined {
+  if (!/^[a-z][a-z0-9_-]{0,79}$/.test(app)) return 'Use the bare IAM application ID. Refresh application metadata after identifier migration.';
   const suffix = type.slice(app.length + 1);
   if (!type.startsWith(`${app}.`) || !/^[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*$/.test(suffix)) return 'Use app_id.service.event, with lowercase service and event names.';
   if (new TextEncoder().encode(type).length > 255) return 'Type names must be at most 255 UTF-8 bytes.';

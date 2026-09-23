@@ -1979,9 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-iam-client"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "102cff396732fcd7e71e7c31ce292f97241444af455a1fd87a0af92bda2faebd"
+version = "4.0.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -2006,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2019,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-client"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "futures-util",
  "libc",
@@ -2037,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-daemon"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2055,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-server"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aes-gcm",
  "anyhow",

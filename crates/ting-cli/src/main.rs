@@ -69,7 +69,7 @@ fn prefs(c: Command) -> Command {
 fn cli() -> Command {
     Command::new("ting").about("Durable notifications for carbons and silicons.").disable_version_flag(true)
  .arg(flag("json").global(true)).arg(a("org").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
- .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'tos>dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain an IAM App Proof Token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
+ .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain an IAM App Proof Token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
  .subcommand(command("iam","Show Ting application information"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
  .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
@@ -333,7 +333,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
     }
     if name == "iam" {
         return Ok(
-            json!({"app_id":"tos>ting","api_version":"v1","repository_url":option_env!("TING_REPOSITORY_URL").unwrap_or("https://github.com/teamofsilicons/silicon-ting"),"docs_url":option_env!("TING_DOCS_URL").unwrap_or("https://ting.teamofsilicons.com/docs"),"rust_package":option_env!("TING_RUST_PACKAGE").unwrap_or("silicon-ting-client")}),
+            json!({"app_id":"ting","api_version":"v1","repository_url":option_env!("TING_REPOSITORY_URL").unwrap_or("https://github.com/teamofsilicons/silicon-ting"),"docs_url":option_env!("TING_DOCS_URL").unwrap_or("https://ting.teamofsilicons.com/docs"),"rust_package":option_env!("TING_RUST_PACKAGE").unwrap_or("silicon-ting-client")}),
         );
     }
     let profile = Profile::current()?;
@@ -969,7 +969,7 @@ mod tests {
                     "preferences",
                     "set",
                     "--app",
-                    "tos>dm",
+                    "dm",
                     "--enabled",
                     "yes"
                 ])

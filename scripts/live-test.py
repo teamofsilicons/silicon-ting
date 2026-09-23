@@ -65,7 +65,7 @@ class Checks:
         endpoint = {"/v1/tings": "tings.send", "/v1/subscriptions": "subscriptions.register",
                     "/v1/subscriptions/query": "subscriptions.query", "/v1/subscriptions/revoke": "subscriptions.revoke",
                     "/v1/sent/query": "sent.query"}[path]
-        return self.iam("app", "obo", "exchange", "tos>ting", endpoint,
+        return self.iam("app", "obo", "exchange", "ting", endpoint,
                         "--as-app-id", self.app, "--app-secret", self.f["sender_app_secret"],
                         "--subject-token", self.subject, "--org-context", self.f.get("org_handle", self.org),
                         "--method", "POST", "--body-file", "-", stdin=raw)["access_proof"]
@@ -114,7 +114,7 @@ class Checks:
     def run_checks(self):
         self.run = key()
         _, info = self.http("GET", "/v1/iam", test=False)
-        assert info["app_id"] == "tos>ting"
+        assert info["app_id"] == "ting"
         self.http("POST", "/v1/tings", body=self.send(), token="invalid-proof", expected=401)
         self.http("POST", "/v1/tings", raw=b'{"org_id":"a","org_id":"b"}', token="invalid-proof", expected=400)
         self.http("POST", "/v1/tings", body=self.send(), token="invalid-proof", extra={"IAM_TEST_APP_SECRET": ""}, expected=(400, 401, 403))

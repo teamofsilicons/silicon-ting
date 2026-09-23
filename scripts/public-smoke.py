@@ -58,7 +58,7 @@ for name, method, path, body, headers, status, code in checks:
             assert payload.get('error', {}).get('code') == code, (name, payload)
             assert isinstance(payload['error'].get('retryable'), bool), name
         elif status != 204:
-            assert payload['app_id'] == 'tos>ting' and payload['api_version'] == 'v1', name
+            assert payload['app_id'] == 'ting' and payload['api_version'] == 'v1', name
         print(json.dumps({'check': name, 'status': response.status, 'passed': True}))
     finally:
         connection.close()

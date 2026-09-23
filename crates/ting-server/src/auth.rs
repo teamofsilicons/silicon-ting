@@ -1,5 +1,8 @@
 //! Upstream authority is always checked live; only encrypted credentials are stored locally.
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    validation as v,
+};
 use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
     aead::{Aead, Payload},
@@ -160,6 +163,10 @@ fn bearer(headers: &HeaderMap) -> Result<&str> {
 
 impl Auth {
     pub fn new(config: &crate::Config) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            v::app_id(&config.iam_app_id),
+            "TING_IAM_APP_ID must be a bare canonical IAM application ID"
+        );
         // IAM and telemetry enable different rustls providers; select one before
         // either client starts a background connection.
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -182,6 +189,7 @@ impl Auth {
             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, payload BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, revoke_pending INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS logins (id TEXT PRIMARY KEY, slt_hash TEXT NOT NULL, created INTEGER NOT NULL, payload BLOB, response BLOB);
             CREATE INDEX IF NOT EXISTS logins_slt ON logins(slt_hash);
+            CREATE TABLE IF NOT EXISTS invalidated_logins (id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);")?;
         // Read the authoritative lifecycle generation without duplicating it in credentials.
         db.execute("ATTACH DATABASE ? AS delivery", [&config.database_path])?;
@@ -365,6 +373,10 @@ impl Auth {
             .ok_or_else(|| Error::unavailable("This testing environment has no active lifecycle generation."))
     }
     fn session_environment(&self, session: &Session) -> Result<Value> {
+        // Public identity changes require a fresh login; never rewrite claims before refresh.
+        if v::actor_kind(&session.id) != Some(session.kind.as_str()) {
+            return Err(expired());
+        }
         match &session.test {
             None if session.context == "production" => Ok(json!({"kind":"production"})),
             Some(test) if test.id == session.context => {
@@ -393,6 +405,11 @@ impl Auth {
         self.current_session(principal).map(|_| ())
     }
     pub fn check_proof(&self, proof: &Proof) -> Result<()> {
+        if v::actor_kind(&proof.actor_id) != Some(proof.actor_kind.as_str())
+            || !v::app_id(&proof.app_id)
+        {
+            return Err(forbidden());
+        }
         match &proof.test {
             None if proof.context == "production" => Ok(()),
             Some(test)
@@ -566,6 +583,11 @@ impl Auth {
         {
             if org.audience != self.app_id
                 || org.public_id.as_deref() != Some(&s.id)
+                || serde_json::to_value(&org.actor_type)
+                    .map_err(storage)?
+                    .as_str()
+                    != Some(&s.kind)
+                || org.org_id.is_empty()
                 || org
                     .testing_environment_id
                     .map(|id| id.to_string())
@@ -671,6 +693,24 @@ impl Auth {
         let _guard = lock.lock().await;
         let slt_lock = self.lock(&format!("slt:{slt_hash}"));
         let _slt_guard = slt_lock.lock().await;
+        let invalidated: bool = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM invalidated_logins WHERE id=?)",
+                [&operation],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        if invalidated {
+            return Err(Error::new(
+                410,
+                "login_migrated",
+                "This login attempt was invalidated during the identifier migration.",
+                "Obtain a fresh IAM short-lived token and start a new login attempt.",
+            ));
+        }
         let prior: Option<(String, i64, Option<Vec<u8>>, Option<Vec<u8>>)> = self
             .db
             .lock()
@@ -987,7 +1027,7 @@ impl Auth {
         let client = self.client(s.test.as_ref())?;
         let catalog = client
             .obo()
-            .endpoints("tos>honeycomb")
+            .endpoints("honeycomb")
             .await
             .map_err(iam_error)?;
         let mut items = Vec::new();
@@ -1004,7 +1044,7 @@ impl Auth {
                     &models::OboExchangeRequest {
                         org_id: Some(a.org_id.clone()),
                         subject_token: s.access.clone(),
-                        audience: "tos>honeycomb".into(),
+                        audience: "honeycomb".into(),
                         endpoint_id: "honeycomb.apps.list".into(),
                         metadata: json!({}),
                         request: models::OboExchangeRequestBinding {
@@ -1039,7 +1079,7 @@ impl Auth {
             let page = body["items"].as_array().ok_or_else(unavailable)?;
             for app in page {
                 let app_id = app["app_id"].as_str().ok_or_else(unavailable)?;
-                if app["org_id"].as_str() != Some(&a.org_id) {
+                if !v::app_id(app_id) || app["org_id"].as_str() != Some(&a.org_id) {
                     return Err(unavailable());
                 }
                 items.push(json!({"app_id":app_id,"name":app["name"],"can_manage_tings":matches!(a.org_role.as_deref(),Some("owner"|"admin"))}));
@@ -1110,16 +1150,15 @@ impl Auth {
             || a.org_id != verified.org_id
             || a.public_id.as_deref() != Some(&verified.actor.public_id)
             || serde_json::to_value(&a.actor_type).map_err(storage)? != actor_kind
-            || verified.actor.public_id.is_empty()
-            || !actor_kind
-                .as_str()
-                .is_some_and(|kind| matches!(kind, "carbon" | "silicon"))
+            || actor_kind.as_str().is_none()
+            || v::actor_kind(&verified.actor.public_id) != actor_kind.as_str()
+            || verified.org_id.is_empty()
             || a.testing_environment_id.map(|v| v.to_string()).as_deref()
                 != test.as_ref().map(|v| v.id.as_str())
             || verified.expires_at.unix_timestamp() <= now()
             || verified.expires_at.unix_timestamp() - verified.consumed_at.unix_timestamp() > 60
             || verified.consumed_at > verified.expires_at
-            || verified.issuer_app_id.is_empty()
+            || !v::app_id(&verified.issuer_app_id)
             || !verified.metadata.as_object().is_some_and(|m| m.is_empty())
             || !a
                 .scopes
@@ -1332,9 +1371,31 @@ pub(crate) mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
+    #[tokio::test]
+    async fn migrated_login_attempt_never_reaches_iam_again() {
+        let f = fixture(false).await;
+        let key = uuid::Uuid::new_v4().to_string();
+        let operation = hash(format!("production:{key}").as_bytes());
+        f.app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO invalidated_logins VALUES(?)", [&operation])
+            .unwrap();
+        f.take_calls();
+        let error = f
+            .app
+            .auth
+            .login("original-slt", &key, &HeaderMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 410);
+        assert!(f.take_calls().is_empty());
+    }
     fn token_reply(access: &str, refresh: &str, expires_in: i64) -> Value {
         json!({"access_token":access,"refresh_token":refresh,"expires_in":expires_in,
-            "token_type":"Bearer","scope":"","actor":{"type":"silicon","public_id":"si_fixture"}})
+            "token_type":"Bearer","scope":"","actor":{"type":"silicon","public_id":"si:fixture"}})
     }
 
     pub(crate) struct MockIam {
@@ -1382,7 +1443,7 @@ pub(crate) mod tests {
                 .into()
         }
         pub fn send(&self, key: &str) -> String {
-            self.app.store.send(&self.proof, &json!({"org_id":self.proof.org_id,"type":"tos>example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
+            self.app.store.send(&self.proof, &json!({"org_id":self.proof.org_id,"type":"example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
         }
         pub fn receipt(&self, hook: &str, id: &str) -> (i64, i64) {
             Connection::open(&self.app.config.database_path)
@@ -1411,9 +1472,9 @@ pub(crate) mod tests {
         let owner_org = uuid::Uuid::new_v4().to_string();
         let iam = Arc::new(MockIam {
             reply: Mutex::new(
-                json!({"active":true,"public_id":"si_fixture","actor_type":"silicon","client_id":"tos>ting","authorization":{
+                json!({"active":true,"public_id":"si:fixture","actor_type":"silicon","client_id":"ting","authorization":{
                 "organization_id":org,"org_id":"tos","membership_id":"fixture-member","membership_version":1,"authorization_epoch":1,
-                "audience":"tos>ting","public_id":"si_fixture","actor_type":"silicon","scopes":[],
+                "audience":"ting","public_id":"si:fixture","actor_type":"silicon","scopes":[],
                 "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
             ),
             status: AtomicU16::new(200),
@@ -1493,10 +1554,11 @@ pub(crate) mod tests {
                         "/v1/sent/query" => "sent.query",
                         _ => panic!("unexpected proof path: {target}"),
                     };
-                    let mut authorization = iam.reply.lock().unwrap()["authorization"].clone();
-                    authorization["scopes"] = json!([format!("obo:tos>ting:{endpoint}")]);
-                    json!({"valid":true,"proof_id":uuid::Uuid::new_v4(),"issuer_app_id":"tos>example","audience":"tos>ting",
-                        "actor":{"type":"silicon","public_id":"si_fixture"},"org_id":authorization["org_id"],"authorization":authorization,
+                    let reply = iam.reply.lock().unwrap().clone();
+                    let mut authorization = reply["authorization"].clone();
+                    authorization["scopes"] = json!([format!("obo:ting:{endpoint}")]);
+                    json!({"valid":true,"proof_id":uuid::Uuid::new_v4(),"issuer_app_id":"example","audience":"ting",
+                        "actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":authorization["org_id"],"authorization":authorization,
                         "endpoint":{"endpoint_id":endpoint,"path":target},"metadata":{},
                         "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339(),
                         "consumed_at":chrono::Utc::now().to_rfc3339()})
@@ -1504,7 +1566,7 @@ pub(crate) mod tests {
                 path if path.starts_with("/api/v1/obo-access/applications/")
                     && path.ends_with("/endpoints") =>
                 {
-                    json!({"application":{"app_id":"tos>honeycomb","org_id":"tos"},
+                    json!({"application":{"app_id":"honeycomb","org_id":"tos"},
                         "endpoints":[{"endpoint_id":"honeycomb.apps.list","path":"/api/v1/obo/apps/list","critical":false,"metadata":{}}]})
                 }
                 "/api/v1/obo-access/exchanges" => {
@@ -1517,7 +1579,7 @@ pub(crate) mod tests {
                         .unwrap();
                     let body: Value = serde_json::from_slice(&raw).unwrap();
                     let items = if body["org_id"] == "tos" {
-                        json!([{"app_id":"tos>example","org_id":"tos","name":"Example"}])
+                        json!([{"app_id":"example","org_id":"tos","name":"Example"}])
                     } else {
                         json!([])
                     };
@@ -1525,7 +1587,7 @@ pub(crate) mod tests {
                 }
                 "/api/v1/application/testing-context" => {
                     json!({"environment_id":iam.context,"application":{
-                    "app_id":"tos>ting","base_url":"https://ting.example","app_scope":{"iam":[],"external":[]},"webhook_scope":[],"testing_idle_days":30}})
+                    "app_id":"ting","base_url":"https://ting.example","app_scope":{"iam":[],"external":[]},"webhook_scope":[],"testing_idle_days":30}})
                 }
                 _ => panic!("unexpected IAM route: {path}"),
             };
@@ -1553,7 +1615,7 @@ pub(crate) mod tests {
             encryption_key: "ab".repeat(32),
             honeycomb_url: iam_url.clone(),
             iam_url,
-            iam_app_id: "tos>ting".into(),
+            iam_app_id: "ting".into(),
             iam_app_secret: "fixture-secret".into(),
             spacestation_url: "http://127.0.0.1:1".into(),
             spacestation_key: String::new(),
@@ -1574,7 +1636,7 @@ pub(crate) mod tests {
             } else {
                 "production".into()
             },
-            id: "si_fixture".into(),
+            id: "si:fixture".into(),
             kind: "silicon".into(),
             access: "fixture-access".into(),
             refresh: "fixture-refresh".into(),
@@ -1606,7 +1668,7 @@ pub(crate) mod tests {
         let proof = Proof {
             context: principal.context.clone(),
             org_id: org,
-            app_id: "tos>example".into(),
+            app_id: "example".into(),
             actor_id: principal.id.clone(),
             actor_kind: principal.kind.clone(),
             expires_at: now() + 60,
@@ -1629,7 +1691,7 @@ pub(crate) mod tests {
                 &principal,
                 &owner_org,
                 &proof.app_id,
-                &json!({"type":"tos>example.msg.received","description":"Fixture"}),
+                &json!({"type":"example.msg.received","description":"Fixture"}),
                 false,
             )
             .unwrap();
@@ -1658,6 +1720,176 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn canonical_actors_require_matching_iam_kind_org_and_world() {
+        for testing in [false, true] {
+            let f = fixture(testing).await;
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            if testing {
+                headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+                headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+            }
+            let raw =
+                serde_json::to_vec(&json!({"org_id":f.proof.org_id,"app_id":"example"})).unwrap();
+            for (actor, kind) in [("c:alice0", "carbon"), ("si:assistant", "silicon")] {
+                {
+                    let mut reply = f.iam.reply.lock().unwrap();
+                    reply["public_id"] = actor.into();
+                    reply["actor_type"] = kind.into();
+                    reply["authorization"]["public_id"] = actor.into();
+                    reply["authorization"]["actor_type"] = kind.into();
+                }
+                let mut tokens = token_reply("canonical-access", "canonical-refresh", 3600);
+                tokens["actor"] = json!({"type":kind,"public_id":actor});
+                f.iam.token_replies.lock().unwrap().push_back(tokens);
+                let key = uuid::Uuid::new_v4().to_string();
+                let slt = format!("canonical-slt-{kind}");
+                let login = f.app.auth.login(&slt, &key, &headers).await.unwrap().1;
+                assert_eq!(login["id"], actor);
+                assert_eq!(login["kind"], kind);
+                assert_eq!(
+                    f.app.auth.login(&slt, &key, &headers).await.unwrap(),
+                    (200, login.clone())
+                );
+                assert_eq!(f.iam.token_requests.lock().unwrap().last().unwrap().0, key);
+                let p = f
+                    .app
+                    .auth
+                    .authenticate(login["session_token"].as_str().unwrap(), &headers)
+                    .await
+                    .unwrap();
+                assert_eq!(f.app.auth.org(&p, "tos").await.unwrap(), f.proof.org_id);
+                assert_eq!(
+                    f.app
+                        .auth
+                        .org(&p, "another-org")
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    403
+                );
+                let proof = f
+                    .app
+                    .auth
+                    .proof(&headers, "/v1/subscriptions", &raw)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    (
+                        proof.actor_id.as_str(),
+                        proof.actor_kind.as_str(),
+                        proof.app_id.as_str()
+                    ),
+                    (actor, kind, "example")
+                );
+
+                let opposite = if kind == "carbon" {
+                    "silicon"
+                } else {
+                    "carbon"
+                };
+                f.iam.reply.lock().unwrap()["authorization"]["actor_type"] = opposite.into();
+                assert_eq!(
+                    f.app
+                        .auth
+                        .authenticate(login["session_token"].as_str().unwrap(), &headers)
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    403
+                );
+                assert_eq!(
+                    f.app
+                        .auth
+                        .proof(&headers, "/v1/subscriptions", &raw)
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    401
+                );
+                f.iam.reply.lock().unwrap()["authorization"]["actor_type"] = kind.into();
+                let other_world = uuid::Uuid::new_v4().to_string();
+                f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] =
+                    other_world.into();
+                assert_eq!(
+                    f.app
+                        .auth
+                        .proof(&headers, "/v1/subscriptions", &raw)
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    401
+                );
+                f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] = if testing
+                {
+                    f.principal.context.clone().into()
+                } else {
+                    Value::Null
+                };
+                let wrong_org =
+                    serde_json::to_vec(&json!({"org_id":"another-org","app_id":"example"}))
+                        .unwrap();
+                assert_eq!(
+                    f.app
+                        .auth
+                        .proof(&headers, "/v1/subscriptions", &wrong_org)
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    401
+                );
+            }
+            for (actor, kind) in [
+                ("alice", "carbon"),
+                ("assistant:tos", "silicon"),
+                ("c:alice", "silicon"),
+                ("si:assistant", "carbon"),
+            ] {
+                let mut reply = f.iam.reply.lock().unwrap();
+                reply["public_id"] = actor.into();
+                reply["actor_type"] = kind.into();
+                reply["authorization"]["public_id"] = actor.into();
+                reply["authorization"]["actor_type"] = kind.into();
+                drop(reply);
+                assert_eq!(
+                    f.app
+                        .auth
+                        .proof(&headers, "/v1/subscriptions", &raw)
+                        .await
+                        .err()
+                        .unwrap()
+                        .status,
+                    401
+                );
+            }
+            let mut stale = f.app.auth.session(&f.principal.session).unwrap();
+            stale.id = "fixture:tos".into();
+            stale.expires = 0;
+            f.app.auth.save(&f.principal.session, &stale).unwrap();
+            f.take_calls();
+            assert_eq!(
+                f.app
+                    .auth
+                    .authenticate(&f.token, &headers)
+                    .await
+                    .err()
+                    .unwrap()
+                    .status,
+                401
+            );
+            assert!(
+                f.take_calls().is_empty(),
+                "legacy claims must not reach refresh under a new audience"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn aged_login_replay_survives_maintenance_restart_and_never_revives_revoked_authority() {
         let f = fixture(false).await;
@@ -2256,7 +2488,7 @@ pub(crate) mod tests {
         assert_eq!(
             get_me(&production).await.unwrap(),
             json!({
-                "id":"si_fixture", "kind":"silicon", "authenticated":true,
+                "id":"si:fixture", "kind":"silicon", "authenticated":true,
                 "environment":{"kind":"production"}
             })
         );
@@ -2288,7 +2520,7 @@ pub(crate) mod tests {
         assert_eq!(
             get_me(&testing).await.unwrap(),
             json!({
-                "id":"si_fixture", "kind":"silicon", "authenticated":true,
+                "id":"si:fixture", "kind":"silicon", "authenticated":true,
                 "environment":{"kind":"testing", "id":testing.principal.context, "generation":1}
             })
         );
@@ -2388,7 +2620,7 @@ pub(crate) mod tests {
                 proof_headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
                 proof_headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
             }
-            let body = json!({"org_id":"bricks","type":"tos>example.msg.received",
+            let body = json!({"org_id":"bricks","type":"example.msg.received",
                 "data":{},"for":f.principal.id,"key":"cross-org"});
             let (status, sent) = request(&f, &proof_headers, Method::POST, "tings", body.clone())
                 .await
@@ -2399,15 +2631,14 @@ pub(crate) mod tests {
                 &proof_headers,
                 Method::POST,
                 "sent/query",
-                json!({"org_id":"bricks","app_id":"tos>example","id":sent["id"]}),
+                json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
             )
             .await
             .unwrap();
             assert_eq!(history["id"], sent["id"]);
-            for (field, value, status) in [
-                ("org_id", "tos", 401),
-                ("type", "bricks>other.msg.received", 403),
-            ] {
+            for (field, value, status) in
+                [("org_id", "tos", 401), ("type", "other.msg.received", 403)]
+            {
                 let mut invalid = body.clone();
                 invalid[field] = value.into();
                 assert_eq!(
@@ -2425,15 +2656,15 @@ pub(crate) mod tests {
                 format!("Bearer {}", f.token).parse().unwrap(),
             );
             for (method, path, body) in [
-                (Method::GET, "orgs/bricks/apps/tos>example/types", json!({})),
+                (Method::GET, "orgs/bricks/apps/example/types", json!({})),
                 (
                     Method::POST,
-                    "orgs/bricks/apps/tos>example/types",
-                    json!({"type":"tos>example.msg.received","description":"Hijack"}),
+                    "orgs/bricks/apps/example/types",
+                    json!({"type":"example.msg.received","description":"Hijack"}),
                 ),
                 (
                     Method::PATCH,
-                    "orgs/bricks/apps/tos>example/types/tos>example.msg.received",
+                    "orgs/bricks/apps/example/types/example.msg.received",
                     json!({"description":"Hijack"}),
                 ),
             ] {
@@ -2454,7 +2685,7 @@ pub(crate) mod tests {
                 &f,
                 &session_headers,
                 Method::GET,
-                "orgs/tos/apps/tos>example/types",
+                "orgs/tos/apps/example/types",
                 json!({}),
             )
             .await
@@ -2465,7 +2696,7 @@ pub(crate) mod tests {
                     &f,
                     &session_headers,
                     Method::PATCH,
-                    "orgs/tos/apps/tos>example/types/tos>example.msg.received",
+                    "orgs/tos/apps/example/types/example.msg.received",
                     json!({"description":"Owner update"}),
                 )
                 .await
@@ -2499,7 +2730,7 @@ pub(crate) mod tests {
                 Method::PUT,
                 headers,
                 Ok(
-                    serde_json::to_vec(&json!({"app_id":"tos>example","enabled":false}))
+                    serde_json::to_vec(&json!({"app_id":"example","enabled":false}))
                         .unwrap()
                         .into(),
                 ),
@@ -2548,9 +2779,9 @@ pub(crate) mod tests {
         ] {
             let f = fixture(true).await;
             let body = if path == "/v1/tings" {
-                json!({"org_id":f.proof.org_id,"type":"tos>example.msg.received","data":{},"for":f.principal.id,"key":"stale-proof"})
+                json!({"org_id":f.proof.org_id,"type":"example.msg.received","data":{},"for":f.principal.id,"key":"stale-proof"})
             } else {
-                json!({"org_id":f.proof.org_id,"app_id":"tos>example"})
+                json!({"org_id":f.proof.org_id,"app_id":"example"})
             };
             let mut headers = HeaderMap::new();
             headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
@@ -2622,7 +2853,7 @@ pub(crate) mod tests {
             database_path: database.to_string_lossy().into_owned(),
             encryption_key: "ab".repeat(32),
             iam_url: "http://127.0.0.1:1".into(),
-            iam_app_id: "tos>ting".into(),
+            iam_app_id: "ting".into(),
             iam_app_secret: "test-only-secret".into(),
             honeycomb_url: "http://127.0.0.1:1".into(),
             spacestation_url: "http://127.0.0.1:1".into(),
@@ -2639,7 +2870,7 @@ pub(crate) mod tests {
         let context = uuid::Uuid::new_v4().to_string();
         let session = Session {
             context: context.clone(),
-            id: "test-actor".into(),
+            id: "c:test-actor".into(),
             kind: "carbon".into(),
             access: "sensitive-access-token".into(),
             refresh: "sensitive-refresh-token".into(),

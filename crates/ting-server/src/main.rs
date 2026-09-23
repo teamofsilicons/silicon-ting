@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod lifecycle;
+mod migration;
 mod receiver;
 mod store;
 mod telemetry;
@@ -57,7 +58,7 @@ impl Config {
             database_path: env::var("TING_DATABASE_PATH").unwrap_or("ting.sqlite".into()),
             encryption_key: required("TING_ENCRYPTION_KEY")?,
             iam_url: required("TING_IAM_URL")?,
-            iam_app_id: "tos>ting".into(),
+            iam_app_id: "ting".into(),
             iam_app_secret: required("TING_IAM_APP_SECRET")?,
             honeycomb_url: required("TING_HONEYCOMB_URL")?,
             spacestation_url: required("TING_SPACESTATION_URL")?,
@@ -106,6 +107,22 @@ pub type Shared = Arc<App>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<_> = env::args().skip(1).collect();
+    if !args.is_empty() {
+        anyhow::ensure!(
+            (args.len() == 2 || (args.len() == 3 && args[2] == "--apply"))
+                && args[0] == "--migrate-public-identifiers",
+            "Usage: ting-server [--migrate-public-identifiers MAP.json [--apply]]"
+        );
+        let report = migration::run(
+            &env::var("TING_DATABASE_PATH")?,
+            &env::var("TING_ENCRYPTION_KEY")?,
+            &args[1],
+            args.len() == 3,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .json()
@@ -943,7 +960,7 @@ mod tests {
                 .into_owned(),
             encryption_key: "ab".repeat(32),
             iam_url: "http://127.0.0.1:1".into(),
-            iam_app_id: "tos>ting".into(),
+            iam_app_id: "ting".into(),
             iam_app_secret: "fixture-secret".into(),
             honeycomb_url: "http://127.0.0.1:1".into(),
             spacestation_url: "http://127.0.0.1:1".into(),

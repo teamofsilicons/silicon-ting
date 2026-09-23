@@ -425,7 +425,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
 
-    const BODY: &str = "{ \"org_id\":\"tos\", \"type\":\"tos>dm.sync.changed\", \"for\":\"si_1\", \"key\":\"si_1/event-1\", \"data\":{\"text\":\"नमस्ते\\nhi\"} }";
+    const BODY: &str = "{ \"org_id\":\"tos\", \"type\":\"dm.sync.changed\", \"for\":\"si:one\", \"key\":\"si_1/event-1\", \"data\":{\"text\":\"नमस्ते\\nhi\"} }";
 
     async fn fixture() -> (TcpListener, Client) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -490,7 +490,7 @@ mod tests {
             .await;
             respond(
                 &mut socket,
-                json!({"op":"inbox_changed","org_id":"org","app_id":"tos>hook"}),
+                json!({"op":"inbox_changed","org_id":"org","app_id":"hook"}),
             )
             .await;
             assert!(
@@ -581,9 +581,9 @@ mod tests {
             }
             assert_eq!(request["op"], "subscribe");
             assert_eq!(request["webhook_ids"], json!([]));
-            respond(&mut socket, json!({"op":"tings","org_id":"tos","webhook_id":"hook_1","tings":[{"id":"dm","type":"tos>dm.sync.changed","for":"si_1"},{"id":"other","type":"tos>other.sync.changed","for":"si_1"}]})).await;
+            respond(&mut socket, json!({"op":"tings","org_id":"tos","webhook_id":"hook_1","tings":[{"id":"dm","type":"dm.sync.changed","for":"si:one"},{"id":"other","type":"other.sync.changed","for":"si:one"}]})).await;
             respond(&mut socket, json!({"op":"paused","org_id":"tos","webhook_ids":["hook_1"],"reason":"session_expired"})).await;
-            respond(&mut socket, json!({"op":"subscribed","request_id":request["request_id"],"for":"si_1","webhook_ids":[]})).await;
+            respond(&mut socket, json!({"op":"subscribed","request_id":request["request_id"],"for":"si:one","webhook_ids":[]})).await;
             let request = receive(&mut socket).await;
             assert_eq!(request["op"], "watch_inbox");
             assert_eq!(request["session_token"], "ting-session");
@@ -609,7 +609,7 @@ mod tests {
             panic!("Expected batch")
         };
         assert_eq!(tings.len(), 2);
-        assert_eq!(tings[1]["for"], "si_1");
+        assert_eq!(tings[1]["for"], "si:one");
         assert!(
             matches!(socket.next_event().await.unwrap(), Event::Paused { reason, .. } if reason == "session_expired")
         );

@@ -1370,7 +1370,7 @@ mod tests {
             "session.json",
             &Session {
                 api_url: "https://test.invalid".into(),
-                id: "si_a".into(),
+                id: "si:alice".into(),
                 token: "secret-a".into(),
                 context: None,
             },
@@ -1479,7 +1479,7 @@ mod tests {
                 "session.json",
                 &Session {
                     api_url: api.clone(),
-                    id: "si_test".into(),
+                    id: "si:test".into(),
                     token: "private-test".into(),
                     context: None,
                 },
@@ -1491,7 +1491,7 @@ mod tests {
             .unwrap()
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         for id in ["expired", "unread"] {
-            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"tos>dm.msg.received","for":"si_test","key":id,"data":{},"metadata":{}}]}),&api).unwrap();
+            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"dm.msg.received","for":"si:test","key":id,"data":{},"metadata":{}}]}),&api).unwrap();
             store.mark("hook", &[id.into()], true).unwrap();
         }
         let (tx, _rx) = mpsc::channel(1);
@@ -1608,7 +1608,7 @@ mod tests {
                 "session.json",
                 &Session {
                     api_url: api.clone(),
-                    id: "si_test".into(),
+                    id: "si:test".into(),
                     token: "private-test".into(),
                     context: None,
                 },
@@ -1625,7 +1625,7 @@ mod tests {
             .unwrap();
         let store = Arc::new(Store::open(&dir.join("queue.sqlite")).unwrap());
         let queue = |id: &str, created: String| {
-            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"tos>dm.msg.received","for":"si_test","key":id,"data":{},"metadata":{}}]}), &api).unwrap();
+            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"dm.msg.received","for":"si:test","key":id,"data":{},"metadata":{}}]}), &api).unwrap();
         };
         let old = Utc::now()
             .checked_sub_months(Months::new(2))
@@ -1692,7 +1692,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("ting-expiry-{}.sqlite", uuid::Uuid::new_v4()));
         let store = Store::open(&path).unwrap();
-        let mut batch = json!({"webhook_id":"hook","org_id":"tos","tings":[{"id":"fresh","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"tos>dm.msg.received","for":"si_test","key":"k","data":{},"metadata":{}}]});
+        let mut batch = json!({"webhook_id":"hook","org_id":"tos","tings":[{"id":"fresh","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"dm.msg.received","for":"si:test","key":"k","data":{},"metadata":{}}]});
         store.queue(&batch, "https://test.invalid").unwrap();
         assert_eq!(store.batch("hook", false).unwrap().len(), 1);
         assert!(store.queue(&batch, "https://different.invalid").is_err());
@@ -1723,7 +1723,7 @@ mod tests {
     #[test]
     fn acceptance_survives_reopen_and_replay() {
         let p = std::env::temp_dir().join(format!("ting-{}.sqlite", uuid::Uuid::new_v4()));
-        let v = json!({"webhook_id":"h","org_id":"tos","tings":[{"id":"m","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"tos>dm.msg.received","data":{},"metadata":{},"for":"si_1","key":"k"}]});
+        let v = json!({"webhook_id":"h","org_id":"tos","tings":[{"id":"m","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"dm.msg.received","data":{},"metadata":{},"for":"si:one","key":"k"}]});
         {
             let store = Store::open(&p).unwrap();
             assert_eq!(store.queue(&v, "https://test.invalid").unwrap(), vec!["m"]);

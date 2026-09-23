@@ -9,17 +9,17 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let readCalls = 0, authenticated = false, read = false;
-  let requiredDelivery = false, failRequiredDelivery = false, appCatalogCalls = 0;
+  let requiredDelivery = false, failRequiredDelivery = false, appCatalogCalls = 0, inboxCalls = 0;
   const preferenceWrites = [];
   const requiredDeliveryWrites = [];
-  const subscription = { id: 'sub-smoke-original', app_id: 'tos>demo', for: 'c_smoke', active: true };
-  const ting = { id: 'smoke-ting', created_at: new Date().toISOString(), type: 'tos>demo.messages.received', for: 'c_smoke', key: 'smoke-key', silent: false };
+  const subscription = { id: 'sub-smoke-original', app_id: 'demo', for: 'c:smoke', active: true };
+  const ting = { id: 'smoke-ting', created_at: new Date().toISOString(), type: 'demo.messages.received', for: 'c:smoke', key: 'smoke-key', silent: false };
   await page.route('**/v1/**', async route => {
     const url = new URL(route.request().url()), path = decodeURIComponent(url.pathname);
     let status = 200, body;
-    if (path === '/v1/me') { status = authenticated ? 200 : 401; body = authenticated ? { id: 'c_smoke', kind: 'carbon', authenticated: true } : { error: { code: 'authentication_required', message: 'Sign in required.' } }; }
+    if (path === '/v1/me') { status = authenticated ? 200 : 401; body = authenticated ? { id: 'c:smoke', kind: 'carbon', authenticated: true } : { error: { code: 'authentication_required', message: 'Sign in required.' } }; }
     else if (path === '/v1/orgs') body = { items: [{ id: 'bricks', name: 'Bricks' }] };
-    else if (path.endsWith('/apps')) { appCatalogCalls++; body = { items: [{ app_id: 'bricks>local', name: 'Local app', can_manage_tings: true }] }; }
+    else if (path.endsWith('/apps')) { appCatalogCalls++; body = { items: [{ app_id: 'local', name: 'Local app', can_manage_tings: true }] }; }
     else if (path.endsWith('/preferences') && route.request().method() === 'PUT') {
       body = route.request().postDataJSON();
       preferenceWrites.push({ path, body });
@@ -35,7 +35,7 @@ try {
     else if (path.endsWith('/subscriptions')) body = { items: [{ ...subscription, required_delivery: requiredDelivery }] };
     else if (path.endsWith('/inbox/read')) { readCalls++; read = true; body = { message_ids: ['smoke-ting'], read: true }; }
     else if (path.endsWith('/inbox/smoke-ting')) body = { ...ting, read, data: { text: 'Smoke test payload', url: 'javascript:alert(1)' }, metadata: {} };
-    else if (path.endsWith('/inbox')) body = { items: url.searchParams.get('silent') === 'true' ? [] : [{ ...ting, read }] };
+    else if (path.endsWith('/inbox')) { inboxCalls++; body = { items: url.searchParams.get('silent') === 'true' ? [] : [{ ...ting, read }] }; }
     else body = { items: [] };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -52,19 +52,23 @@ try {
   await page.screenshot({ path: '/tmp/ting-mobile-docs.png', fullPage: true });
   authenticated = true;
   await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.evaluate(() => localStorage.setItem('ting.org', 'retired-organization'));
   await page.goto(origin);
-  await page.getByRole('button', { name: /tos>demo.messages.received/ }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'Your saved organization is no longer available.' }).waitFor();
+  assert.equal(inboxCalls, 0, 'A stale organization must not fall back to another organization');
+  await page.getByRole('combobox', { name: 'Active organization', exact: true }).selectOption('bricks');
+  await page.getByRole('button', { name: /demo.messages.received/ }).waitFor();
   assert.equal(readCalls, 0, 'Inbox fetching must never acknowledge a ting');
   assert.equal(appCatalogCalls, 0, 'Recipient inbox must not depend on app-management catalog access');
-  await page.locator('#inbox-apps option[value="tos>demo"]').waitFor({ state: 'attached' });
-  assert.equal(await page.locator('#inbox-apps option[value="bricks>local"]').count(), 0, 'Inbox suggestions must come from recipient connections');
+  await page.locator('#inbox-apps option[value="demo"]').waitFor({ state: 'attached' });
+  assert.equal(await page.locator('#inbox-apps option[value="local"]').count(), 0, 'Inbox suggestions must come from recipient connections');
   const appFilter = page.getByRole('combobox', { name: 'Filter by application', exact: true });
-  let filtered = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/inbox') && new URL(request.url()).searchParams.get('app_id') === 'tos>demo');
-  await appFilter.fill('tos>demo');
+  let filtered = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/inbox') && new URL(request.url()).searchParams.get('app_id') === 'demo');
+  await appFilter.fill('demo');
   await appFilter.press('Tab');
   assert.equal(new URL((await filtered).url()).pathname, '/v1/orgs/bricks/inbox', 'Filter foreign apps in the recipient org');
-  filtered = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/inbox') && new URL(request.url()).searchParams.get('app_id') === 'other>unlisted');
-  await appFilter.fill('other>unlisted');
+  filtered = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/inbox') && new URL(request.url()).searchParams.get('app_id') === 'unlisted');
+  await appFilter.fill('unlisted');
   await appFilter.press('Tab');
   await filtered;
   await appFilter.fill('');
@@ -78,7 +82,7 @@ try {
     await page.screenshot({ path: `/tmp/ting-cross-org-inbox-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 1050 });
-  await page.getByRole('button', { name: /tos>demo.messages.received/ }).click();
+  await page.getByRole('button', { name: /demo.messages.received/ }).click();
   await page.getByText('Smoke test payload', { exact: true }).waitFor();
   await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Read'));
   assert.equal(readCalls, 1, 'Opening a visible ting sends one read acknowledgement');
@@ -88,15 +92,15 @@ try {
   await page.getByRole('heading', { name: 'A little peace and quiet.' }).waitFor();
   assert.equal(readCalls, 1, 'Switching inbox filters must not acknowledge unseen tings');
   await page.getByRole('link', { name: 'Preferences', exact: true }).click();
-  await page.locator('#preference-apps option[value="tos>demo"]').waitFor({ state: 'attached' });
-  await page.getByRole('combobox', { name: 'Application', exact: true }).fill('tos>demo');
+  await page.locator('#preference-apps option[value="demo"]').waitFor({ state: 'attached' });
+  await page.getByRole('combobox', { name: 'Application', exact: true }).fill('demo');
   await page.getByRole('button', { name: 'Save preference', exact: true }).click();
   await page.getByText('Preference saved.', { exact: true }).waitFor();
-  assert.deepEqual(preferenceWrites, [{ path: '/v1/orgs/bricks/preferences', body: { app_id: 'tos>demo', service: null, type: null, enabled: false } }]);
+  assert.deepEqual(preferenceWrites, [{ path: '/v1/orgs/bricks/preferences', body: { app_id: 'demo', service: null, type: null, enabled: false } }]);
   assert.equal(appCatalogCalls, 0, 'Recipient preferences must not depend on app-management catalog access');
   await page.getByRole('link', { name: 'Applications', exact: true }).click();
   await page.getByRole('button', { name: 'Register type' }).click();
-  await page.getByRole('textbox', { name: 'Type name', exact: true }).fill('tos>other.messages.received');
+  await page.getByRole('textbox', { name: 'Type name', exact: true }).fill('other.messages.received');
   await page.getByRole('textbox', { name: 'Description', exact: true }).fill('Description');
   await page.getByRole('button', { name: 'Register type', exact: true }).last().click();
   await page.getByText('Use app_id.service.event, with lowercase service and event names.').waitFor();
@@ -132,5 +136,5 @@ try {
   }
   await page.screenshot({ path: '/tmp/ting-mobile-connections.png', fullPage: true });
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible read ACK, safe URLs, silent filtering, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
+  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible read ACK, safe URLs, silent filtering, canonical Carbon IDs, stale organization rejection, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
 } finally { await browser.close(); }

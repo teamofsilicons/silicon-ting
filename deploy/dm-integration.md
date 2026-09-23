@@ -132,7 +132,7 @@ completed changes.
    preserving every existing participant:
 
    ```json
-   {"app_id":"tos>dm","base_url":"https://backend.dm.teamofsilicons.com","token_env":"DM_HONEYCOMB_SERVICE_TOKEN"}
+   {"app_id":"dm","base_url":"https://backend.dm.teamofsilicons.com","token_env":"DM_HONEYCOMB_SERVICE_TOKEN"}
    ```
 
    Honeycomb uses `silicon-honeycomb/production/runtime` in `us-east-2`; DM uses
@@ -158,7 +158,7 @@ completed changes.
    `state: ready` alone is insufficient. Do not use the configuration-operation
    retry route or substitute a user/root token for the service credential.
 
-4. Apply DM's candidate external scopes (`tos>ting` / `subscriptions.register` and
+4. Apply DM's candidate external scopes (`ting` / `subscriptions.register` and
    `tings.send`) through Honeycomb's normal configuration/review flow. Retain
    `self.identity.read` in both apps and obtain recipient consent using fresh
    eligible sessions. Private test configuration can stage the scopes in the shared
@@ -168,7 +168,7 @@ completed changes.
    manager registers the notification type:
 
    ```sh
-   ting --org ORG types register --type 'tos>dm.sync.changed' \
+   ting --org ORG types register --type 'dm.sync.changed' \
      --description 'A DM message or receipt changed; fetch its current authorized state from DM.'
    ```
 

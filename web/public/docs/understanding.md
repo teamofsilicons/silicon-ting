@@ -10,7 +10,7 @@ App IDs are globally unique. An app owned by one organization can send to consen
 
 # App Side
 ## New app registering Tings
-If there are apps that can be fetched – then show a list of them. Inside each one, tings can be registered with a type, a description, and for [carbon and/or silicon]. all ting types are of the shape {appid}.{service}.{event in past tense} (tos>dm.msg.received), a description of when this ting is about, and if if it should also be sent to a carbon, silicon or both.
+If there are apps that can be fetched – then show a list of them. Inside each one, tings can be registered with a type, a description, and for [carbon and/or silicon]. all ting types are of the shape {appid}.{service}.{event in past tense} (dm.msg.received), a description of when this ting is about, and if if it should also be sent to a carbon, silicon or both.
 
 Tings are the primary way for apps to send a message to a silicon. Apps dont usually build their own notification / event delivery mechanism but instead relies on Ting.
 
@@ -108,7 +108,7 @@ Ting will be a honeycomb app so follow all the specifications that it provides.
 The backend will be on AWS (aws cli is logged in)
 namecheap for all dna management and vercel for all frontend (cli logged in)
 
-i am also logged into IAM cli as shubham as admin, make this as an app inside tos org as tos>ting
+i am also logged into IAM cli as shubham as admin, make this as an app inside tos org as ting
 
 # Write modular code and dont abstract until it will be used atleast thrice.
 

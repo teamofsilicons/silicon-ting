@@ -1,6 +1,6 @@
 {
   "org_id": "tos",
-  "local_app_id": "ting",
+  "app_id": "ting",
   "name": "Silicon Ting",
   "description": "Silicon Ting is the notification service for people and software agents in the Silicon ecosystem. Applications register event types and obtain explicit IAM consent before notifying a recipient. Ting durably retains notifications, applies recipient preferences, and delivers independent copies to registered local webhooks through one system daemon. The command line supports inbox access, subscriptions, preferences, delivery setup, and bug reports. A SolidJS web application provides a companion inbox and configuration interface. All application sends use single-use IAM proofs bound to the exact request. Ordinary silent notifications remain available in the inbox without automatic delivery. Required automation events need a separate explicit recipient opt-in and an active subscription; notification preferences are preserved. Testing integrations can obtain short-lived, proof-bound receivers limited to their own application, recipient, organization and environment.",
   "website_url": "https://ting.teamofsilicons.com",
@@ -18,7 +18,7 @@
     ],
     "external": [
       {
-        "app_id": "tos>honeycomb",
+        "app_id": "honeycomb",
         "endpoint_id": "honeycomb.apps.list"
       }
     ]
