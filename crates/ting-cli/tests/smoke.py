@@ -38,6 +38,9 @@ class API(http.server.BaseHTTPRequestHandler):
             result = {'id':'si:test','kind':'silicon','authenticated':True}
             if len(exchanges) > 1: result['session_token']='private-session-test'
             self.respond(201, result)
+        elif self.path == '/v1/sent/read':
+            data = json.loads(body)
+            self.respond(200, {key: data[key] for key in ('message_ids', 'read')})
         else: self.respond(202, {'id':'msg_test','status':'accepted','key':'test','created_at':'2026-09-22T00:00:00Z','silent':False})
     def do_PUT(self):
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
@@ -76,6 +79,22 @@ with tempfile.TemporaryDirectory() as d:
     if os.name != 'nt': assert Path(d,'send.json').stat().st_mode & 0o777 == 0o600
     cli('send','--request-file','send.json','--proof-token-stdin',text='proof-test\n')
     assert received[-1]==('/v1/tings','Bearer proof-test',raw)
+    for command, read in [('mark-read', True), ('mark-unread', False)]:
+        filename = command + '.json'
+        prepared = cli('sent', command, 'msg_1', 'msg_2', '--app', 'dm', '--key', command, '--write-request', filename)
+        raw = Path(d, filename).read_bytes()
+        assert json.loads(raw) == {'org_id': 'org-canonical', 'app_id': 'dm', 'message_ids': ['msg_1', 'msg_2'], 'read': read, 'key': command}
+        assert prepared['path'] == '/v1/sent/read'
+        assert prepared['body_sha256'] == hashlib.sha256(raw).hexdigest()
+        count = len(received)
+        opposite = 'mark-unread' if read else 'mark-read'
+        cli('sent', opposite, '--request-file', filename, '--proof-token-stdin', text='proof-test\n', code=2)
+        cli('sent', command, 'msg_3', '--request-file', filename, '--proof-token-stdin', text='proof-test\n', code=2)
+        assert len(received) == count
+        assert cli('sent', command, '--request-file', filename, '--proof-token-stdin', text='proof-test\n')['read'] is read
+        assert received[-1] == ('/v1/sent/read', 'Bearer proof-test', raw)
+    cli('sent', 'mark-read', '--app', 'dm', '--key', 'missing-ids', '--write-request', 'missing.json', code=2)
+    assert not Path(d, 'missing.json').exists()
     cli('send','--type','hook.webhook.received','--for','si:test','--key','required-test','--data','{}','--delivery','required','--write-request','required.json')
     assert json.loads(Path(d,'required.json').read_text())['delivery']=='required'
     assert cli('subscriptions','required-delivery','sub-test','--enabled','true')['enabled'] is True
@@ -92,4 +111,4 @@ with tempfile.TemporaryDirectory() as d:
     assert len(received)==count
     assert cli('config','set','telemetry.enabled','false')['value'] is False
 server.shutdown()
-print('CLI smoke passed: login, canonical org, exact proof bytes, private files, input rejection, origin isolation.')
+print('CLI smoke passed: login, canonical org, exact proof bytes, sent read/unread, private files, input rejection, origin isolation.')

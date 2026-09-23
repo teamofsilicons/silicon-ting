@@ -278,7 +278,7 @@ pub fn ensure_current(db: &Connection) -> Result<()> {
             let (kind, owner) = row?;
             ensure!(
                 match kind.as_str() {
-                    "send" => crate::validation::app_id(&owner),
+                    "send" | "sent-read" => crate::validation::app_id(&owner),
                     "hook" => crate::validation::actor_kind(&owner).is_some(),
                     _ => false,
                 },
@@ -631,7 +631,7 @@ pub fn run(
                     "recipient" => mapped[n] = manifest.actor(&ctx, &org, &values[n])?,
                     "owner" => {
                         mapped[n] = match values[1].as_str() {
-                            "send" => manifest
+                            "send" | "sent-read" => manifest
                                 .identity(&ctx, Some("application"), &values[n])?
                                 .new_id
                                 .clone(),

@@ -1120,6 +1120,7 @@ impl Auth {
             "/v1/subscriptions/query" => "subscriptions.query",
             "/v1/subscriptions/revoke" => "subscriptions.revoke",
             "/v1/sent/query" => "sent.query",
+            "/v1/sent/read" => "sent.read",
             _ => {
                 return Err(Error::invalid(
                     "No IAM endpoint is registered for this path.",
@@ -1403,6 +1404,7 @@ pub(crate) mod tests {
         pub token_replies: Mutex<std::collections::VecDeque<Value>>,
         pub token_requests: Mutex<Vec<(String, HashMap<String, String>)>>,
         pub revoke_requests: Mutex<Vec<(String, Vec<u8>)>>,
+        pub proof_requests: Mutex<Vec<Value>>,
         pub status: AtomicU16,
         pub calls: Mutex<Vec<String>>,
         pub block_next: AtomicBool,
@@ -1481,6 +1483,7 @@ pub(crate) mod tests {
             token_replies: Mutex::new(std::collections::VecDeque::new()),
             token_requests: Mutex::new(vec![]),
             revoke_requests: Mutex::new(vec![]),
+            proof_requests: Mutex::new(vec![]),
             calls: Mutex::new(vec![]),
             block_next: AtomicBool::new(false),
             block_path: Mutex::new(None),
@@ -1544,6 +1547,7 @@ pub(crate) mod tests {
                         .await
                         .unwrap();
                     let request: Value = serde_json::from_slice(&raw).unwrap();
+                    iam.proof_requests.lock().unwrap().push(request.clone());
                     let target = request["request"]["path"].as_str().unwrap();
                     let endpoint = match target {
                         "/v1/tings" => "tings.send",
@@ -1552,6 +1556,7 @@ pub(crate) mod tests {
                         "/v1/subscriptions/query" => "subscriptions.query",
                         "/v1/subscriptions/revoke" => "subscriptions.revoke",
                         "/v1/sent/query" => "sent.query",
+                        "/v1/sent/read" => "sent.read",
                         _ => panic!("unexpected proof path: {target}"),
                     };
                     let reply = iam.reply.lock().unwrap().clone();
@@ -2572,7 +2577,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn cross_org_proofs_deliver_without_granting_type_management() {
+    async fn cross_org_proofs_deliver_and_update_read_without_granting_type_management() {
         use axum::{
             extract::{Path, RawQuery, State},
             http::Method,
@@ -2621,7 +2626,7 @@ pub(crate) mod tests {
                 proof_headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
             }
             let body = json!({"org_id":"bricks","type":"example.msg.received",
-                "data":{},"for":f.principal.id,"key":"cross-org"});
+                "data":{"text":"Retained notification"},"for":f.principal.id,"key":"cross-org"});
             let (status, sent) = request(&f, &proof_headers, Method::POST, "tings", body.clone())
                 .await
                 .unwrap();
@@ -2655,6 +2660,134 @@ pub(crate) mod tests {
                 "authorization",
                 format!("Bearer {}", f.token).parse().unwrap(),
             );
+            let read_request = json!({"org_id":"bricks","app_id":"example",
+                "message_ids":[sent["id"]],"read":true,"key":"mark-read"});
+            for read in [true, false] {
+                let mut update = read_request.clone();
+                update["read"] = read.into();
+                update["key"] = format!("mark-{read}").into();
+                f.take_calls();
+                let (status, result) = request(
+                    &f,
+                    &proof_headers,
+                    Method::POST,
+                    "sent/read",
+                    update.clone(),
+                )
+                .await
+                .unwrap();
+                assert_eq!(status, 200);
+                assert_eq!(result, json!({"message_ids":[sent["id"]],"read":read}));
+                assert!(
+                    !f.take_calls()
+                        .iter()
+                        .any(|path| path == "/api/v1/oauth/introspect"),
+                    "app read changes must not require a Ting session"
+                );
+                let verified = f.iam.proof_requests.lock().unwrap().last().unwrap().clone();
+                assert_eq!(
+                    verified["request"],
+                    json!({
+                        "method":"POST", "path":"/v1/sent/read",
+                        "body_sha256":hash(&serde_json::to_vec(&update).unwrap())
+                    })
+                );
+                for (headers, method, path, query) in [
+                    (
+                        &proof_headers,
+                        Method::POST,
+                        "sent/query".to_owned(),
+                        json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
+                    ),
+                    (
+                        &session_headers,
+                        Method::GET,
+                        format!("orgs/bricks/inbox/{}", sent["id"].as_str().unwrap()),
+                        json!({}),
+                    ),
+                ] {
+                    let (_, retained) = request(&f, headers, method, &path, query).await.unwrap();
+                    assert_eq!(retained["id"], sent["id"]);
+                    assert_eq!(retained["read"], read);
+                    assert_eq!(retained["data"], body["data"]);
+                    assert_eq!(retained["created_at"], sent["created_at"]);
+                }
+            }
+            for (field, value, status) in [("app_id", "other", 403), ("org_id", "tos", 401)] {
+                let mut invalid = read_request.clone();
+                invalid[field] = value.into();
+                assert_eq!(
+                    request(&f, &proof_headers, Method::POST, "sent/read", invalid)
+                        .await
+                        .unwrap_err()
+                        .status,
+                    status
+                );
+            }
+            f.iam.reply.lock().unwrap()["authorization"]["organization_id"] =
+                uuid::Uuid::new_v4().to_string().into();
+            assert_eq!(
+                request(
+                    &f,
+                    &proof_headers,
+                    Method::POST,
+                    "sent/read",
+                    read_request.clone()
+                )
+                .await
+                .unwrap_err()
+                .status,
+                404,
+                "a valid proof for another organization cannot change the original ting"
+            );
+            f.iam.reply.lock().unwrap()["authorization"]["organization_id"] =
+                f.proof.org_id.clone().into();
+            f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] =
+                uuid::Uuid::new_v4().to_string().into();
+            assert_eq!(
+                request(
+                    &f,
+                    &proof_headers,
+                    Method::POST,
+                    "sent/read",
+                    read_request.clone()
+                )
+                .await
+                .unwrap_err()
+                .status,
+                401
+            );
+            f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] = if testing {
+                f.principal.context.clone().into()
+            } else {
+                Value::Null
+            };
+            for rejected in [401, 503] {
+                f.iam.status.store(rejected, Ordering::SeqCst);
+                for key in ["mark-true", "rejected-new-operation"] {
+                    let mut denied = read_request.clone();
+                    denied["key"] = key.into();
+                    assert_eq!(
+                        request(&f, &proof_headers, Method::POST, "sent/read", denied)
+                            .await
+                            .unwrap_err()
+                            .status,
+                        rejected,
+                        "IAM failures must reject both new updates and accepted-key replays"
+                    );
+                }
+                f.iam.status.store(200, Ordering::SeqCst);
+                let (_, retained) = request(
+                    &f,
+                    &proof_headers,
+                    Method::POST,
+                    "sent/query",
+                    json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
+                )
+                .await
+                .unwrap();
+                assert_eq!(retained["read"], false);
+            }
             for (method, path, body) in [
                 (Method::GET, "orgs/bricks/apps/example/types", json!({})),
                 (
@@ -2776,10 +2909,13 @@ pub(crate) mod tests {
             "/v1/subscriptions",
             "/v1/subscriptions/query",
             "/v1/sent/query",
+            "/v1/sent/read",
         ] {
             let f = fixture(true).await;
             let body = if path == "/v1/tings" {
                 json!({"org_id":f.proof.org_id,"type":"example.msg.received","data":{},"for":f.principal.id,"key":"stale-proof"})
+            } else if path == "/v1/sent/read" {
+                json!({"org_id":f.proof.org_id,"app_id":"example","message_ids":[f.send("read-target")],"read":true,"key":"stale-read-proof"})
             } else {
                 json!({"org_id":f.proof.org_id,"app_id":"example"})
             };

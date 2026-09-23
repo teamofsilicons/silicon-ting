@@ -483,6 +483,77 @@ impl Store {
             db.prepare("SELECT hook,delivery,read FROM deliveries WHERE message=? ORDER BY hook")?;
         Ok(q.query_map([mid],|r|Ok(json!({"webhook_id":r.get::<_,String>(0)?,"delivery_acked":r.get::<_,bool>(1)?,"read_acked":r.get::<_,bool>(2)?})))?.collect::<std::result::Result<_,_>>()?)
     }
+    pub fn sent_read(&self, p: &Proof, b: &Value) -> Result<(Value, Vec<(String, bool)>)> {
+        let fields = &["org_id", "app_id", "message_ids", "read", "key"];
+        v::fields(b, fields, fields)?;
+        if v::string(b, "app_id", 255)? != p.app_id {
+            return Err(Error::new(
+                403,
+                "permission_denied",
+                "The app must match the verified proof issuer.",
+                "Prepare a request for the issuing app.",
+            ));
+        }
+        let ids = v::ids(b, "message_ids", false)?;
+        let read = v::optional_bool(b, "read")?.unwrap();
+        let key = v::string(b, "key", 200)?;
+        let mut normalized = b.clone();
+        normalized["org_id"] = p.org_id.clone().into();
+        normalized["message_ids"] = json!(ids);
+        let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&normalized)?));
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let prior: Option<(String, String)> = tx.query_row(
+            "SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='sent-read' AND key=? AND expires>?",
+            params![p.context,p.org_id,p.app_id,key,now()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        if let Some((original, response)) = prior {
+            if original != fingerprint {
+                return Err(conflict(
+                    "idempotency_conflict",
+                    "This read-state key was accepted with different content.",
+                ));
+            }
+            // A delayed retry must not overwrite a newer read/unread decision.
+            return Ok((decode(response)?, vec![]));
+        }
+        let cutoff = retention_cutoff(3);
+        let read_cutoff = retention_cutoff(1);
+        let mut owners = std::collections::BTreeMap::<String, bool>::new();
+        for mid in &ids {
+            let row: Option<(String, String, bool)> = tx.query_row(
+                "SELECT recipient,created,read FROM tings WHERE ctx=? AND org=? AND app=? AND id=?
+                 AND created>=? AND ((read=0 AND silent=0) OR created>=?)",
+                params![p.context,p.org_id,p.app_id,mid,cutoff,read_cutoff],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ).optional()?;
+            let (recipient, created, previous) = row.ok_or_else(Error::not_found)?;
+            if previous != read {
+                let expired = read && created < read_cutoff;
+                *owners.entry(recipient).or_default() |= expired;
+            }
+        }
+        // Validate the entire batch before changing any recipient's state.
+        for mid in &ids {
+            tx.execute("UPDATE tings SET read=? WHERE id=?", params![read, mid])?;
+        }
+        let response = json!({"message_ids":ids,"read":read});
+        tx.execute(
+            "INSERT OR REPLACE INTO keys VALUES(?,?,?,'sent-read',?,?,?,?)",
+            params![
+                p.context,
+                p.org_id,
+                p.app_id,
+                key,
+                fingerprint,
+                response.to_string(),
+                now() + 14 * 86400
+            ],
+        )?;
+        tx.commit()?;
+        Ok((response, owners.into_iter().collect()))
+    }
     pub fn read(&self, p: &Principal, org: &str, ids: &[String]) -> Result<(Value, bool)> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
@@ -985,15 +1056,18 @@ impl Store {
         }
         for mid in ids {
             if kind == "read" {
-                tx.execute(
-                    "UPDATE deliveries SET read=1,delivery=1 WHERE hook=? AND message=?",
+                let completed = tx.execute(
+                    "UPDATE deliveries SET read=1,delivery=1 WHERE hook=? AND message=? AND read=0",
                     params![hid, mid],
                 )?;
-                expired |= tx.execute(
-                    "UPDATE tings SET read=1 WHERE id=? AND read=0 AND created<?",
-                    params![mid, cutoff],
-                )? > 0;
-                tx.execute("UPDATE tings SET read=1 WHERE id=?", [mid])?;
+                // Replayed completion must not undo an app's later mark-unread.
+                if completed > 0 {
+                    expired |= tx.execute(
+                        "UPDATE tings SET read=1 WHERE id=? AND read=0 AND created<?",
+                        params![mid, cutoff],
+                    )? > 0;
+                    tx.execute("UPDATE tings SET read=1 WHERE id=?", [mid])?;
+                }
             } else {
                 tx.execute(
                     "UPDATE deliveries SET delivery=1 WHERE hook=? AND message=?",
@@ -1127,6 +1201,198 @@ mod tests {
             .as_str()
             .unwrap()
             .into()
+    }
+    #[test]
+    fn sent_read_is_scoped_atomic_and_retries_preserve_newer_state() {
+        let (s, p, proof) = fixture();
+        let first = s.send(&proof, &body("first")).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let second = s.send(&proof, &body("second")).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        s.lock()
+            .unwrap()
+            .execute(
+                "UPDATE tings SET recipient='c:second' WHERE id=?",
+                [&second],
+            )
+            .unwrap();
+        let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,
+            "message_ids":[first,first,second],"read":true,"key":"mark-read"});
+        let state = |id: &str| {
+            s.ting(&p.context, &proof.org_id, id, None, Some(&proof.app_id))
+                .unwrap()["read"]
+                .as_bool()
+                .unwrap()
+        };
+        for column in ["app", "org", "ctx"] {
+            s.lock()
+                .unwrap()
+                .execute(
+                    &format!("UPDATE tings SET {column}='other' WHERE id=?"),
+                    [&second],
+                )
+                .unwrap();
+            assert_eq!(s.sent_read(&proof, &request).unwrap_err().status, 404);
+            assert!(!state(&first));
+            let original = match column {
+                "app" => &proof.app_id,
+                "org" => &proof.org_id,
+                _ => &proof.context,
+            };
+            s.lock()
+                .unwrap()
+                .execute(
+                    &format!("UPDATE tings SET {column}=? WHERE id=?"),
+                    params![original, second],
+                )
+                .unwrap();
+        }
+        let mut invalid = request.clone();
+        invalid["message_ids"] = json!([first, "missing"]);
+        assert_eq!(s.sent_read(&proof, &invalid).unwrap_err().status, 404);
+        assert!(!state(&first));
+        for (field, value, status) in [
+            ("app_id", json!("other"), 403),
+            ("read", json!("false"), 400),
+            ("message_ids", json!([]), 400),
+            ("key", json!(""), 400),
+        ] {
+            let mut invalid = request.clone();
+            invalid[field] = value;
+            assert_eq!(s.sent_read(&proof, &invalid).unwrap_err().status, status);
+        }
+        let (receipt, owners) = s.sent_read(&proof, &request).unwrap();
+        assert_eq!(receipt, json!({"message_ids":[first,second],"read":true}));
+        assert_eq!(
+            owners,
+            vec![("c:second".into(), false), (p.id.clone(), false)]
+        );
+        assert!(state(&first) && state(&second));
+        let mut unread = request.clone();
+        unread["read"] = false.into();
+        assert_eq!(
+            s.sent_read(&proof, &unread).unwrap_err().body["error"]["code"],
+            "idempotency_conflict"
+        );
+        unread["key"] = "mark-unread".into();
+        s.sent_read(&proof, &unread).unwrap();
+        assert!(!state(&first) && !state(&second));
+        assert_eq!(s.sent_read(&proof, &request).unwrap(), (receipt, vec![]));
+        assert!(!state(&first) && !state(&second));
+        let db = s.lock().unwrap();
+        // Replay records must remain valid when the server opens this database again.
+        crate::migration::ensure_current(&db).unwrap();
+        let keys: i64 = db
+            .query_row(
+                "SELECT count(*) FROM keys WHERE kind='sent-read'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(keys, 2);
+    }
+    #[test]
+    fn sent_read_preserves_hook_completion_and_unread_backlog() {
+        let (s, p, proof) = fixture();
+        let a = hook(&s, &p, "a");
+        let b = hook(&s, &p, "b");
+        let mid = s.send(&proof, &body("first")).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let change = |read: bool, key: &str| {
+            s.sent_read(&proof, &json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":read,"key":key})).unwrap()
+        };
+        change(true, "app-read");
+        let completed = s.deliveries(&mid).unwrap();
+        assert!(completed.iter().all(|d| d["read_acked"] == false));
+        // App read state cannot complete or discard a webhook's pending work.
+        assert!(s.offer("a", &a).unwrap().is_some());
+        s.ack("a", &proof.org_id, &a, &[mid.clone()], "read")
+            .unwrap();
+        let receipts = s.deliveries(&mid).unwrap();
+        change(false, "app-unread");
+        assert_eq!(s.deliveries(&mid).unwrap(), receipts);
+        s.ack("a", &proof.org_id, &a, &[mid.clone()], "read")
+            .unwrap();
+        assert_eq!(
+            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
+            false
+        );
+        assert!(s.offer("a", &a).unwrap().is_none());
+        let c = hook(&s, &p, "c");
+        assert!(s.offer("c", &c).unwrap().is_some());
+        assert!(s.offer("b", &b).unwrap().is_some());
+        // A genuinely new receiver completion may mark it read again.
+        s.ack("b", &proof.org_id, &b, &[mid.clone()], "read")
+            .unwrap();
+        assert_eq!(
+            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
+            true
+        );
+        change(false, "unread-again");
+        s.read(&p, &proof.org_id, &[mid.clone()]).unwrap();
+        assert_eq!(
+            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
+            true
+        );
+    }
+    #[test]
+    fn sent_read_cannot_resurrect_expired_rows_or_extend_creation_time() {
+        let (s, p, proof) = fixture();
+        let old = (chrono::Utc::now() - chrono::Months::new(2))
+            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+        let h = hook(&s, &p, "r");
+        for (key, read, silent, months) in [
+            ("read", true, false, 2),
+            ("silent", false, true, 2),
+            ("unread", false, false, 4),
+        ] {
+            let mid = s.send(&proof, &body(key)).unwrap().1["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let created = (chrono::Utc::now() - chrono::Months::new(months))
+                .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+            s.lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tings SET created=?,read=?,silent=? WHERE id=?",
+                    params![created, read, silent, mid],
+                )
+                .unwrap();
+            let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":false,"key":key});
+            assert_eq!(s.sent_read(&proof, &request).unwrap_err().status, 404);
+        }
+        let mid = s.send(&proof, &body("retained-unread")).unwrap().1["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        s.lock()
+            .unwrap()
+            .execute("UPDATE tings SET created=? WHERE id=?", params![old, mid])
+            .unwrap();
+        let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":true,"key":"expire"});
+        let (receipt, owners) = s.sent_read(&proof, &request).unwrap();
+        assert_eq!(owners, vec![(p.id.clone(), true)]);
+        assert!(s.offer("r", &h).unwrap().is_none());
+        let created: String = s
+            .lock()
+            .unwrap()
+            .query_row("SELECT created FROM tings WHERE id=?", [&mid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(created, old);
+        let mut unread = request.clone();
+        unread["read"] = false.into();
+        unread["key"] = "resurrect".into();
+        assert_eq!(s.sent_read(&proof, &unread).unwrap_err().status, 404);
+        s.prune().unwrap();
+        assert_eq!(s.sent_read(&proof, &request).unwrap(), (receipt, vec![]));
+        assert!(s.ting(&p.context, &proof.org_id, &mid, None, None).is_err());
     }
     #[test]
     fn global_app_catalog_keeps_recipient_state_and_contexts_isolated() {

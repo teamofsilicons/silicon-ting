@@ -97,21 +97,44 @@ export default function App() {
     catch (error) { setActionError(error); if (error instanceof ApiError && error.status === 401) setIdentity(undefined); return false; }
     finally { setBusy(false); }
   }
-  const acknowledged = new Set<string>();
+  const acknowledging = new Set<string>();
+  let detailGeneration = 0;
+  let pendingView: { actor: Identity; org: string; id: string } | undefined;
   async function markViewed() {
-    const ting = detail(), currentOrg = org();
-    if (!ting || ting.read || page() !== 'inbox' || document.visibilityState !== 'visible' || !detailDialog.open || acknowledged.has(ting.id)) return;
-    acknowledged.add(ting.id);
+    const ting = detail(), currentOrg = org(), actor = identity();
+    if (!ting || !actor || ting.for !== actor.id || ting.read || page() !== 'inbox' || document.visibilityState !== 'visible' || !detailDialog.open) return;
+    const key = JSON.stringify([actor.id, currentOrg, ting.id]);
+    if (acknowledging.has(key)) return;
+    acknowledging.add(key);
+    const current = () => identity() === actor && org() === currentOrg && detailId() === ting.id;
     try {
       await api(orgPath(currentOrg, 'inbox/read'), 'POST', { message_ids: [ting.id] });
-      if (detail()?.id === ting.id) setDetail({ ...ting, read: true }); void inbox.reload();
-    } catch (error) { acknowledged.delete(ting.id); setDetailError(error); }
+      if (current()) { void refreshDetail(); void inbox.reload(); }
+    } catch (error) { if (current()) setDetailError(error); }
+    finally { acknowledging.delete(key); }
   }
-  async function openTing(ting: Ting) {
-    const selectedOrg = org(); setDetailId(ting.id); setDetail(undefined); setDetailError(undefined); setDetailLoading(true); detailDialog.showModal();
-    try { const full = await api<Ting>(orgPath(selectedOrg, `inbox/${enc(ting.id)}`)); if (detailId() === ting.id && org() === selectedOrg) { setDetail(full); requestAnimationFrame(() => requestAnimationFrame(() => void markViewed())); } }
-    catch (error) { setDetailError(error); }
-    finally { if (detailId() === ting.id) setDetailLoading(false); }
+  async function refreshDetail(viewed = false) {
+    const id = detailId(), selectedOrg = org(), actor = identity();
+    if (!id || !actor || page() !== 'inbox' || !detailDialog.open || document.visibilityState !== 'visible') return;
+    if (viewed) pendingView = { actor, org: selectedOrg, id };
+    const generation = ++detailGeneration;
+    const current = () => generation === detailGeneration && detailId() === id && org() === selectedOrg && identity() === actor && detailDialog.open;
+    try {
+      const full = await api<Ting>(orgPath(selectedOrg, `inbox/${enc(id)}`));
+      if (current()) {
+        setDetail(full); setDetailError(undefined);
+        if (pendingView?.actor === actor && pendingView.org === selectedOrg && pendingView.id === id) {
+          pendingView = undefined;
+          requestAnimationFrame(() => requestAnimationFrame(() => { if (detailId() === id && org() === selectedOrg && identity() === actor) void markViewed(); }));
+        }
+      }
+    } catch (error) { if (current()) { setDetail(undefined); setDetailError(error); } }
+    finally { if (current()) setDetailLoading(false); }
+  }
+  function refreshInbox(viewed = false) { void inbox.reload(); void refreshDetail(viewed); }
+  function openTing(ting: Ting) {
+    setDetailId(ting.id); setDetail(undefined); setDetailError(undefined); setDetailLoading(true); detailDialog.showModal();
+    void refreshDetail(true);
   }
   let diagnostics: SpaceStationWeb | undefined;
   createEffect(() => { const enabled = telemetry(); diagnostics?.setEnabled(enabled); });
@@ -130,8 +153,8 @@ export default function App() {
         let message: { op: string; org_id?: string; reason?: string; error?: { code: string; message: string; hint?: string } };
         try { message = JSON.parse(event.data); } catch { return; }
         if (message.op === 'ready') watch();
-        if (message.op === 'watching_inbox' && message.org_id === org()) { setConnection('live'); void inbox.reload(); clearTimeout(healthy); healthy = setTimeout(() => { attempt = 0; }, 60_000); }
-        if (message.op === 'inbox_changed' && message.org_id === org() && document.visibilityState === 'visible') void inbox.reload();
+        if (message.op === 'watching_inbox' && message.org_id === org()) { setConnection('live'); refreshInbox(); clearTimeout(healthy); healthy = setTimeout(() => { attempt = 0; }, 60_000); }
+        if (message.op === 'inbox_changed' && message.org_id === org() && document.visibilityState === 'visible') refreshInbox();
         if (message.op === 'paused' || message.op === 'error') {
           const reason = message.reason || message.error?.code;
           if (reason === 'session_expired' || reason === 'authentication_required') { setIdentity(undefined); setActionError(new ApiError(401, 'session_expired', 'Your session has expired.', 'Sign in again to reconnect your inbox.')); }
@@ -155,7 +178,7 @@ export default function App() {
     }
     void boot();
     const hash = () => { setPage(initialPage()); setMobileNav(false); setActionError(undefined); detailDialog?.close(); };
-    const visibility = () => { if (document.visibilityState === 'visible') { if (identity()) void inbox.reload(); void markViewed(); } };
+    const visibility = () => { if (document.visibilityState === 'visible' && identity()) refreshInbox(true); };
     window.addEventListener('hashchange', hash); document.addEventListener('visibilitychange', visibility);
     onCleanup(() => { window.removeEventListener('hashchange', hash); document.removeEventListener('visibilitychange', visibility); });
   });

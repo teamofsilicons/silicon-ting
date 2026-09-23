@@ -1,6 +1,6 @@
 #requires -Version 5.1
 #requires -RunAsAdministrator
-param([string]$Version = 'v0.1.6')
+param([string]$Version = 'v0.1.7')
 $ErrorActionPreference = 'Stop'
 $repository = 'https://github.com/teamofsilicons/silicon-ting'
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()

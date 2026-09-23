@@ -7,7 +7,7 @@ This is the contract to build. Examples use sample IDs and timestamps. [cli.md](
 - Retain read or silent tings for one calendar month, and unread non-silent tings for three calendar months, measured from their original `created_at` in UTC. Older tings and their delivery records expire automatically; no per-app or per-org quota applies within those windows.
 - A disconnected recipient's tings wait quietly. No delivery-failure alerts go to the sender or recipient.
 - Every registered destination receives its own copy. One destination completing delivery does not complete another destination's copy.
-- The sender sees `read: true` after any webhook accepts the ting, or after the carbon views it in the browser. Read state never goes backwards.
+- Overall `read` becomes true after a new webhook acceptance or a recipient view acknowledgement. The sending app may also set its own tings read or unread. This flag can reflect app-supplied state; it is not proof that the recipient viewed or processed the ting. Per-hook read ACK completion remains permanent.
 - New types are enabled by default. Existing recipient opt-outs still apply. Ordinary silent tings stay in the drawer and are never delivered automatically. Required automation delivery needs a separate explicit recipient opt-in, described below.
 - Every ting carries `created_at`, the UTC time Ting first stored it. It stays unchanged during retries and replay. Consumers choose processing order; timestamps do not guarantee delivery order.
 - A local webhook always receives `{ "tings": [...] }`, even for one ting.
@@ -19,7 +19,7 @@ HTTP uses HTTPS and JSON. WebSockets use WSS. Local development may use HTTP/WS 
 
 Resource IDs are opaque strings. Actor IDs are complete IAM identities: `c:alice0` for a Carbon and `si:assistant` for a Silicon. Keep the explicit actor kind; both kinds contain a colon. Application IDs are bare IAM handles such as `ting`, `dm` and `hook`, using 1–80 lowercase letters, digits, underscores or hyphens and starting with a letter. Silicon handles have 3–50 characters; Carbon handles have 3–30, including already registered handles containing zero. Prefixes do not count toward these limits. `id` identifies a ting, subscription, or webhook in its own record. Use separate `org_id` and `app_id` fields, and resolve ownership and current membership through IAM; never infer organization authority from an actor or application ID. Paths must URL-encode IDs; for example, `si:assistant` becomes `si%3Aassistant`.
 
-`app_id` is globally unique. An app owned by one organization can notify consenting recipients in any organization. Type definitions belong to the app within the verified production/testing context; resolve a send’s type by its app ID and type name, independently of the delivery organization. For sends, subscriptions, sent queries, inboxes, preferences and receivers, `org_id` selects the recipient/delivery organization. App catalog and type-management routes use the app’s owning organization and retain their Honeycomb permission checks.
+`app_id` is globally unique. An app owned by one organization can notify consenting recipients in any organization. Type definitions belong to the app within the verified production/testing context; resolve a send’s type by its app ID and type name, independently of the delivery organization. For sends, subscriptions, sent queries/read updates, inboxes, preferences and receivers, `org_id` selects the recipient/delivery organization. App catalog and type-management routes use the app’s owning organization and retain their Honeycomb permission checks.
 
 | Value | v1 rule |
 | --- | --- |
@@ -44,7 +44,7 @@ Two credentials have different jobs:
 | Credential | Used for |
 | --- | --- |
 | Ting session | A carbon/silicon's own orgs, inbox, preferences, hooks and settings; app management only with current Honeycomb permission. HTTP: `Authorization: Bearer <session_token>`. |
-| IAM App Proof Token | Every app send, subscription registration, and app-side subscription/status query. HTTP: `Authorization: Bearer <access_proof>`. A Ting session never replaces this proof. |
+| IAM App Proof Token | Every app send, subscription registration, app-side subscription/status query, and sent read-state update. HTTP: `Authorization: Bearer <access_proof>`. A Ting session never replaces this proof. |
 
 An **IAM App Proof Token** here is IAM's verified, single-use `access_proof` from its OBO exchange. It identifies the issuing app, represented actor, audience, org and exact downstream request. It is not an app secret, a login token, or an arbitrary bearer token. Verify it with the official IAM client before reading app-owned data or applying an operation.
 
@@ -176,11 +176,12 @@ IAM binds a proof to the exact method, registered path and SHA-256 of the body b
 | `subscriptions.query` | `/v1/subscriptions/query` | `POST` |
 | `subscriptions.revoke` | `/v1/subscriptions/revoke` | `POST` |
 | `sent.query` | `/v1/sent/query` | `POST` |
+| `sent.read` | `/v1/sent/read` | `POST` |
 | `receivers.bootstrap` | `/v1/receivers/bootstrap` | `POST` (testing only) |
 
 Publish these in Ting's IAM OBO catalog, with empty metadata schemas and explicit `critical: true`. Calling apps declare the matching external scopes, obtain required review and user consent, then mint proofs with the official IAM SDK. Recipient registration derives consent and identity from the verified proof actor. Later app sends still require their own proof and an active stored recipient grant.
 
-Verify audience `ting`, issuing app, selected org, endpoint, exact body bytes and current IAM authorization. Do not infer permission from an unverified token payload. The issuing app must match `app_id` or the type's app prefix. Proof actor and target recipient may differ on sends; the stored app-to-recipient grant authorizes the target. On subscription registration they must match.
+Verify audience `ting`, issuing app, selected org, endpoint, exact body bytes and current IAM authorization. Do not infer permission from an unverified token payload. The issuing app must match `app_id` or the type's app prefix. Proof actor and target recipient may differ on sends; the stored app-to-recipient grant authorizes the target. On subscription registration they must match. Sent queries and read-state updates authorize the issuing app's own tings; their proof actor need not match each ting's recipient.
 
 A proof lasts at most 60 seconds and can be consumed once. Do not retry IAM proof verification after an uncertain result. Return `503 proof_verification_uncertain` without executing the operation. A client retry needs a fresh proof over the same operation body, using the same Ting key. Authentication still runs on idempotent replays.
 
@@ -303,6 +304,7 @@ Delivery replay uses permanent ting IDs, not the expiring producer key. Consumer
 | --- | --- | --- |
 | `POST /v1/sent/query` | App Proof. `org_id`, `app_id`; optional `for`, `type`, `read`, `limit`, `cursor`. | `200 {"items":[<ting>]}` for that issuer. |
 | `POST /v1/sent/query` | App Proof. `org_id`, `app_id`, `id`; optional `deliveries_cursor`, no list filters. | `200` full ting with `deliveries`. |
+| `POST /v1/sent/read` | App Proof. Required `org_id`, `app_id`, `message_ids`, `read`, `key`; see below. | `200 {"message_ids":["msg_123"],"read":false}` |
 | `GET /v1/orgs/{org}/inbox` | Ting session; current recipient only. Optional `app_id`, `type`, `read`, `silent`, pagination. Omit `silent` to include both kinds. | `200 {"items":[<ting>]}` |
 | `GET /v1/orgs/{org}/inbox/{id}` | Ting session; owning recipient. | `200` full ting. |
 | `POST /v1/orgs/{org}/inbox/read` | Ting session; `{ "message_ids": ["msg_123"] }`. | `200 {"message_ids":["msg_123"],"read":true}` |
@@ -335,9 +337,33 @@ Sent detail adds:
 
 `delivery_acked` describes the current receiver subscription's receipt; it resets on subscription replacement. `read_acked` is permanent completion for that hook. No deliveries is `[]`. A large `deliveries` list uses `deliveries_cursor` in the sent-detail request and `deliveries_next_cursor` in the result, omitted on the last page; pages contain at most 100 hooks.
 
-`read` becomes true after any webhook read ACK or the recipient's explicit view acknowledgement. A browser calls `/inbox/read` when the carbon opens a ting or its contents become visible in the foreground drawer. Background fetch, preload, a hidden tab, or an unopened count badge does not count. The CLI exposes this as `inbox mark-read`; list/get operations never mark read by themselves. Silent tings can be viewed and marked read in the drawer.
+`read` becomes true after a new webhook read ACK or the recipient's explicit view acknowledgement. The sending app may also set this flag read or unread; it is not evidence of actual recipient viewing. A browser calls `/inbox/read` when the carbon opens a ting or its contents become visible in the foreground drawer. Background fetch, preload, a hidden tab, or an unopened count badge does not count. The CLI exposes this as `inbox mark-read`; list/get operations never mark read by themselves. Silent tings can be viewed and marked read in the drawer.
 
-Validate every submitted ID against the current recipient and org before applying a read request. Repeated requests are harmless. This changes overall read state, not another webhook's pending copy. Carbons may also use CLI webhooks; their webhook acceptance counts as read even if they have not viewed the browser entry. Neither form of read means the consumer finished processing.
+For `/inbox/read`, validate every submitted ID against the current recipient and org before applying a read request. Repeated requests are harmless. This changes overall read state, not another webhook's pending copy. Carbons may also use CLI webhooks; their webhook acceptance counts as read even if they have not viewed the browser entry. Neither form of read means the consumer finished processing.
+
+### Apps marking their sent tings read or unread
+
+Use `POST /v1/sent/read` with a fresh IAM proof for `sent.read`, bound to this exact body:
+
+```json
+{
+  "org_id": "bricks",
+  "app_id": "dm",
+  "message_ids": ["msg_123", "msg_124"],
+  "read": false,
+  "key": "dm-unread-456"
+}
+```
+
+All fields are required. `read` must be a JSON boolean; `true` marks read and `false` marks unread. `message_ids` contains 1–100 IDs, with duplicates collapsed. `key` follows the common 1–200 UTF-8 byte rule. A Ting session or receiver capability cannot replace the app proof. No recipient Ting session or connected receiver is needed.
+
+The proof issuer must match `app_id`; a mismatch returns `403 permission_denied`. Validate the entire batch before changing any record: every ting must belong to that issuing app in the proof's organization and verified environment and still be retained. A missing, expired, wrong-app, wrong-org or wrong-environment ID returns `404 not_found` with no partial update. Like sent queries, the represented actor may differ from the tings' recipients.
+
+Success returns `200 {"message_ids":["msg_123","msg_124"],"read":false}` with duplicate IDs removed. Atomically retain the operation's request fingerprint and original response for 14 days from first acceptance, scoped to `(verified environment, org, issuing app, sent.read, key)`, separately from send keys. Every retry needs a fresh valid proof. The same key and unchanged request returns the original response without applying the state change again, even if another action has changed the tings since; changed content returns `409 idempotency_conflict`. Use a new key for each new intended update. The response describes the accepted operation, not necessarily the current read state after a replay.
+
+App updates change overall read state only. They neither complete nor reset webhook delivery/read ACKs, and marking unread does not resend a completed hook's copy. A new valid read ACK for an unfinished copy or a later recipient view can set overall read true again. Repeating a completed hook's read ACK is a no-op and cannot undo an app's unread update. New hooks still backfill eligible retained overall-unread history. Actual state changes send the normal `inbox_changed` hint to affected recipients' browser watches.
+
+Retention still uses the original `created_at`: one calendar month when read or silent, three months while unread and non-silent. State changes do not restart either window or resurrect expired tings. Marking an older retained ting read may make it immediately eligible for expiry.
 
 ## Notification preferences
 
@@ -524,11 +550,11 @@ A batch is nonempty and belongs to one recipient and hook. Only one batch is act
 | Kind | When sent | Effect |
 | --- | --- | --- |
 | `delivery` | Daemon has durably queued every listed ting. | Suppresses server retries for those IDs while that subscription stays active. They remain unfinished. |
-| `read` | Webhook returned `204` after accepting the whole local batch, and the daemon saved that result. | Permanently completes this hook's listed deliveries and sets overall read true. |
+| `read` | Webhook returned `204` after accepting the whole local batch, and the daemon saved that result. | Permanently completes this hook's previously unfinished listed deliveries and sets their overall read true; already completed IDs are no-ops. |
 
 Before a delivery ACK, retry an unacknowledged batch after ten seconds. After it, the daemon owns local retry scheduling; a live socket alone is not a webhook acceptance. Only a read ACK completes delivery. ACKs may arrive out of order and affect only their listed IDs. A late delivery ACK cannot undo a read ACK. ACKs never delete tings; only the one-/three-month retention cleanup does.
 
-Validate every ACK against the current authorized receiver binding and the hook's delivery records. A delivery ACK needs an offer on the current subscription. A read ACK may settle an ID previously offered to this same hook, including a prior subscription or a ting now muted or blocked by a revoked app grant: it records past acceptance and does not authorize another delivery. Keep that offered history until the delivery is complete or the ting reaches its applicable one- or three-month retention cutoff. Completed IDs may be acknowledged again. Unknown/unoffered IDs return `400 invalid_ack` with no partial update. Persist ACK state before replying. The daemon retains queued/accepted records until the server confirms the read ACK; a lost reply retries the ACK, not the already accepted webhook work. Old receiver bindings still cannot ACK after takeover.
+Validate every ACK against the current authorized receiver binding and the hook's delivery records. A delivery ACK needs an offer on the current subscription. A read ACK may settle an ID previously offered to this same hook, including a prior subscription or a ting now muted or blocked by a revoked app grant: it records past acceptance and does not authorize another delivery. Keep that offered history until the delivery is complete or the ting reaches its applicable one- or three-month retention cutoff. Completed IDs may be acknowledged again without changing overall read state, including after an app marks the ting unread. Unknown/unoffered IDs return `400 invalid_ack` with no partial update. Persist ACK state before replying. The daemon retains queued/accepted records until the server confirms the read ACK; a lost reply retries the ACK, not the already accepted webhook work. Old receiver bindings still cannot ACK after takeover.
 
 Disconnect, authorization loss or subscription replacement releases unfinished receipt state for replay. The server remains authoritative if local disk is lost. On local disk write failure, do not send a delivery ACK; stop forwarding for that hook until durable storage works.
 
@@ -660,6 +686,6 @@ Before release, demonstrate:
 2. Concurrent same-key sends and a crash during commit produce one accepted ting within 14 days; expiry permits a new ID without deleting the old ting.
 3. Disconnects before either ACK, lost ACK replies, daemon restart, worker stall, disk loss and the 12-hour cutoff all preserve unfinished copies. One failed hook cannot block another.
 4. A new hook gets unread history; an old hook also gets its own copies read elsewhere. No gap occurs during registration or concurrent sends.
-5. Muting/revocation pauses queued forwarding, silent tings never replay, browser preload never marks read, actual viewing does, and one destination's read never erases another's pending copy.
+5. Muting/revocation pauses queued forwarding, silent tings never replay, browser preload never marks read, actual viewing does, and one destination's read never erases another's pending copy. App read/unread changes are atomic and limited to the issuing app/org/environment; replaying an accepted operation or completed hook ACK never undoes a later app update or resurrects an expired ting.
 6. Local payloads contain only `tings`; timestamps and IDs survive rebatching; limits reject oversized requests before acceptance without imposing storage quotas.
 7. CLI/API schemas, pagination and errors agree, and a bug report returns success only after Space Station acknowledges the unmodified report and attachment contents.

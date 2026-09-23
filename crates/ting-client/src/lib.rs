@@ -399,6 +399,7 @@ pub enum ProofOperation {
     Revoke,
     SentList,
     SentGet,
+    SentRead,
     /// A test-only, app-scoped receiver capability; never a full Ting session.
     ReceiverBootstrap,
 }
@@ -410,6 +411,7 @@ impl ProofOperation {
             Self::Subscriptions => "/v1/subscriptions/query",
             Self::Revoke => "/v1/subscriptions/revoke",
             Self::SentList | Self::SentGet => "/v1/sent/query",
+            Self::SentRead => "/v1/sent/read",
             Self::ReceiverBootstrap => "/v1/receivers/bootstrap",
         }
     }
@@ -451,6 +453,7 @@ impl Prepared {
                 &["for", "type", "read", "limit", "cursor"],
             ),
             ProofOperation::SentGet => (&["org_id", "app_id", "id"], &["deliveries_cursor"]),
+            ProofOperation::SentRead => (&["org_id", "app_id", "message_ids", "read", "key"], &[]),
             ProofOperation::ReceiverBootstrap => (
                 &[
                     "org_id",
@@ -482,6 +485,19 @@ impl Prepared {
                     if !value.is_boolean() {
                         return Err(Error::input("read must be a boolean."));
                     }
+                }
+                "message_ids" => {
+                    let ids = value
+                        .as_array()
+                        .ok_or_else(|| Error::input("message_ids must be an array."))?
+                        .iter()
+                        .map(|id| {
+                            id.as_str()
+                                .map(str::to_owned)
+                                .ok_or_else(|| Error::input("Each message ID must be a string."))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    unique_ids(ids)?;
                 }
                 "limit" => {
                     if !value.as_u64().is_some_and(|n| (1..=100).contains(&n)) {
@@ -828,7 +844,11 @@ pub fn unique_ids(ids: Vec<String>) -> Result<Vec<String>> {
     ids.into_iter()
         .filter_map(|s| {
             if seen.insert(s.clone()) {
-                Some(nonempty(&s, "ID").map(|_| s))
+                Some(if s.len() > 255 {
+                    Err(Error::input("ID exceeds 255 bytes."))
+                } else {
+                    nonempty(&s, "ID").map(|_| s)
+                })
             } else {
                 None
             }
@@ -932,6 +952,52 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn sent_read_preserves_false_and_validates_the_complete_request() {
+        let bytes = br#"{ "org_id":"tos", "app_id":"dm", "message_ids":["msg_1"], "read":false, "key":"unread-1" }"#.to_vec();
+        let prepared = Prepared::new(ProofOperation::SentRead, bytes.clone(), Some("tos")).unwrap();
+        assert_eq!(prepared.operation.path(), "/v1/sent/read");
+        assert_eq!(prepared.body, bytes);
+        assert_eq!(prepared.value["read"], false);
+        for (field, value) in [
+            ("message_ids", json!([])),
+            ("message_ids", json!(vec!["msg_1"; 101])),
+            ("message_ids", json!([1])),
+            ("message_ids", json!([""])),
+            ("message_ids", json!(["msg\n1"])),
+            ("message_ids", json!(["x".repeat(256)])),
+            ("message_ids", json!("msg_1")),
+            ("read", json!("false")),
+            ("key", json!("")),
+            ("key", json!("x".repeat(201))),
+            ("for", json!("si:someone")),
+        ] {
+            let mut body = prepared.value.clone();
+            body[field] = value;
+            assert!(
+                Prepared::new(
+                    ProofOperation::SentRead,
+                    serde_json::to_vec(&body).unwrap(),
+                    None
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+        for field in ["org_id", "app_id", "message_ids", "read", "key"] {
+            let mut body = prepared.value.clone();
+            body.as_object_mut().unwrap().remove(field);
+            assert!(
+                Prepared::new(
+                    ProofOperation::SentRead,
+                    serde_json::to_vec(&body).unwrap(),
+                    None
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
     }
 }
 

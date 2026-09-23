@@ -79,7 +79,7 @@ fn cli() -> Command {
  .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
  .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(command("revoke","Revoke a grant as recipient or proof-authorized app").arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
  .subcommand(proof(command("send","Prepare or submit one proof-bound notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
- .subcommand(group("sent","Inspect application sent history using fresh proofs").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)))
+ .subcommand(group("sent","Inspect and update application sent history using fresh proofs").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
@@ -171,6 +171,7 @@ async fn execute_proof(
     m: &ArgMatches,
     root: &ArgMatches,
     org: Option<&str>,
+    sent_read: Option<bool>,
 ) -> Result<Value> {
     let building = [
         "app",
@@ -181,6 +182,7 @@ async fn execute_proof(
         "metadata",
         "delivery",
         "id",
+        "ids",
         "read",
         "cursor",
         "deliveries-cursor",
@@ -218,6 +220,11 @@ async fn execute_proof(
             fs::read(file).map_err(|_| Error::input("Could not read request file."))?,
             org,
         )?;
+        if sent_read.is_some_and(|read| p.value["read"] != read) {
+            return Err(Error::input(
+                "Request read state must match sent mark-read or mark-unread.",
+            ));
+        }
         let proof = secret(file_secret)?;
         let test = TestHeaders::environment()?;
         let api = origin(root)?;
@@ -274,6 +281,15 @@ async fn execute_proof(
     }
     if let Some(read) = s(m, "read") {
         obj.insert("read".into(), json!(read == "true"));
+    }
+    if let Some(read) = sent_read {
+        let ids = m
+            .get_many::<String>("ids")
+            .ok_or_else(|| Error::input("Supply 1 to 100 IDs."))?
+            .cloned()
+            .collect();
+        obj.insert("message_ids".into(), json!(unique_ids(ids)?));
+        obj.insert("read".into(), json!(read));
     }
     Prepared::new(op, serde_json::to_vec(&v).unwrap(), org)?.write(Path::new(out))
 }
@@ -376,19 +392,22 @@ async fn run(root: &ArgMatches) -> Result<Value> {
     }
     let org_opt = selection.as_ref().map(|(s, _)| s.as_str());
     if name == "send" {
-        return execute_proof(ProofOperation::Send, m, root, org_opt).await;
+        return execute_proof(ProofOperation::Send, m, root, org_opt, None).await;
     }
     if name == "sent" {
         let (sub, m) = m.subcommand().unwrap();
         return execute_proof(
-            if sub == "get" {
-                ProofOperation::SentGet
-            } else {
-                ProofOperation::SentList
+            match sub {
+                "get" => ProofOperation::SentGet,
+                "mark-read" | "mark-unread" => ProofOperation::SentRead,
+                _ => ProofOperation::SentList,
             },
             m,
             root,
             org_opt,
+            ["mark-read", "mark-unread"]
+                .contains(&sub)
+                .then_some(sub == "mark-read"),
         )
         .await;
     }
@@ -404,6 +423,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 sm,
                 root,
                 org_opt,
+                None,
             )
             .await;
         }

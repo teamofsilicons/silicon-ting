@@ -110,7 +110,7 @@ ting types register --type 'dm.msg.received' \
 
 `types list` requires `--app`. Register and update require `--type` and a nonempty `--description`; derive the app from the type's app component. Update changes only the description. The type name stays fixed. `defaults` is read-only and always true for both carbon and silicon; apps cannot change it.
 
-Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the saved Ting session; Ting checks app visibility or management permission through Honeycomb. Only recipients can turn their notifications off or override their settings. Select the app’s owning organization for type management. Select the recipient’s organization for sends, subscriptions, sent status, inboxes, preferences and webhooks. The type stays in its owner catalog; it does not need to be registered again for each recipient organization.
+Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the saved Ting session; Ting checks app visibility or management permission through Honeycomb. Only recipients can turn their notifications off or override their settings. Select the app’s owning organization for type management. Select the recipient’s organization for sends, subscriptions, sent status/read updates, inboxes, preferences and webhooks. The type stays in its owner catalog; it does not need to be registered again for each recipient organization.
 
 ```sh
 ting --org tos types list --app 'dm'
@@ -168,12 +168,13 @@ Preparation output:
 | `subscriptions revoke` as app | `POST /v1/subscriptions/revoke` | `org_id`, required positional subscription ID as `id`. |
 | `sent list` | `POST /v1/sent/query` | `org_id`, required `--app` as `app_id`; optional `--for`, `--type`, `--read`, `--limit`, `--cursor`. |
 | `sent get` | `POST /v1/sent/query` | `org_id`, required `--app` as `app_id`, required positional ting ID as `id`; optional `--deliveries-cursor` as `deliveries_cursor`. |
+| `sent mark-read` / `sent mark-unread` | `POST /v1/sent/read` | `org_id`, required `--app` as `app_id`, 1–100 positional ting IDs as `message_ids`, required `--key`; `read` is `true` / `false` respectively. |
 
 List preparation writes its effective limit, including the default `50`; omit unused optional filters. A `get` body cannot contain list filters, `limit` or `cursor`; only its separate `deliveries_cursor` is allowed for detail pagination. Request files must match the selected command's schema. Sending body JSON is at most 256 KiB; validate size before asking IAM for a proof or sending it. File paths, tokens and proofs are never part of the body.
 
-Do not automatically retry a request with a used proof. If the response is uncertain, obtain a fresh proof for the same body bytes. For `send`, retain the same ting key: Ting returns the original accepted ting if it already stored the request. The caller obtains each proof; Ting never stores the sending app's secret.
+Do not automatically retry a request with a used proof. If the response is uncertain, obtain a fresh proof for the same body bytes. For `send`, retain the same ting key: Ting returns the original accepted ting if it already stored the request. For `sent mark-read` and `sent mark-unread`, retain the same operation key to recover the original response without overwriting a later read-state change. The caller obtains each proof; Ting never stores the sending app's secret.
 
-## Send and inspect sent tings
+## Send, inspect and update sent tings
 
 ```sh
 ting send --type 'dm.msg.received' --for si:assistant --key dm-456 \
@@ -200,8 +201,16 @@ Reuse the same key and a fresh proof when retrying the same send. Ting retains t
 | `ting sent list --request-file sent-list.json --proof-token-stdin` | `{ "items": [{ "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "type": "dm.msg.received", "for": "si:assistant", "key": "dm-456", "silent": false, "read": false }] }` |
 | `ting sent get msg_123 --app 'dm' --write-request sent-get.json` | Request-file information. |
 | `ting sent get --request-file sent-get.json --proof-token-stdin` | The full ting record and its delivery status, shown below. |
+| `ting sent mark-read msg_123 msg_124 --app 'dm' --key read-456 --write-request read.json` | Request-file information. |
+| `ting sent mark-read --request-file read.json --proof-token-stdin` | `{ "message_ids": ["msg_123", "msg_124"], "read": true }` |
+| `ting sent mark-unread msg_123 --app 'dm' --key unread-456 --write-request unread.json` | Request-file information. |
+| `ting sent mark-unread --request-file unread.json --proof-token-stdin` | `{ "message_ids": ["msg_123"], "read": false }` |
 
-Sent-list preparation accepts `--for ID`, `--type TYPE`, `--read true|false` and pagination flags. Each query execution needs fresh app proof; a saved recipient session cannot inspect the app's sent history. `--proof-token-file PATH` is an alternative to stdin for both list and get.
+Sent-list preparation accepts `--for ID`, `--type TYPE`, `--read true|false` and pagination flags. Each query execution needs fresh app proof; a saved recipient session cannot inspect the app's sent history. `--proof-token-file PATH` is an alternative to stdin for every sent command.
+
+`sent mark-read` and `sent mark-unread` require an IAM `sent.read` proof over `POST /v1/sent/read`; no recipient Ting login or receiver is needed. Preparation requires `--app`, a unique operation `--key`, and 1–100 ting IDs. Duplicate IDs are collapsed. The request file's `read` value must match the selected command. Ting validates all IDs before changing any: each must still be retained and belong to the issuing app in the proof's organization and environment. Any missing, expired or out-of-scope ID returns `404` with no partial update; an `app_id` that differs from the proof issuer returns `403`.
+
+Use the same operation key and fresh proof after an uncertain response. Ting keeps its original response for 14 days within the app/org/environment and `sent.read` operation, separately from send keys. Replaying it does not reapply the update or undo a later read-state change. Changed content with that key returns `409 idempotency_conflict`; use a new key for a new intended change. These updates never reset `created_at` or resurrect expired tings. Marking an older ting read may shorten its remaining retention to zero.
 
 Sent detail returns at most 100 entries in `deliveries`. If more remain, preserve its `deliveries_next_cursor` in CLI output. Prepare another `sent get` request with `--deliveries-cursor CURSOR`, obtain a fresh proof and execute it to fetch the next delivery page. Omit `deliveries_next_cursor` on the final page; do not replace it with the list-page `next_cursor`.
 
@@ -222,7 +231,7 @@ Sent detail returns at most 100 entries in `deliveries`. If more remain, preserv
 }
 ```
 
-Overall `read` becomes true when any destination sends a read ACK or a carbon actually views the ting in the browser. Other destinations still need their own ACKs. A webhook read ACK means acceptance; it does not mean the silicon finished its work.
+Overall `read` becomes true when a destination newly completes a read ACK or a carbon actually views the ting in the browser. The sending app may also set it read or unread, so the flag is not proof of recipient viewing. App changes update the recipient's browser inbox through its normal change hints; they do not complete or reset any hook's delivery/read ACKs or resend completed copies. A new valid read ACK or later recipient view can set read again; repeating a completed hook ACK cannot undo an app's unread update. New hooks still receive eligible retained overall-unread history. A webhook read ACK means acceptance, not that the silicon finished its work.
 
 ## Inbox, including silent tings
 
@@ -336,7 +345,7 @@ The daemon checks its forwarding workers every 5 seconds. It restarts a due job 
 
 WebSocket ping runs every 30 seconds with a 10-second pong timeout. Connection recovery backs off through 1, 2, 4, 8, 16 and then 30 seconds, with up to 20% jitter and a 30-second cap; reset the backoff after one healthy minute. Losing the socket or authorization pauses local forwarding until the identity reauthenticates; reconnect resubscribes retained, attached registrations. Explicitly unhooked hooks stay detached and hooks paused at the 12-hour cutoff require the explicit resume commands above.
 
-A local webhook's read ACK means acceptance, including when a carbon uses the CLI webhook. Browser read state records actual viewing instead. Neither confirms finished processing. Delivery failures do not alert the sender or recipient; Ting waits quietly for recovery.
+A local webhook's read ACK means acceptance, including when a carbon uses the CLI webhook. Browser view acknowledgements record actual viewing; the sending app can also change the overall read flag. Neither overall read state nor webhook acceptance confirms finished processing. Delivery failures do not alert the sender or recipient; Ting waits quietly for recovery.
 
 ## Settings
 

@@ -445,6 +445,7 @@ async fn http(
             "subscriptions/query",
             "subscriptions/revoke",
             "sent/query",
+            "sent/read",
         ]
         .contains(&path.as_str())
     {
@@ -753,6 +754,21 @@ pub async fn app_call(
             app.hub
                 .invalidate(app, &p.context, &p.org_id, &recipient, "permission_changed")
                 .await?;
+            Ok((200, out))
+        }
+        "/v1/sent/read" => {
+            let (out, owners) = app.store.sent_read(&p, b)?;
+            for (recipient, expired) in owners {
+                if expired {
+                    app.hub
+                        .invalidate(app, &p.context, &p.org_id, &recipient, "preference_changed")
+                        .await?;
+                }
+                app.hub
+                    .inbox_changed(&p.context, &p.org_id, &recipient)
+                    .await;
+            }
+            app.changed.notify_waiters();
             Ok((200, out))
         }
         "/v1/sent/query" => {

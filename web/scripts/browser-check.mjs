@@ -8,7 +8,7 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  let readCalls = 0, authenticated = false, read = false;
+  let readCalls = 0, authenticated = false, read = false, unreadAfterRead = false, inboxSocket;
   let requiredDelivery = false, failRequiredDelivery = false, appCatalogCalls = 0, inboxCalls = 0;
   const preferenceWrites = [];
   const requiredDeliveryWrites = [];
@@ -33,13 +33,13 @@ try {
       else { requiredDelivery = write.body.enabled; body = { id: subscription.id, app_id: subscription.app_id, for: subscription.for, enabled: requiredDelivery }; }
     }
     else if (path.endsWith('/subscriptions')) body = { items: [{ ...subscription, required_delivery: requiredDelivery }] };
-    else if (path.endsWith('/inbox/read')) { readCalls++; read = true; body = { message_ids: ['smoke-ting'], read: true }; }
+    else if (path.endsWith('/inbox/read')) { readCalls++; read = !unreadAfterRead; body = { message_ids: ['smoke-ting'], read: true }; }
     else if (path.endsWith('/inbox/smoke-ting')) body = { ...ting, read, data: { text: 'Smoke test payload', url: 'javascript:alert(1)' }, metadata: {} };
     else if (path.endsWith('/inbox')) { inboxCalls++; body = { items: url.searchParams.get('silent') === 'true' ? [] : [{ ...ting, read }] }; }
     else body = { items: [] };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
-  await page.routeWebSocket('**/v1/ws?protocol=v1', ws => { ws.send(JSON.stringify({ op: 'ready', receiver_id: 'smoke-receiver', protocol: 'v1' })); ws.onMessage(data => { const message = JSON.parse(data); if (message.op === 'watch_inbox') ws.send(JSON.stringify({ op: 'watching_inbox', request_id: message.request_id, org_id: message.org_id })); }); });
+  await page.routeWebSocket('**/v1/ws?protocol=v1', ws => { inboxSocket = ws; ws.send(JSON.stringify({ op: 'ready', receiver_id: 'smoke-receiver', protocol: 'v1' })); ws.onMessage(data => { const message = JSON.parse(data); if (message.op === 'watch_inbox') ws.send(JSON.stringify({ op: 'watching_inbox', request_id: message.request_id, org_id: message.org_id })); }); });
   await page.goto(origin);
   await page.getByRole('heading', { name: /Good things start/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Connect with IAM', exact: true }).count(), 1);
@@ -87,10 +87,38 @@ try {
   await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Read'));
   assert.equal(readCalls, 1, 'Opening a visible ting sends one read acknowledgement');
   assert.equal(await page.getByRole('link', { name: 'Open link' }).count(), 0, 'Unsafe payload links must not render');
+  read = false;
+  inboxSocket.send(JSON.stringify({ op: 'inbox_changed', org_id: 'bricks' }));
+  await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Unread'));
+  assert.equal(readCalls, 1, 'An app unread hint refreshes the open drawer without undoing it');
+  read = true;
+  inboxSocket.send(JSON.stringify({ op: 'watching_inbox', org_id: 'bricks' }));
+  await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Read'));
+  assert.equal(readCalls, 1, 'Reconnecting refreshes the open drawer without a read ACK');
+  read = false;
+  const foregroundAck = page.waitForResponse(response => response.url().endsWith('/inbox/read'));
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await foregroundAck;
+  await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Read'));
+  assert.equal(readCalls, 2, 'Returning to a visible unread drawer acknowledges the fresh server state');
+  await page.getByRole('button', { name: 'Close ting details' }).click();
+  read = false; unreadAfterRead = true;
+  const reopenedAck = page.waitForResponse(response => response.url().endsWith('/inbox/read'));
+  await page.getByRole('button', { name: /demo.messages.received/ }).click();
+  await reopenedAck;
+  await page.waitForFunction(() => document.querySelector('.detail-body .tag-row')?.textContent.includes('Unread'));
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(readCalls, 3, 'Reopening permits another view ACK without overwriting a later app unread or looping');
+  unreadAfterRead = false;
   await page.getByRole('button', { name: 'Close ting details' }).click();
   await page.getByRole('tab', { name: 'Silent', exact: true }).click();
   await page.getByRole('heading', { name: 'A little peace and quiet.' }).waitFor();
-  assert.equal(readCalls, 1, 'Switching inbox filters must not acknowledge unseen tings');
+  assert.equal(readCalls, 3, 'Switching inbox filters must not acknowledge unseen tings');
   await page.getByRole('link', { name: 'Preferences', exact: true }).click();
   await page.locator('#preference-apps option[value="demo"]').waitFor({ state: 'attached' });
   await page.getByRole('combobox', { name: 'Application', exact: true }).fill('demo');
@@ -136,5 +164,5 @@ try {
   }
   await page.screenshot({ path: '/tmp/ting-mobile-connections.png', fullPage: true });
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible read ACK, safe URLs, silent filtering, canonical Carbon IDs, stale organization rejection, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
+  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible/repeated view ACK, app unread refresh and read race, reconnect/foreground drawer reconciliation, safe URLs, silent filtering, canonical Carbon IDs, stale organization rejection, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
 } finally { await browser.close(); }
