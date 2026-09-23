@@ -1,0 +1,188 @@
+{
+  "checked_at": "2026-09-23T17:32:31.275601+00:00",
+  "version": "0.1.6",
+  "contract": {
+    "actor_ids": [
+      "c:<handle>",
+      "si:<handle>"
+    ],
+    "application_id": "ting",
+    "organization_authority": "IAM membership and ownership; never inferred from actor syntax",
+    "iam_sdk": "4.0.0 (vendored, provenance checked against deployed IAM)"
+  },
+  "deployment": {
+    "backend_source_commit": "d25b0bde48fc9b187235c56c4694edc05cef0eae",
+    "native_and_frontend_source_commit": "ceddb9de251482ee9882a9847dc715bb07aa6638",
+    "backend_artifact_sha256": "9b1dcc9d4ebbdd9b64265d250baf2fda327eba2f7d73ba8f422b3e05820744c3",
+    "backend_workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35894614944",
+    "native_workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35894360129",
+    "workflows_conclusion": "success",
+    "frontend_deployment_id": "dpl_9HGWY4fsLpPoH56SBC6Gh5C2Pb38",
+    "frontend": "https://ting.teamofsilicons.com",
+    "backend": "https://backend.ting.teamofsilicons.com"
+  },
+  "registration": {
+    "app_id": "ting",
+    "org_id": "tos",
+    "already_registered": true,
+    "revision": 3,
+    "latest_version": "0.1.6",
+    "visibility": "private",
+    "app_secret_rotated": false
+  },
+  "migration": {
+    "version": 1,
+    "authenticated_sessions": 47,
+    "collisions": 0,
+    "immutable_sha256": "35baf09fd6f831a92674e4b9c12ae045e5c1fe4d50c00d5f4028bc04ec8fa7e0",
+    "mapping_sha256": "6ed539342e86eb2ba8bd51e700c759880633c7bd137e18bc867f05e42f2a2100",
+    "receiver_leases_invalidated": 0,
+    "rows": {
+      "grants": 1,
+      "hooks": 3,
+      "keys": 4,
+      "preferences": 0,
+      "tings": 1,
+      "types": 2
+    },
+    "sessions_invalidated": 47,
+    "status": "applied",
+    "unmapped": 0,
+    "declared_world_count": 51,
+    "restored_final_backup_preview_and_apply": "passed",
+    "production_preview_and_apply": "passed",
+    "prior_rehearsal_same_manifest_reapply": "already_applied",
+    "backup_sha256": {
+      "ting.sqlite": "35137bd67039806f050a58417f47fc1329fec5a685661dd3c5d125eaaf5debb0",
+      "ting.sqlite.auth": "6cd8588592c1161d3ea00696397c27fd31b564fad6e2f27b2a2e78c4962216ef"
+    },
+    "backup_s3_prefix": "s3://silicon-ting-production-artifacts-dnhhu0vcfcdt/backups/identifier-cutover-20260923T172319Z",
+    "evidence_objects": [
+      "cutover-map.json",
+      "iam-evidence.json",
+      "verification.json",
+      "post-start-verification.json"
+    ],
+    "post_start": {
+      "server_active": true,
+      "caddy_active": true,
+      "backup_timer_active": true,
+      "runtime_unchanged": true,
+      "original_47_session_ciphertexts_unchanged": true,
+      "original_login_hashes_ciphertexts_and_receipts_unchanged": true,
+      "old_login_operation_tombstones_present": true
+    }
+  },
+  "authentication_reconciliation": {
+    "surviving_pre_cutover_refresh_families_revoked": 4,
+    "revocation_method": "Normal IAM revoke endpoint with retained refresh tokens and original operation keys",
+    "all_affected_worlds_active_ting_access_tokens_before_apply": 0,
+    "all_affected_worlds_active_ting_refresh_families_before_apply": 0,
+    "old_session_action": "Require new login; original ciphertext retained",
+    "old_login_action": "Retain receipts and permanently invalidate original operation IDs",
+    "runtime_configuration_sha256": "2cac4836ea76b3a07ac08a9b90a15ea16e36aabf6e799d9924d8dfbaa4bc789d"
+  },
+  "validation": {
+    "server_unit_tests": 49,
+    "other_workspace_unit_tests": 20,
+    "compiling_doctests": 1,
+    "packaging_tests": 5,
+    "formatting": "passed",
+    "package_dry_runs": "passed",
+    "unix_installer_boundary_check": "passed",
+    "web_unit_tests_and_build": "passed",
+    "production_http_backend_checks": 20,
+    "production_http_frontend_proxy_checks": 13,
+    "production_authentication": [
+      "canonical Ting application discovery",
+      "live canonical Carbon login and exact same-key replay; changed body rejected",
+      "live IAM identity and explicit organization authority",
+      "live Honeycomb OBO app listing returns canonical bare IDs",
+      "cross-organization, invalid test-world and incomplete world context denied",
+      "local and upstream test login cleanup succeeds"
+    ],
+    "live_iam_testing_world_with_local_ting": {
+      "actor_kinds": [
+        "carbon",
+        "silicon"
+      ],
+      "checks": [
+        "canonical login",
+        "subscription registration and recipient isolation",
+        "same-key replay",
+        "changed-body conflict",
+        "inbox isolation",
+        "cross-org denial",
+        "WebSocket delivery and acknowledgment"
+      ],
+      "local_event_catalog_fixture": true
+    },
+    "migration_regressions": [
+      "production and two test worlds",
+      "wrong owner and kind rejection",
+      "unknown world rejection",
+      "collision and missing-mapping rollback",
+      "tampered ciphertext rollback",
+      "exact message, receipt, resource-ID and ciphertext retention",
+      "unmigrated startup rejection",
+      "invalidated login never contacts IAM"
+    ],
+    "production_chrome_mocked_api_checks": "passed",
+    "strict_clippy": "Blocked by pre-existing client warnings; not a release gate"
+  },
+  "distribution": {
+    "github_release": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6",
+    "native_archives": [
+      {
+        "name": "ting-v0.1.6-aarch64-apple-darwin.tar.gz",
+        "sha256": "88e76376e46f28278e401810ee0841ea830feb05ef174c548a429d3032eaf248"
+      },
+      {
+        "name": "ting-v0.1.6-aarch64-pc-windows-msvc.zip",
+        "sha256": "c11b04a3c82c46da6c7f6cf2d7c8e2a3c0c0104be802a8db93357bbb9a1a5ed0"
+      },
+      {
+        "name": "ting-v0.1.6-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "62ca5c30071b55e59cca8604b0004a4b8432062a550262f00e810322ef7bab9c"
+      },
+      {
+        "name": "ting-v0.1.6-x86_64-apple-darwin.tar.gz",
+        "sha256": "df2c94936652b81983b1a58e42ec15c44dffcfe864495f57407bb9fb3235f2f4"
+      },
+      {
+        "name": "ting-v0.1.6-x86_64-pc-windows-msvc.zip",
+        "sha256": "05a37aa29e50ac5cc877cccb2fab685b8f4a1009ad184c4694151ffb1315f4a2"
+      },
+      {
+        "name": "ting-v0.1.6-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "c3dce63e41b9d30d538f6a0bbb7b27bd690ef80ead2ee716ea51a7e386d10b7d"
+      }
+    ],
+    "macos_arm_cli_version": "0.1.6",
+    "honeycomb_archive_sha256": "f13ec11a8ed268ffb9c99389ca4f8d92c889cebd44aa72a40366296a8d2c42f8",
+    "honeycomb_channel": "prod",
+    "honeycomb_upload": "confirmed",
+    "crates": {
+      "silicon-ting-client": {
+        "version": "0.1.6",
+        "checksum": "89fadfc55ad6694827db51dc99bfdebebd824ee592363a8706de9cea12cf9e56",
+        "published": "2026-09-23T17:17:42.378862Z"
+      },
+      "silicon-ting-cli": {
+        "version": "0.1.6",
+        "checksum": "0bba3ca4f1022a4628aa0be07be75b06169ae78d198d76c449c804a8bd7ea02c",
+        "published": "2026-09-23T17:17:54.681594Z"
+      }
+    }
+  },
+  "cleanup": {
+    "temporary_iam_test_environment_retired": true,
+    "local_test_server_stopped": true
+  },
+  "scope_notes": [
+    "Production authentication and OBO checks used real IAM and Honeycomb.",
+    "Carbon and Silicon send/delivery checks used real IAM test credentials with an isolated local Ting store; no production notifications were sent.",
+    "Chrome interaction checks against the deployed frontend mocked its API/WebSocket responses.",
+    "Other applications and existing local installed-package registries were not migrated by this Ting service rollout."
+  ]
+}
