@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-09-23T22:09:14.182914+00:00",
+  "version": "0.1.7",
+  "source_commit": "2b398fa41ca34847d73718e3339c0754b798dd01",
+  "workspace_unit_tests": {
+    "cli": 1,
+    "client": 14,
+    "daemon": 6,
+    "server": 52,
+    "total": 73
+  },
+  "compiling_doctests": 1,
+  "workspace_build": "passed",
+  "cli_smoke": "passed, including exact-byte read/unread operations",
+  "packaging_tests": 5,
+  "unix_installer_tests": 1,
+  "formatting": "passed",
+  "documentation_and_installer_mirrors": "passed",
+  "frontend_unit_tests": 2,
+  "frontend_build": "passed",
+  "frontend_browser_checks": "passed against mocked API and WebSocket; not a live IAM test",
+  "feature_regressions": [
+    "own-app/org/environment isolation",
+    "atomic batch validation",
+    "read/unread with safe operation-key replay",
+    "existing retention and expiry without resurrection",
+    "per-hook acknowledgements preserved",
+    "completed ACK retry cannot undo later unread",
+    "live authority and lifecycle generation revalidation",
+    "browser refresh and repeat view after app unread"
+  ]
+}

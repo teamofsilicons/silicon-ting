@@ -1,0 +1,75 @@
+{
+  "checked_at": "2026-09-23T22:23:20.823705+00:00",
+  "release": "0.1.7",
+  "backend": "https://backend.ting.teamofsilicons.com",
+  "environment_id": "0203815a-8d26-4e4e-9eaa-486203afb626",
+  "real_iam": true,
+  "test_sender_app": "ting",
+  "scope": "Task-owned isolated test environment; imported Ting acts as controlled sender and audience with effective test-only self scopes.",
+  "passed": [
+    "real IAM proof accepted one isolated test ting",
+    "app read is visible in sent history and recipient inbox",
+    "app unread is visible in sent history and recipient inbox",
+    "fresh-proof replay preserves later unread state; conflicting key and issuer mismatch rejected",
+    "Ting recipient session logged out"
+  ],
+  "test_tings_sent": 1,
+  "production_tings_sent": 0,
+  "cleanup": {
+    "state": "deleted",
+    "environment_id": "0203815a-8d26-4e4e-9eaa-486203afb626",
+    "revision": 3,
+    "operation_id": "b7707d1e-de9f-4c99-96cb-f3e9a8211a32",
+    "operation_state": "accepted",
+    "operation_pending": false,
+    "services": [
+      {
+        "app_id": "briefcase",
+        "error": null,
+        "operation_id": "b7707d1e-de9f-4c99-96cb-f3e9a8211a32",
+        "state": "ready"
+      },
+      {
+        "app_id": "honeycomb",
+        "error": null,
+        "operation_id": "b7707d1e-de9f-4c99-96cb-f3e9a8211a32",
+        "state": "ready"
+      },
+      {
+        "app_id": "iam",
+        "error": null,
+        "operation_id": "b7707d1e-de9f-4c99-96cb-f3e9a8211a32",
+        "state": "ready"
+      },
+      {
+        "app_id": "ting",
+        "error": null,
+        "operation_id": "b7707d1e-de9f-4c99-96cb-f3e9a8211a32",
+        "state": "ready"
+      }
+    ],
+    "ting_session_logged_out": true,
+    "iam_carbon_session_logged_out": true
+  },
+  "earlier_fixture_cleanup": {
+    "environment_id": "726e2532-8ab2-432f-848f-1abda09e7534",
+    "state": "blocked",
+    "environment_revision": 2,
+    "test_app_id": "ting-read-probe",
+    "configure_operation_id": "7bd5110d-33a8-423b-93b4-4ac8cd411591",
+    "configure_operation_state": "pending",
+    "test_app_owner_org": "tingreadtest",
+    "environment_owner_org": "tos",
+    "root_cause": "IAM test application configure requires the application organization to equal the environment control organization. Honeycomb maps this rejection to a generic owner/admin authority error.",
+    "clean_error": "HTTP 409 revision_conflict: Finish or retry pending environment and test application operations first",
+    "retry_result": "pending: Current organization owner/admin or the required reviewer authority is needed.",
+    "reconcile_result": "pending: No accepted import matches IAM configuration revision zero",
+    "supported_cancel_available": false,
+    "notification_writes": 0,
+    "honeycomb_test_session_logged_out": true,
+    "iam_carbon_session_logged_out": true,
+    "manual_database_or_independent_iam_deletion": false,
+    "remaining_action": "Honeycomb must provide a supported resolution or cancellation for the pending test application configure operation before coordinated environment deletion can complete."
+  },
+  "source_commit": "2b398fa41ca34847d73718e3339c0754b798dd01"
+}

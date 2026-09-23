@@ -1,0 +1,104 @@
+{
+  "checked_at": "2026-09-23T22:08:50.213492+00:00",
+  "app_id": "ting",
+  "release": "0.1.7",
+  "configuration": {
+    "before_revision": 3,
+    "requested_revision": 4,
+    "effective_revision": 4,
+    "iam_revision": 36,
+    "changed_fields": [
+      "description",
+      "obo_endpoints",
+      "obo_review_message"
+    ],
+    "all_other_live_fields_preserved": true,
+    "configure_operation_id": "33b625f1-f5a8-46a3-871d-851b929e9430",
+    "configure_operation_state": "accepted",
+    "payload_sha256": "86d3fae88b29534ecb49b3b257819d280e46960fe995dca05b09c6922be32950"
+  },
+  "iam_catalog": {
+    "source": "https://backend.iam.teamofsilicons.com/api/v1/obo-access/applications/ting/endpoints",
+    "status": 200,
+    "sent_read": {
+      "endpoint_id": "sent.read",
+      "path": "/v1/sent/read",
+      "metadata": {},
+      "critical": true,
+      "ttl_seconds": 60
+    },
+    "endpoint_effective": true
+  },
+  "publication": {
+    "id": "dbd98887-10d2-42b5-b2ee-1550e2ce4b09",
+    "revision": 4,
+    "state": "awaiting_review_plan",
+    "gates": [],
+    "retry_plan_error": "HTTP 503 integration_unavailable: Review scopes must be distinct; only the validator gate has no scopes",
+    "current_actor_can_validate": false,
+    "visibility_before": "private",
+    "visibility_after": "private",
+    "diagnosis": {
+      "checked_at": "2026-09-23T22:20:13.313105+00:00",
+      "classification": "Upstream IAM/Honeycomb review-plan provider-name collision after canonical application identifiers; not an ordinary missing external-scope approval.",
+      "live_configuration_evidence": {
+        "ting_effective_revision": 4,
+        "ting_external_scope": {
+          "app_id": "honeycomb",
+          "endpoint_id": "honeycomb.apps.list"
+        },
+        "honeycomb_effective_endpoint": {
+          "endpoint_id": "honeycomb.apps.list",
+          "critical": true,
+          "path": "/api/v1/obo/apps/list",
+          "ttl_seconds": 60
+        },
+        "source": "Authenticated canonical Honeycomb apps get for ting and honeycomb; no secrets retained."
+      },
+      "source_evidence": [
+        {
+          "repository": "teamofsilicons/silicon-iam",
+          "commit": "8111d3206a4d86b3c562e5556af304d428b9fced",
+          "file": "migrations/0102_honeycomb_publication.sql",
+          "lines": [
+            60,
+            75
+          ],
+          "url": "https://github.com/teamofsilicons/silicon-iam/blob/8111d3206a4d86b3c562e5556af304d428b9fced/migrations/0102_honeycomb_publication.sql#L60-L75",
+          "finding": "IAM groups critical external scopes by catalog.app_id, yielding provider honeycomb for this scope, then appends a separate empty validator gate also named honeycomb."
+        },
+        {
+          "repository": "teamofsilicons/silicon-honeycomb",
+          "commit": "d8c06143add9114051fc8c591d742a1dce264c0a",
+          "file": "crates/server/src/reviews.rs",
+          "lines": [
+            85,
+            101
+          ],
+          "url": "https://github.com/teamofsilicons/silicon-honeycomb/blob/d8c06143add9114051fc8c591d742a1dce264c0a/crates/server/src/reviews.rs#L85-L101",
+          "finding": "Honeycomb requires unique provider names and reserves honeycomb for the empty validator gate. Its nonempty-scopes rejection exactly matches the observed HTTP 503."
+        },
+        {
+          "repository": "teamofsilicons/silicon-iam",
+          "commit": "8111d3206a4d86b3c562e5556af304d428b9fced",
+          "file": "migrations/0102_honeycomb_publication.sql",
+          "lines": [
+            112,
+            134
+          ],
+          "url": "https://github.com/teamofsilicons/silicon-iam/blob/8111d3206a4d86b3c562e5556af304d428b9fced/migrations/0102_honeycomb_publication.sql#L112-L134",
+          "finding": "IAM returns the stored immutable plan for an existing request. Preapproving the external scope alone does not resolve the duplicate provider: the gate filter retains every provider named honeycomb even after scopes are removed."
+        }
+      ],
+      "release_side_remedy": "None that preserves the existing required Honeycomb scope and normal review policy. Do not remove or rename Ting scopes, edit stored plans, or bypass provider/validator review.",
+      "supported_next_action": "Fix the upstream IAM/Honeycomb contract to distinguish the validator gate from the Honeycomb application provider. Then use the supported configuration/publication workflow to generate a fresh immutable plan for a new revision and complete all required provider and validator approvals. Retrying the existing request alone replays its stored malformed plan.",
+      "mutations_performed_during_diagnosis": false
+    }
+  },
+  "production_notification_writes": 0,
+  "limitations": [
+    "Production IAM endpoint registration is verified; end-to-end read-state acceptance is verified separately.",
+    "Public Honeycomb publication remains blocked by review-plan validation; no approval bypass was attempted."
+  ],
+  "source_commit": "2b398fa41ca34847d73718e3339c0754b798dd01"
+}

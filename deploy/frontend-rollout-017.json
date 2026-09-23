@@ -1,0 +1,140 @@
+{
+  "checked_at": "2026-09-23T22:15:10.487276+00:00",
+  "release": "0.1.7",
+  "source_commit": "2b398fa41ca34847d73718e3339c0754b798dd01",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_ArCfHsYNLJ3EYim8QE5VWsmcueFE",
+    "url": "https://silicon-ting-nbj38lbkr-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/ArCfHsYNLJ3EYim8QE5VWsmcueFE",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "promoted": true,
+    "project_and_domains_preserved": true,
+    "promotion_waited_for_native_release_and_backend": true,
+    "source_input": "Clean git archive of the pinned commit; existing project binding only; local dependencies and build output excluded from upload."
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "chrome_browser_checks_with_mocked_api": "passed",
+    "production_telemetry_tables_preserved": true,
+    "telemetry_build_inputs": [
+      "VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics",
+      "VITE_SS_EVENTS_TABLE=tingfrontendevents"
+    ]
+  },
+  "staged_checks": {
+    "/assets/index-vh7i7rh7.js": {
+      "matches_tested_build": true,
+      "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5"
+    },
+    "/docs/api.md": {
+      "matches_tested_build": true,
+      "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3"
+    },
+    "/install.sh": {
+      "matches_tested_build": true,
+      "sha256": "c0a309ddee5fb2c99b8f15c0403e72c16eb37cd834e1e97b27a0070dfe5f5f38"
+    }
+  },
+  "public_home": {
+    "https://ting.teamofsilicons.com": {
+      "status": 200,
+      "assets": [
+        "/assets/index-vh7i7rh7.js",
+        "/assets/index-BbForarz.css"
+      ],
+      "matches_tested_production_build": true
+    },
+    "https://silicon-ting.vercel.app": {
+      "status": 200,
+      "assets": [
+        "/assets/index-vh7i7rh7.js",
+        "/assets/index-BbForarz.css"
+      ],
+      "matches_tested_production_build": true
+    }
+  },
+  "public_resources": {
+    "/docs/api.md": {
+      "status": 200,
+      "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3",
+      "matches_tested_production_build": true,
+      "source": "udd/api.md",
+      "sent_read_contract_present": true
+    },
+    "/docs/cli.md": {
+      "status": 200,
+      "sha256": "12558501d30e6fe755aadb3bd46e38bd944645c3c4964de4b6ed72db29005b56",
+      "matches_tested_production_build": true,
+      "source": "udd/cli.md"
+    },
+    "/docs/understanding.md": {
+      "status": 200,
+      "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4",
+      "matches_tested_production_build": true,
+      "source": "udd/understanding.md"
+    },
+    "/install.sh": {
+      "status": 200,
+      "sha256": "c0a309ddee5fb2c99b8f15c0403e72c16eb37cd834e1e97b27a0070dfe5f5f38",
+      "matches_tested_production_build": true,
+      "default_version": "0.1.7",
+      "source": "scripts/install.sh"
+    },
+    "/install.ps1": {
+      "status": 200,
+      "sha256": "5de170ef78c8251b89f5a0c58beef009532371dfc437e94547964a19570b1a76",
+      "matches_tested_production_build": true,
+      "default_version": "0.1.7",
+      "source": "scripts/install.ps1"
+    }
+  },
+  "public_assets": {
+    "/assets/index-vh7i7rh7.js": {
+      "status": 200,
+      "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5",
+      "matches_tested_production_build": true,
+      "telemetry_tables": [
+        "tingfrontendanalytics",
+        "tingfrontendevents"
+      ]
+    },
+    "/assets/index-BbForarz.css": {
+      "status": 200,
+      "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+      "matches_tested_production_build": true
+    }
+  },
+  "production_browser_checks": {
+    "origin": "https://ting.teamofsilicons.com",
+    "browser": "Chrome",
+    "passed": true,
+    "api_and_websocket_responses": "mocked",
+    "checks": [
+      "Public desktop and mobile layout and documentation navigation",
+      "Inbox fetching does not mark read; visible opening acknowledges once",
+      "App unread hints refresh open drawer without acknowledging",
+      "Reconnect refreshes open drawer without acknowledging",
+      "Returning to foreground fetches current unread state and acknowledges the visible ting",
+      "Reopening an app-marked-unread ting permits another acknowledgement",
+      "Read response does not overwrite a later app unread or cause acknowledgement loops",
+      "Unsafe payload links are not rendered",
+      "Silent filtering and recipient-scoped cross-org app filters/preferences",
+      "Required delivery remains explicit opt-in, preserves confirmed state after failed updates, and fits mobile layouts",
+      "No browser runtime errors"
+    ]
+  },
+  "limitations": [
+    "Browser interaction checks use mocked API and WebSocket responses; they do not establish a live authenticated IAM delivery flow.",
+    "Static resources and asset hashes were checked against the actual public production origin. Backend authorization and publishing verification are recorded separately."
+  ]
+}

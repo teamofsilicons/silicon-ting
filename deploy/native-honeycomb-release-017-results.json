@@ -1,0 +1,166 @@
+{
+  "checked_at": "2026-09-23T22:16:51.037373+00:00",
+  "release": "0.1.7",
+  "source_commit": "2b398fa41ca34847d73718e3339c0754b798dd01",
+  "github": {
+    "release_url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7",
+    "published_at": "2026-09-23T22:12:42Z",
+    "workflow_url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/35926399569",
+    "workflow_conclusion": "success",
+    "jobs": [
+      {
+        "name": "build (ubuntu-24.04, x86_64-unknown-linux-gnu)",
+        "conclusion": "success"
+      },
+      {
+        "name": "build (macos-15, aarch64-apple-darwin)",
+        "conclusion": "success"
+      },
+      {
+        "name": "build (macos-15-intel, x86_64-apple-darwin)",
+        "conclusion": "success"
+      },
+      {
+        "name": "build (windows-11-arm, aarch64-pc-windows-msvc)",
+        "conclusion": "success"
+      },
+      {
+        "name": "build (ubuntu-24.04-arm, aarch64-unknown-linux-gnu)",
+        "conclusion": "success"
+      },
+      {
+        "name": "build (windows-2025, x86_64-pc-windows-msvc)",
+        "conclusion": "success"
+      },
+      {
+        "name": "publish",
+        "conclusion": "success"
+      }
+    ],
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "sha256": "f6155707cba9478dd7197bda77369d060f8c9cb247e28bd8dbdfd95e927c0bed",
+        "size": 643,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/SHA256SUMS",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-aarch64-apple-darwin.tar.gz",
+        "sha256": "0ce4c3f5c6c0caba71108fed07f8c18121b4b8598e015d140b13a1962995875a",
+        "size": 5071885,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-aarch64-apple-darwin.tar.gz",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-aarch64-pc-windows-msvc.zip",
+        "sha256": "e0cf4a2b37ac4e9ff362ca170daec0ab15416b8fc92216b918bff54180679f5c",
+        "size": 5047071,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-aarch64-pc-windows-msvc.zip",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "866173894ec12c7a860a0b95700694f991d1ee632d30dec2c57d0adc73935736",
+        "size": 5288091,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-aarch64-unknown-linux-gnu.tar.gz",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-x86_64-apple-darwin.tar.gz",
+        "sha256": "2f03388135c20dabde9d9f6421b5216b7306d9a70ed01e31e14e3542aa651bd7",
+        "size": 5343885,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-x86_64-apple-darwin.tar.gz",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-x86_64-pc-windows-msvc.zip",
+        "sha256": "124209c1c9246df7c41c688ad509446f5d711c9b46e592fc59c7ae9b3e2383f3",
+        "size": 5431007,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-x86_64-pc-windows-msvc.zip",
+        "downloaded_checksum_verified": true
+      },
+      {
+        "name": "ting-v0.1.7-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "e30ec6d2547a174ddb3cda1018614f85acc0ff88382dc59a3ac182329cace0c6",
+        "size": 5585458,
+        "url": "https://github.com/teamofsilicons/silicon-ting/releases/download/v0.1.7/ting-v0.1.7-x86_64-unknown-linux-gnu.tar.gz",
+        "downloaded_checksum_verified": true
+      }
+    ]
+  },
+  "package": {
+    "path": "dist/ting-honeycomb-0.1.7.tar.gz",
+    "sha256": "691671d9f98d1e2af3340ba6ae663fdd5f840e47dd48cc93d0108dcacbb3efe0",
+    "size": 31410064,
+    "source_inputs_match_release_commit": true,
+    "valid": true,
+    "validation_errors": [],
+    "platforms": [
+      "linux-aarch64",
+      "linux-x86_64",
+      "macos-aarch64",
+      "macos-x86_64",
+      "windows-aarch64",
+      "windows-x86_64"
+    ],
+    "app_id": "ting",
+    "bin": {
+      "ting": "main",
+      "ting-daemon": "daemon"
+    },
+    "licenses_and_service_instructions_verified": true,
+    "packaging_cli": "Canonical Honeycomb 0.4.0 retained from the identifier migration; installed wrapper rejected canonical app_id."
+  },
+  "honeycomb": {
+    "app_id": "ting",
+    "channel": "prod",
+    "revision_before_upload": 4,
+    "upload_attempts": 1,
+    "upload_exit_code": 0,
+    "release_receipt": {
+      "app_id": "ting",
+      "channel": "prod",
+      "id": "e88b4010-ffa0-433e-9386-4438ea0cdf93",
+      "promoted_from": null,
+      "publication": {
+        "error": "Review scopes must be distinct; only the validator gate has no scopes",
+        "state": "request_pending"
+      },
+      "sha256": "691671d9f98d1e2af3340ba6ae663fdd5f840e47dd48cc93d0108dcacbb3efe0",
+      "size": 31410064,
+      "state": "accepted",
+      "version": "0.1.7"
+    },
+    "authenticated_latest_version": "0.1.7",
+    "authenticated_release_matches_upload_receipt": true,
+    "older_releases_preserved": [
+      "0.1.6",
+      "0.1.5",
+      "0.1.4",
+      "0.1.3",
+      "0.1.2",
+      "0.1.0"
+    ],
+    "revision_after": 4,
+    "effective_revision_after": 4,
+    "visibility": "private",
+    "anonymous_checks": {
+      "app": {
+        "url": "https://backend.honeycomb.teamofsilicons.com/api/v1/apps/ting",
+        "status": 404
+      },
+      "releases": {
+        "url": "https://backend.honeycomb.teamofsilicons.com/api/v2/apps/ting/releases?channel=prod",
+        "status": 404
+      }
+    }
+  },
+  "limitations": [
+    "Honeycomb accepted the immutable production package, but the app remains private. Public catalog publication is blocked by upstream review-plan error: Review scopes must be distinct; only the validator gate has no scopes.",
+    "Native CI builds and tests all six platforms; this verification does not claim service installation on every platform."
+  ],
+  "remaining_actions": [
+    "Resolve Honeycomb publication review-plan failure through its supported workflow, then verify anonymous app/package access."
+  ]
+}

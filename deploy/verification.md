@@ -1,8 +1,29 @@
 # Deployment verification
 
-Updated 2026-09-23 UTC. Backend **0.1.5**, release source `3537f90e98147acaf3ad42c2f8b80bc505ab2357`, is [deployed and healthy](backend-015-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
+Updated 2026-09-23 UTC. Backend **0.1.7**, release source `2b398fa41ca34847d73718e3339c0754b798dd01`, is [deployed and healthy](backend-017-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.1.5 release
+## Current 0.1.7 release
+
+Apps can set their own retained tings read or unread through `POST /v1/sent/read` with a fresh exact-request IAM proof for `sent.read`. Updates validate the whole batch, preserve webhook receipts and retention, and safely replay operation keys without overwriting newer state.
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [73 workspace unit tests and one compiling doctest passed](release-validation-017.json). Workspace build, CLI smoke, five packaging tests, one installer test, formatting and documentation mirrors passed. |
+| Native and Honeycomb | [All six native platforms passed and GitHub assets are publicly available](native-honeycomb-release-017-results.json). Each downloaded archive matches its checksum. Honeycomb accepted the verified six-platform package on the production channel and reports latest version 0.1.7; public catalog access remains blocked by its review-plan error. |
+| Crates | [Client and CLI 0.1.7 are published and non-yanked](crates-release-017-results.json). Downloaded checksums and clean embedded source commits match the release. |
+| Backend | [All three backend workflow jobs and SSM deployment checks passed](backend-017-deployment-results.json). The archive checksum and embedded commit were verified; public health reports 0.1.7. |
+| Frontend | [Vercel production promotion and public checks passed](frontend-rollout-017.json). Both domains serve source-matching JavaScript, CSS, docs and 0.1.7 installers; telemetry settings are preserved. Mocked Chrome checks verify browser refresh and repeat read after an app marks a ting unread. |
+| Public boundaries | [45 live HTTP/CORS checks and the new route authentication boundary passed](public-browser-smoke-017-results.json) across the backend and frontend proxy, without recipient mutations. |
+| Authenticated read/unread | [Live acceptance passed with real IAM proofs](live-sent-read-017-results.json): app read and unread appeared in sent history and recipient inbox; replay preserved newer state, changed content with the same key conflicted, and a mismatched issuer was rejected. One isolated test ting, zero production sends. The imported Ting app acted as controlled sender and audience; this is protocol evidence, not a third-party app/browser end-to-end run. |
+| IAM catalog and publication | [Configuration revision 4 is effective and production IAM exposes `sent.read`](ting-config-rollout-017.json). Honeycomb public listing remains private with an upstream review-plan validation error; runtime configuration is effective independently of public listing. |
+
+The successful acceptance environment was deleted through coordinated lifecycle operations, with all service receipts ready and no pending operation. An earlier failed cross-org test setup remains blocked from deletion by Honeycomb’s pending configure operation; its test sessions are logged out and it sent no notifications. [Cleanup evidence and required upstream resolution](live-sent-read-017-results.json).
+
+## Historical 0.1.6 release
+
+[The identifier cutover evidence](identifier-migration-016-results.json) records the deployed canonical actor/application identifiers, verified migration and authentication reconciliation, native/crates/Honeycomb publication, frontend promotion, protocol validation and fixture cleanup. Its local Ting delivery checks are not substituted for live 0.1.7 acceptance.
+
+## Historical 0.1.5 release
 
 | Check | Evidence and scope |
 | --- | --- |
