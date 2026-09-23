@@ -43,6 +43,7 @@ impl Store {
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS types(ctx TEXT,org TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,org,name));
+ CREATE INDEX IF NOT EXISTS types_app ON types(ctx,app,name);
  CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,ctx TEXT,org TEXT,app TEXT,recipient TEXT,active INTEGER,UNIQUE(ctx,org,app,recipient));
  CREATE TABLE IF NOT EXISTS preferences(ctx TEXT,org TEXT,recipient TEXT,app TEXT,scope TEXT,enabled INTEGER,PRIMARY KEY(ctx,org,recipient,app,scope));
  CREATE TABLE IF NOT EXISTS tings(id TEXT PRIMARY KEY,ctx TEXT,org TEXT,app TEXT,recipient TEXT,type TEXT,created TEXT,body TEXT,silent INTEGER,read INTEGER DEFAULT 0);
@@ -326,9 +327,10 @@ impl Store {
         let mut db = self.lock()?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some((fp,response))=tx.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='send' AND key=? AND expires>?",params![p.context,p.org_id,p.app_id,key,now()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?{if fp!=fingerprint{return Err(conflict("idempotency_conflict","This key was accepted with different content."))}return Ok((200,decode(response)?))}
+        // App IDs are global; types belong to the app's owner, not the delivery org.
         let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM types WHERE ctx=? AND org=? AND app=? AND name=?)",
-            params![p.context, p.org_id, app, typ],
+            "SELECT EXISTS(SELECT 1 FROM types WHERE ctx=? AND app=? AND name=?)",
+            params![p.context, app, typ],
             |r| r.get(0),
         )?;
         if !exists {
@@ -1076,7 +1078,7 @@ mod tests {
         };
         s.register_type(
             &p,
-            &proof.org_id,
+            "app-owner-org",
             &proof.app_id,
             &json!({"type":"tos>example.msg.received","description":"A message arrived."}),
             false,
@@ -1104,6 +1106,120 @@ mod tests {
             .as_str()
             .unwrap()
             .into()
+    }
+    #[test]
+    fn global_app_catalog_keeps_recipient_state_and_contexts_isolated() {
+        let (s, p, proof) = fixture();
+        assert_eq!(
+            s.types(&p, "app-owner-org", &proof.app_id).unwrap().len(),
+            1
+        );
+        assert!(
+            s.types(&p, &proof.org_id, &proof.app_id)
+                .unwrap()
+                .is_empty()
+        );
+        let h = hook(&s, &p, "r");
+        let other = Proof {
+            org_id: "other-recipient-org".into(),
+            context: proof.context.clone(),
+            app_id: proof.app_id.clone(),
+            actor_id: proof.actor_id.clone(),
+            actor_kind: proof.actor_kind.clone(),
+            expires_at: proof.expires_at,
+            test: None,
+        };
+        let mut request = body("shared-key");
+        request["org_id"] = other.org_id.clone().into();
+        assert_eq!(
+            s.send(&other, &request).unwrap_err().body["error"]["code"],
+            "recipient_not_registered"
+        );
+        s.subscribe_app(
+            &other,
+            &json!({"org_id":other.org_id,"app_id":other.app_id}),
+        )
+        .unwrap();
+        let other_hook = s
+            .create_hook(
+                &p,
+                &other.org_id,
+                "other",
+                "hook",
+                &json!({"receiver_id":"other"}),
+            )
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        s.preference(
+            &p,
+            &proof.org_id,
+            &json!({"app_id":proof.app_id,"enabled":false}),
+            false,
+        )
+        .unwrap();
+        let silent = s.send(&proof, &body("shared-key")).unwrap().1;
+        assert_eq!(silent["silent"], true);
+        let sent = s.send(&other, &request).unwrap();
+        assert_eq!(sent.0, 202);
+        assert_eq!(sent.1["silent"], false);
+        assert_ne!(sent.1["id"], silent["id"]);
+        assert_eq!(s.send(&other, &request).unwrap(), (200, sent.1.clone()));
+        let mid = sent.1["id"].as_str().unwrap().to_owned();
+        assert!(
+            s.ting(&p.context, &proof.org_id, &mid, Some(&p.id), None)
+                .is_err()
+        );
+        assert_eq!(
+            s.tings(
+                &p.context,
+                &other.org_id,
+                Some(&p.id),
+                Some(&proof.app_id),
+                &json!({})
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        assert!(s.offer("r", &h).unwrap().is_none());
+        let offered = s.offer("other", &other_hook).unwrap().unwrap();
+        assert_eq!(offered["org_id"], other.org_id);
+        assert_eq!(offered["tings"][0]["id"], mid);
+        assert!(
+            s.ack("other", &proof.org_id, &other_hook, &[mid.clone()], "read")
+                .is_err()
+        );
+        s.ack("other", &other.org_id, &other_hook, &[mid.clone()], "read")
+            .unwrap();
+        assert_eq!(s.deliveries(&mid).unwrap()[0]["read_acked"], true);
+        let grant = s
+            .grants(&p.context, &proof.org_id, Some(&p.id), Some(&proof.app_id))
+            .unwrap()[0]
+            .clone();
+        s.required_delivery(&p, &proof.org_id, grant["id"].as_str().unwrap(), Some(true))
+            .unwrap();
+        request["key"] = "required".into();
+        request["delivery"] = "required".into();
+        assert_eq!(
+            s.send(&other, &request).unwrap_err().body["error"]["code"],
+            "required_delivery_not_enabled"
+        );
+
+        let mut isolated = Proof {
+            context: "other-context".into(),
+            ..other
+        };
+        s.subscribe_app(
+            &isolated,
+            &json!({"org_id":isolated.org_id,"app_id":isolated.app_id}),
+        )
+        .unwrap();
+        assert_eq!(s.send(&isolated, &request).unwrap_err().status, 404);
+        isolated.context = p.context.clone();
+        isolated.app_id = "elsewhere>app".into();
+        assert_eq!(s.send(&isolated, &request).unwrap_err().status, 403);
     }
     #[test]
     fn bounded_pages_survive_read_changes_and_retention() {
@@ -1692,7 +1808,7 @@ mod tests {
             let s = Store::open(path.to_str().unwrap()).unwrap();
             s.register_type(
                 &p,
-                "org-uuid",
+                "app-owner-org",
                 &proof.app_id,
                 &json!({"type":"tos>example.msg.received","description":"arrived"}),
                 false,

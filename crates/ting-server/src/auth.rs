@@ -1354,6 +1354,7 @@ pub(crate) mod tests {
         pub app: crate::Shared,
         pub principal: Principal,
         pub proof: Proof,
+        owner_org: String,
         pub token: String,
         pub iam: Arc<MockIam>,
         task: tokio::task::JoinHandle<()>,
@@ -1407,6 +1408,7 @@ pub(crate) mod tests {
         let context = uuid::Uuid::new_v4().to_string();
         let environment_key = "k".repeat(32);
         let org = uuid::Uuid::new_v4().to_string();
+        let owner_org = uuid::Uuid::new_v4().to_string();
         let iam = Arc::new(MockIam {
             reply: Mutex::new(
                 json!({"active":true,"public_id":"si_fixture","actor_type":"silicon","client_id":"tos>ting","authorization":{
@@ -1494,10 +1496,32 @@ pub(crate) mod tests {
                     let mut authorization = iam.reply.lock().unwrap()["authorization"].clone();
                     authorization["scopes"] = json!([format!("obo:tos>ting:{endpoint}")]);
                     json!({"valid":true,"proof_id":uuid::Uuid::new_v4(),"issuer_app_id":"tos>example","audience":"tos>ting",
-                        "actor":{"type":"silicon","public_id":"si_fixture"},"authorization":authorization,"org_id":"tos",
+                        "actor":{"type":"silicon","public_id":"si_fixture"},"org_id":authorization["org_id"],"authorization":authorization,
                         "endpoint":{"endpoint_id":endpoint,"path":target},"metadata":{},
                         "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339(),
                         "consumed_at":chrono::Utc::now().to_rfc3339()})
+                }
+                path if path.starts_with("/api/v1/obo-access/applications/")
+                    && path.ends_with("/endpoints") =>
+                {
+                    json!({"application":{"app_id":"tos>honeycomb","org_id":"tos"},
+                        "endpoints":[{"endpoint_id":"honeycomb.apps.list","path":"/api/v1/obo/apps/list","critical":false,"metadata":{}}]})
+                }
+                "/api/v1/obo-access/exchanges" => {
+                    json!({"access_proof":"catalog-proof","proof_id":uuid::Uuid::new_v4(),"expires_in":30,
+                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339()})
+                }
+                "/api/v1/obo/apps/list" => {
+                    let raw = axum::body::to_bytes(request.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    let body: Value = serde_json::from_slice(&raw).unwrap();
+                    let items = if body["org_id"] == "tos" {
+                        json!([{"app_id":"tos>example","org_id":"tos","name":"Example"}])
+                    } else {
+                        json!([])
+                    };
+                    json!({"items":items})
                 }
                 "/api/v1/application/testing-context" => {
                     json!({"environment_id":iam.context,"application":{
@@ -1527,10 +1551,10 @@ pub(crate) mod tests {
                 .to_string_lossy()
                 .into_owned(),
             encryption_key: "ab".repeat(32),
+            honeycomb_url: iam_url.clone(),
             iam_url,
             iam_app_id: "tos>ting".into(),
             iam_app_secret: "fixture-secret".into(),
-            honeycomb_url: "http://127.0.0.1:1".into(),
             spacestation_url: "http://127.0.0.1:1".into(),
             spacestation_key: String::new(),
             spacestation_table: String::new(),
@@ -1603,7 +1627,7 @@ pub(crate) mod tests {
         store
             .register_type(
                 &principal,
-                &proof.org_id,
+                &owner_org,
                 &proof.app_id,
                 &json!({"type":"tos>example.msg.received","description":"Fixture"}),
                 false,
@@ -1627,6 +1651,7 @@ pub(crate) mod tests {
             app,
             principal,
             proof,
+            owner_org,
             token,
             iam,
             task,
@@ -2312,6 +2337,143 @@ pub(crate) mod tests {
             )
             .unwrap();
         assert_eq!(get_me(&testing).await.unwrap_err().status, 503);
+    }
+
+    #[tokio::test]
+    async fn cross_org_proofs_deliver_without_granting_type_management() {
+        use axum::{
+            extract::{Path, RawQuery, State},
+            http::Method,
+        };
+
+        async fn request(
+            f: &Fixture,
+            headers: &HeaderMap,
+            method: Method,
+            path: &str,
+            body: Value,
+        ) -> Result<(u16, Value)> {
+            let bytes = if method == Method::GET {
+                Vec::new()
+            } else {
+                serde_json::to_vec(&body).unwrap()
+            };
+            let response = crate::http(
+                State(f.app.clone()),
+                Path(path.into()),
+                RawQuery(None),
+                method,
+                headers.clone(),
+                Ok(bytes.into()),
+            )
+            .await?;
+            let status = response.status().as_u16();
+            let bytes = axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap();
+            Ok((status, serde_json::from_slice(&bytes).unwrap()))
+        }
+
+        for testing in [false, true] {
+            let f = fixture(testing).await;
+            {
+                let mut reply = f.iam.reply.lock().unwrap();
+                reply["authorization"]["org_id"] = "bricks".into();
+                reply["authorization"]["org_role"] = "admin".into();
+            }
+            let mut proof_headers = HeaderMap::new();
+            proof_headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            proof_headers.insert("content-type", "application/json".parse().unwrap());
+            if testing {
+                proof_headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+                proof_headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+            }
+            let body = json!({"org_id":"bricks","type":"tos>example.msg.received",
+                "data":{},"for":f.principal.id,"key":"cross-org"});
+            let (status, sent) = request(&f, &proof_headers, Method::POST, "tings", body.clone())
+                .await
+                .unwrap();
+            assert_eq!(status, 202);
+            let (_, history) = request(
+                &f,
+                &proof_headers,
+                Method::POST,
+                "sent/query",
+                json!({"org_id":"bricks","app_id":"tos>example","id":sent["id"]}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(history["id"], sent["id"]);
+            for (field, value, status) in [
+                ("org_id", "tos", 401),
+                ("type", "bricks>other.msg.received", 403),
+            ] {
+                let mut invalid = body.clone();
+                invalid[field] = value.into();
+                assert_eq!(
+                    request(&f, &proof_headers, Method::POST, "tings", invalid)
+                        .await
+                        .unwrap_err()
+                        .status,
+                    status
+                );
+            }
+
+            let mut session_headers = proof_headers.clone();
+            session_headers.insert(
+                "authorization",
+                format!("Bearer {}", f.token).parse().unwrap(),
+            );
+            for (method, path, body) in [
+                (Method::GET, "orgs/bricks/apps/tos>example/types", json!({})),
+                (
+                    Method::POST,
+                    "orgs/bricks/apps/tos>example/types",
+                    json!({"type":"tos>example.msg.received","description":"Hijack"}),
+                ),
+                (
+                    Method::PATCH,
+                    "orgs/bricks/apps/tos>example/types/tos>example.msg.received",
+                    json!({"description":"Hijack"}),
+                ),
+            ] {
+                assert_eq!(
+                    request(&f, &session_headers, method, path, body)
+                        .await
+                        .unwrap_err()
+                        .status,
+                    403
+                );
+            }
+            {
+                let mut reply = f.iam.reply.lock().unwrap();
+                reply["authorization"]["org_id"] = "tos".into();
+                reply["authorization"]["organization_id"] = f.owner_org.clone().into();
+            }
+            let (_, types) = request(
+                &f,
+                &session_headers,
+                Method::GET,
+                "orgs/tos/apps/tos>example/types",
+                json!({}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(types["items"][0]["description"], "Fixture");
+            assert_eq!(
+                request(
+                    &f,
+                    &session_headers,
+                    Method::PATCH,
+                    "orgs/tos/apps/tos>example/types/tos>example.msg.received",
+                    json!({"description":"Owner update"}),
+                )
+                .await
+                .unwrap()
+                .0,
+                200
+            );
+        }
     }
 
     #[tokio::test]

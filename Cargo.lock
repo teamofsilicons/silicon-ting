@@ -2006,7 +2006,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "futures-util",
  "libc",
@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-daemon"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aes-gcm",
  "anyhow",

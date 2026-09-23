@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the published CLI and one system service. No IAM login is performed.
 set -eu
-VERSION=${TING_VERSION:-v0.1.4}
+VERSION=${TING_VERSION:-v0.1.5}
 REPOSITORY=https://github.com/teamofsilicons/silicon-ting
 PREFIX=${TING_INSTALL_PREFIX:-/usr/local}
 case "$(uname -s)" in Darwin) OS=apple-darwin;; Linux) OS=unknown-linux-gnu;; *) echo 'Use the PowerShell installer on Windows; this shell installer supports macOS and Linux.' >&2; exit 1;; esac

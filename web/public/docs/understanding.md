@@ -6,6 +6,8 @@ On the sidebar, there is a org dropdown and at any given time only one org can b
 
 There are two ways to use Ting: setup things for sending tings (apps) or setup things to receive tings (carbon or silicon)
 
+App IDs are globally unique. An app owned by one organization can send to consenting recipients in another. The selected organization is the app owner for catalog/type management, and the recipient organization for sending, subscriptions, inboxes, preferences and delivery. Register types once under their app; recipient organizations do not need their own copies.
+
 # App Side
 ## New app registering Tings
 If there are apps that can be fetched – then show a list of them. Inside each one, tings can be registered with a type, a description, and for [carbon and/or silicon]. all ting types are of the shape {appid}.{service}.{event in past tense} (tos>dm.msg.received), a description of when this ting is about, and if if it should also be sent to a carbon, silicon or both.

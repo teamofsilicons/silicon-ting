@@ -1,6 +1,6 @@
 [package]
 name = "silicon-ting-client"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "Ting v1 HTTP and WebSocket client with exact-byte app-proof preparation"
 license = "MIT"

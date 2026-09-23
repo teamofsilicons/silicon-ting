@@ -87,7 +87,7 @@ Before session exchange, generate and privately persist an `Idempotency-Key` for
 | `ting org current` | `{ "org_id": "tos", "source": "saved" }` |
 | `ting apps list` | `{ "items": [{ "app_id": "tos>dm", "name": "DM", "can_manage_tings": true }] }` |
 
-Org access comes from IAM. App visibility comes from Honeycomb permissions. Seeing an app does not grant permission to change it or send its tings.
+Org access comes from IAM. App visibility comes from Honeycomb permissions. Seeing an app does not grant permission to change it or send its tings. `apps list` lists the selected organization’s app catalog, not all apps that can notify its recipients. `app_id` is globally unique; senders can belong to another organization.
 
 `org current` reports the effective org and its source: `--org`, `SILICON_ORG` or `saved`; missing selection is an input error. `org use ORG` validates access to its explicit argument and saves it as the fallback. It does not change `SILICON_ORG` or override it. Use `--org` to override the environment for one command.
 
@@ -108,7 +108,16 @@ ting types register --type 'tos>dm.msg.received' \
 
 `types list` requires `--app`. Register and update require `--type` and a nonempty `--description`; derive the app from the type's app component. Update changes only the description. The type name stays fixed. `defaults` is read-only and always true for both carbon and silicon; apps cannot change it.
 
-Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the saved Ting session; Ting checks app visibility or management permission through Honeycomb. Only recipients can turn their notifications off or override their settings.
+Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the saved Ting session; Ting checks app visibility or management permission through Honeycomb. Only recipients can turn their notifications off or override their settings. Select the app’s owning organization for type management. Select the recipient’s organization for sends, subscriptions, sent status, inboxes, preferences and webhooks. The type stays in its owner catalog; it does not need to be registered again for each recipient organization.
+
+```sh
+ting --org tos types list --app 'tos>dm'
+ting --org bricks send --type 'tos>dm.msg.received' \
+  --for si_123 --key dm-456 --data '{"message_id":"dm_456"}' \
+  --write-request send.json
+```
+
+Obtain an IAM proof bound to the prepared `bricks` request, then execute it with `ting --org bricks send --request-file send.json --proof-token-stdin`.
 
 ## Permission to receive from an app
 

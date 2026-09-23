@@ -19,6 +19,8 @@ HTTP uses HTTPS and JSON. WebSockets use WSS. Local development may use HTTP/WS 
 
 IDs are opaque strings. `id` identifies a ting, subscription, or webhook in its own record. Use `org_id` and `app_id` when identifying an org or app. Resolve org handles through IAM and compare/store their canonical identity; changing a display name must not change ownership. Paths must URL-encode IDs; for example, `tos>dm` becomes `tos%3Edm`.
 
+`app_id` is globally unique. An app owned by one organization can notify consenting recipients in any organization. Type definitions belong to the app within the verified production/testing context; resolve a send’s type by its app ID and type name, independently of the delivery organization. For sends, subscriptions, sent queries, inboxes, preferences and receivers, `org_id` selects the recipient/delivery organization. App catalog and type-management routes use the app’s owning organization and retain their Honeycomb permission checks.
+
 | Value | v1 rule |
 | --- | --- |
 | `created_at` | RFC 3339 UTC string ending in `Z`; server-assigned acceptance time, not the originating app's event time. |
@@ -205,7 +207,7 @@ WebSocket `send` and `subscribe` may carry the same header pair in `headers`. Co
 
 ## Ting types
 
-These routes require a Ting session with current Honeycomb permission to manage the named app. App visibility alone is insufficient.
+These routes use the app’s owning organization and require a Ting session with current Honeycomb permission: view permission to list types, management permission to register or update them. Receiving an app’s tings in another organization grants no type-management authority.
 
 | Method and path | Input | Success |
 | --- | --- | --- |
@@ -256,7 +258,7 @@ Requires an IAM App Proof Token. The signed body is:
 
 ```json
 {
-  "org_id": "tos",
+  "org_id": "bricks",
   "type": "tos>dm.msg.received",
   "data": {"message_id": "dm_456", "text": "Hello"},
   "metadata": {},
@@ -264,6 +266,8 @@ Requires an IAM App Proof Token. The signed body is:
   "key": "dm-456"
 }
 ```
+
+Here `tos>dm` owns the type, and `bricks` is the recipient’s organization. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
 
 All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Optional `delivery: "required"` selects the separately authorized automation path below; omit it for ordinary notification delivery. Reject other delivery values and caller-assigned `id`, `created_at`, `silent` or `read`.
 
