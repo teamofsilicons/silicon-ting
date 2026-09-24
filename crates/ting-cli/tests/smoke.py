@@ -11,6 +11,8 @@ import threading
 
 received = []
 exchanges = []
+me_response = (200, {'id':'si:test','kind':'silicon','authenticated':True})
+login_response = None
 class API(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def respond(self, status, value):
@@ -21,7 +23,7 @@ class API(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         received.append((self.path, self.headers.get('Authorization'), b''))
         if self.path == '/v1/me':
-            self.respond(200, {'id':'si:test','kind':'silicon','authenticated':True})
+            self.respond(*me_response)
         elif self.path == '/v1/orgs':
             self.respond(200, {'items':[{'id':'org-canonical','handle':'tos','name':'TOS'}]})
         else: self.respond(200, {'items':[]})
@@ -37,7 +39,11 @@ class API(http.server.BaseHTTPRequestHandler):
             # An unreadable first result must leave the original operation recoverable.
             result = {'id':'si:test','kind':'silicon','authenticated':True}
             if len(exchanges) > 1: result['session_token']='private-session-test'
-            self.respond(201, result)
+            status, result = login_response or (201, result)
+            if status == 0:
+                self.close_connection = True
+                return
+            self.respond(status, result)
         elif self.path == '/v1/sent/read':
             data = json.loads(body)
             self.respond(200, {key: data[key] for key in ('message_ids', 'read')})
@@ -110,5 +116,44 @@ with tempfile.TemporaryDirectory() as d:
     cli('inbox','list','--api-url','https://different.example',code=1)
     assert len(received)==count
     assert cli('config','set','telemetry.enabled','false')['value'] is False
+    session_path = Path(d, '.ting', 'session.json')
+    for state in ['valid', 'expired', 'revoked']:
+        me_response = (200, {'id':json.loads(session_path.read_text())['id']}) if state == 'valid' else (401, {
+            'error':{'code':'session_expired' if state == 'expired' else 'authentication_required','message':state,'hint':'','retryable':False}})
+        assert cli('login', 'status')['authenticated'] is (state == 'valid')
+        login_response = (201, {'id':f'si:{state}', 'session_token':f'private-session-test-{state}'})
+        count = len(exchanges)
+        if state == 'expired':
+            result = cli('login', '--token-stdin', text=f'replacement-{state}\n')
+        else:
+            result = cli('login', f'replacement-{state}')
+        assert result == {'authenticated':True, 'id':f'si:{state}'}
+        assert len(exchanges) == count + 1
+        assert json.loads(exchanges[-1][1]) == {'slt':f'replacement-{state}'}
+        saved = json.loads(session_path.read_text())
+        assert saved['id'] == f'si:{state}' and saved['token'] == f'private-session-test-{state}'
+        assert not attempt_path.exists()
+        if os.name != 'nt': assert session_path.stat().st_mode & 0o777 == 0o600
+    for failure, code in [
+        ((201, {'id':'si:replacement'}), 'connection_failed'),
+        ((503, {'error':{'code':'unavailable','message':'Retry','hint':'','retryable':True}}), 'unavailable'),
+        ((0, None), 'connection_failed'),
+    ]:
+        original = session_path.read_bytes()
+        login_response = failure
+        assert cli('login', 'replacement-retry', code=1)['error']['code'] == code
+        assert session_path.read_bytes() == original
+        pending = attempt_path.read_bytes()
+        exchange = exchanges[-1]
+        count = len(received)
+        assert cli('logout', code=1)['error']['code'] == 'login_cleanup_pending'
+        assert cli('login', 'different-token', code=1)['error']['code'] == 'login_attempt_pending'
+        assert len(received) == count
+        assert session_path.read_bytes() == original and attempt_path.read_bytes() == pending
+        login_response = (201, {'id':'si:replacement', 'session_token':f'private-session-test-{len(exchanges)}'})
+        assert cli('login', '--recover') == {'authenticated':True, 'id':'si:replacement'}
+        assert exchanges[-1] == exchange
+        assert json.loads(session_path.read_text())['token'] == login_response[1]['session_token']
+        assert not attempt_path.exists()
 server.shutdown()
-print('CLI smoke passed: login, canonical org, exact proof bytes, sent read/unread, private files, input rejection, origin isolation.')
+print('CLI smoke passed: login replacement/recovery, canonical org, exact proof bytes, sent read/unread, private files, input rejection, origin isolation.')

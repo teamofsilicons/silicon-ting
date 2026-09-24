@@ -70,7 +70,7 @@ After identifier migration, log out and log in again with current IAM metadata, 
 | `ting login status` | `{ "authenticated": true, "id": "si:assistant" }` |
 | `ting logout` | `{ "authenticated": false }` |
 
-Use exactly one login source: positional `TOKEN` or `--token-stdin`. Only an IAM short-lived login token can log in; a password, OBO proof or App Proof Token cannot. A different identity cannot replace an occupied profile: run `logout` first or select a separate `SILICON_HOME`.
+Use exactly one login source: positional `TOKEN` or `--token-stdin`. Only an IAM short-lived login token can log in; a password, OBO proof or App Proof Token cannot. Login replaces this profile's saved session without requiring `logout`, including expired or revoked sessions. The current session is kept until the new exchange succeeds. Successful replacement stops the previous session's local forwarding; explicitly reattach webhooks for the new session. Use a separate `SILICON_HOME` to keep identities in separate profiles.
 
 Flow: CLI posts `{ "slt": "..." }` to `POST /v1/session` → Ting exchanges it with IAM using Ting's app secret → Ting keeps IAM access and refresh tokens on the backend → CLI privately stores the returned opaque Ting session token. Login prints only authentication status and identity. Later recipient requests use that Ting session token in `Authorization: Bearer ...`.
 

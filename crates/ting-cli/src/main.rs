@@ -454,11 +454,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 Err(e) => Err(e),
             };
         }
-        if profile.read::<Session>("session.json")?.is_some() {
-            return Err(Error::input(
-                "This profile already holds a session. Run logout or use another SILICON_HOME.",
-            ));
-        }
+        let previous_session = profile.read::<Session>("session.json")?;
         let previous = profile.read::<Value>("login-attempt.json")?;
         let slt = match (s(m, "token"), b(m, "token-stdin"), b(m, "recover")) {
             (Some(t), false, false) => {
@@ -522,22 +518,33 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 .into(),
             context: v.get("context").cloned(),
         };
+        if let Some(old) = previous_session {
+            if let Err(e) = ipc(
+                json!({"op":"logout","profile":profile.dir,"api_url":old.api_url,"session_token":old.token}),
+            )
+            .await
+            {
+                if e.code != "daemon_unavailable" {
+                    return Err(e);
+                }
+            }
+        }
         profile.save("session.json", &sess)?;
         profile.remove("login-attempt.json")?;
         return Ok(json!({"authenticated":true,"id":sess.id}));
     }
     if name == "logout" {
+        if profile.read::<Value>("login-attempt.json")?.is_some() {
+            return Err(Error::new(
+                "login_cleanup_pending",
+                "A previous login still has an uncertain outcome.",
+                "Use login --recover with the original API and selector, then log out the recovered session.",
+                false,
+            ));
+        }
         let sess = match profile.session(&api) {
             Ok(s) => s,
             Err(e) if e.code == "authentication_required" => {
-                if profile.read::<Value>("login-attempt.json")?.is_some() {
-                    return Err(Error::new(
-                        "login_cleanup_pending",
-                        "A previous login still has an uncertain outcome.",
-                        "Use login --recover with the original API and selector, then log out the recovered session.",
-                        false,
-                    ));
-                }
                 return Ok(json!({"authenticated":false}));
             }
             Err(e) => return Err(e),
