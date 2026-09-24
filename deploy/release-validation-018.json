@@ -1,0 +1,29 @@
+{
+  "checked_at": "2026-09-24T10:57:54.740261+00:00",
+  "version": "0.1.8",
+  "source_commit": "ebde4c2a824931cfcc21eb5ec3afbd366c2f2767",
+  "workspace_unit_tests": {
+    "cli": 1,
+    "client": 14,
+    "daemon": 6,
+    "server": 52,
+    "total": 73
+  },
+  "compiling_doctests": 1,
+  "workspace_build": "passed",
+  "cli_smoke": "passed",
+  "packaging_tests": 5,
+  "unix_installer_tests": 1,
+  "formatting": "passed",
+  "documentation_and_installer_mirrors": "passed",
+  "frontend_unit_tests": 2,
+  "frontend_build": "passed",
+  "feature_regressions": [
+    "Valid, expired, and revoked saved sessions can be replaced without logout.",
+    "Positional and stdin token sources can replace a different saved identity.",
+    "Malformed success, HTTP 503, and dropped connection preserve the previous session.",
+    "Pending replacement attempts survive logout and different-token login attempts.",
+    "Recovery reuses the original idempotency key and request body.",
+    "Replacement session files retain private Unix permissions and tokens are not printed."
+  ]
+}

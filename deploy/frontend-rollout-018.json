@@ -1,0 +1,172 @@
+{
+  "checked_at": "2026-09-24T11:03:31.213778+00:00",
+  "release": "0.1.8",
+  "source_commit": "ebde4c2a824931cfcc21eb5ec3afbd366c2f2767",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_5r4HhxD5EYLbZRL7KAsWxFgZR285",
+    "url": "https://silicon-ting-6t8i5f269-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/5r4HhxD5EYLbZRL7KAsWxFgZR285",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "promoted": true,
+    "project_and_domains_preserved": true,
+    "promotion_waited_for_native_release_and_backend": true,
+    "source_input": "Clean git archive of the pinned commit; existing project binding only; dry run verified precisely 21 tracked web source files with no local dependencies, build output, or credentials uploaded."
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "source_mirrors": "passed",
+    "production_telemetry_tables_preserved": true,
+    "telemetry_build_inputs": [
+      "VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics",
+      "VITE_SS_EVENTS_TABLE=tingfrontendevents"
+    ]
+  },
+  "staged_checks": {
+    "/install.sh": {
+      "matches_tested_build": true,
+      "sha256": "a72b470382a998a49700e044a211ce7e042ae5313fe9dff3eea7d147b62661dd"
+    },
+    "/": {
+      "matches_tested_build": true,
+      "sha256": "814b2874e20914ed72a6384b98cf94f4e09157a08aa0e738df042e7dad55bd5f"
+    },
+    "/docs/cli.md": {
+      "matches_tested_build": true,
+      "sha256": "8c4fb7ecf1dae4361bfb9529fbb644d15e004251e885387cc51b392add6bb8c5"
+    },
+    "/docs/api.md": {
+      "matches_tested_build": true,
+      "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3"
+    },
+    "/docs/understanding.md": {
+      "matches_tested_build": true,
+      "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4"
+    },
+    "/install.ps1": {
+      "matches_tested_build": true,
+      "sha256": "a1308fd0b145f23a5fee2464c103ae5b561ba33b7b57b9b2779ea528065593da"
+    },
+    "/assets/index-BbForarz.css": {
+      "matches_tested_build": true,
+      "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0"
+    },
+    "/assets/index-vh7i7rh7.js": {
+      "matches_tested_build": true,
+      "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5"
+    }
+  },
+  "public_resources_by_origin": {
+    "https://ting.teamofsilicons.com": {
+      "/": {
+        "status": 200,
+        "sha256": "814b2874e20914ed72a6384b98cf94f4e09157a08aa0e738df042e7dad55bd5f",
+        "matches_tested_production_build": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "8c4fb7ecf1dae4361bfb9529fbb644d15e004251e885387cc51b392add6bb8c5",
+        "matches_tested_production_build": true,
+        "login_replacement_contract_present": true
+      },
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3",
+        "matches_tested_production_build": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4",
+        "matches_tested_production_build": true
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "a72b470382a998a49700e044a211ce7e042ae5313fe9dff3eea7d147b62661dd",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.8"
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "a1308fd0b145f23a5fee2464c103ae5b561ba33b7b57b9b2779ea528065593da",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.8"
+      },
+      "/assets/index-BbForarz.css": {
+        "status": 200,
+        "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-vh7i7rh7.js": {
+        "status": 200,
+        "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5",
+        "matches_tested_production_build": true,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      }
+    },
+    "https://silicon-ting.vercel.app": {
+      "/": {
+        "status": 200,
+        "sha256": "814b2874e20914ed72a6384b98cf94f4e09157a08aa0e738df042e7dad55bd5f",
+        "matches_tested_production_build": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "8c4fb7ecf1dae4361bfb9529fbb644d15e004251e885387cc51b392add6bb8c5",
+        "matches_tested_production_build": true,
+        "login_replacement_contract_present": true
+      },
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3",
+        "matches_tested_production_build": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4",
+        "matches_tested_production_build": true
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "a72b470382a998a49700e044a211ce7e042ae5313fe9dff3eea7d147b62661dd",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.8"
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "a1308fd0b145f23a5fee2464c103ae5b561ba33b7b57b9b2779ea528065593da",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.8"
+      },
+      "/assets/index-BbForarz.css": {
+        "status": 200,
+        "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-vh7i7rh7.js": {
+        "status": 200,
+        "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5",
+        "matches_tested_production_build": true,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      }
+    }
+  },
+  "limitations": [
+    "Static resource and asset bytes were checked against the actual public production origins. No authenticated IAM browser flow was exercised; frontend application source is unchanged in this release.",
+    "Backend protocol and release publication checks are recorded separately."
+  ]
+}

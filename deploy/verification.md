@@ -1,8 +1,22 @@
 # Deployment verification
 
-Updated 2026-09-23 UTC. Backend **0.1.7**, release source `2b398fa41ca34847d73718e3339c0754b798dd01`, is [deployed and healthy](backend-017-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
+Updated 2026-09-24 UTC. Backend **0.1.8**, release source `ebde4c2a824931cfcc21eb5ec3afbd366c2f2767`, is [deployed and healthy](backend-018-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.1.7 release
+## Current 0.1.8 release
+
+`ting login` replaces an existing valid, expired, or revoked saved session without requiring logout. Failed exchanges preserve the old session and pending recovery attempt. A successful replacement stops the old session's local webhook forwarding; callers explicitly reattach webhooks for the new session.
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [73 workspace unit tests and one compiling doctest passed](release-validation-018.json), plus workspace build, expanded login replacement/recovery CLI smoke, five packaging tests, one installer test, formatting and documentation/installer mirrors. |
+| Native and Honeycomb | [All six native builds and publication passed](native-honeycomb-release-018-results.json). Every archive matches its checksum. Honeycomb production is publicly published at 0.1.8; anonymous app and release access return 200. The earlier public-catalog blocker is resolved. |
+| Crates | [Client and CLI 0.1.8 are published and non-yanked](crates-release-018-results.json). Downloaded archive checksums and clean embedded source commits match the release. |
+| Backend | [All three backend workflow jobs and SSM deployment checks passed](backend-018-deployment-results.json). The archive checksum and embedded commit were verified; public health reports 0.1.8. |
+| Frontend | [Vercel production promotion and 16 public resource comparisons passed](frontend-rollout-018.json). Both public domains serve source-matching assets, login docs and 0.1.8 installers; telemetry build settings are preserved. Two frontend tests and the production build passed. |
+| Public boundaries | [45 live HTTP/CORS checks passed](public-browser-smoke-018-results.json) across backend and frontend proxy without notification writes. |
+| Live login replacement | [Published 0.1.8 CLI passed real IAM login and session replacement](live-login-replacement-018-results.json): valid saved credentials were replaced; a server-revoked credential remained on disk, status reported unauthenticated, and fresh login succeeded without logout. All three isolated test sessions were revoked and confirmed unauthorized afterward. Natural expiry and webhook delivery were not exercised. |
+
+## Historical 0.1.7 release
 
 Apps can set their own retained tings read or unread through `POST /v1/sent/read` with a fresh exact-request IAM proof for `sent.read`. Updates validate the whole batch, preserve webhook receipts and retention, and safely replay operation keys without overwriting newer state.
 
