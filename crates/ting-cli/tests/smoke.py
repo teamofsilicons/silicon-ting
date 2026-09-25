@@ -14,6 +14,7 @@ from pathlib import Path
 import select
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -328,14 +329,23 @@ with tempfile.TemporaryDirectory() as d:
                 assert len(pids) == 1 and os.getsid(pids[0]) == pids[0]
                 row('10: a start from a controlling terminal prints no polkit text and detaches')
             # 3: SIGKILL leaves a stale socket; the next command replaces it.
+            def refused():
+                # Inode numbers are reused after unlink, so test the socket itself.
+                probe = socket.socket(socket.AF_UNIX)
+                try:
+                    probe.connect(str(socket_dir / 'daemon.sock'))
+                    return False
+                except ConnectionRefusedError:
+                    return True
+                finally:
+                    probe.close()
             killed = daemons()[0]
-            inode = None if WINDOWS else os.lstat(socket_dir / 'daemon.sock').st_ino
             stop(killed, force=True)
-            if not WINDOWS: assert os.path.lexists(socket_dir / 'daemon.sock'), 'SIGKILL should leave a stale socket'
+            if not WINDOWS: assert os.path.lexists(socket_dir / 'daemon.sock') and refused(), 'SIGKILL should leave a stale socket'
             assert connected('--id', hook_id) == hook_id
             pids = daemons()
             assert len(pids) == 1 and pids[0] != killed
-            if not WINDOWS: assert os.lstat(socket_dir / 'daemon.sock').st_ino != inode
+            if not WINDOWS: assert not refused(), 'the stale socket was not replaced'
             row('3: after SIGKILL the next webhook recovers and replaces the stale socket')
             # 2: concurrent starts end with one daemon.
             stop(pids[0], force=WINDOWS)
