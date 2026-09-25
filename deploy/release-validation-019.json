@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-09-25T11:00:53.788630+00:00",
+  "version": "0.1.9",
+  "source_commit": "6853b4e247f434e358f4bbd05e5d23d5ae7870cd",
+  "workspace_unit_tests": {
+    "cli": 7,
+    "client": 15,
+    "daemon": 6,
+    "server": 52,
+    "total": 80
+  },
+  "compiling_doctests": 1,
+  "workspace_build": "passed",
+  "cli_smoke": "passed",
+  "packaging_tests": 5,
+  "unix_installer_tests": 1,
+  "formatting": "passed",
+  "documentation_and_installer_mirrors": "passed",
+  "frontend_unit_tests": 2,
+  "frontend_build": "passed",
+  "cross_compilation": [
+    "x86_64-pc-windows-msvc (cargo-xwin)",
+    "x86_64-unknown-linux-gnu.2.39 (cargo-zigbuild)",
+    "aarch64-unknown-linux-gnu.2.39 (cargo-zigbuild)"
+  ],
+  "feature_regressions": [
+    "A missing daemon is started on demand as the calling account: no sudo, prompt, installer or service manager.",
+    "Healthy daemons are only probed; no systemctl, launchctl, schtasks or ting-daemon subprocess.",
+    "Installed services are asked with systemctl --no-ask-password only, then replaced by an on-demand daemon if they stay down.",
+    "Concurrent starters serialize on ~/.ting-daemon/startup.lock and leave exactly one daemon.",
+    "Spawned daemons lead their own session, read /dev/null and write only ~/.ting-daemon/daemon.log.",
+    "A socket directory owned by another account returns daemon_identity_mismatch and spawns nothing.",
+    "SIGTERM removes daemon.sock; after SIGKILL the next command replaces the stale socket.",
+    "ting-daemon --version exits 0 and unknown arguments exit 2 without creating the socket."
+  ]
+}

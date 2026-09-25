@@ -1,8 +1,21 @@
 # Deployment verification
 
-Updated 2026-09-24 UTC. Backend **0.1.8**, release source `ebde4c2a824931cfcc21eb5ec3afbd366c2f2767`, is [deployed and healthy](backend-018-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
+Updated 2026-09-25 UTC. Ting **0.1.9**, release source `6853b4e247f434e358f4bbd05e5d23d5ae7870cd`, is published natively, on Honeycomb and on crates.io. Backend **0.1.8**, release source `ebde4c2a824931cfcc21eb5ec3afbd366c2f2767`, remains [deployed and healthy](backend-018-deployment-results.json); the 0.1.9 backend archive is built but not yet deployed, and the frontend still serves the 0.1.8 installers. Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.1.8 release
+## Current 0.1.9 release
+
+After a Honeycomb-only install, the first `ting webhook` starts the daemon itself, as the calling account, with no sudo, prompt, installer or service manager. The CLI connects first and starts nothing while a daemon answers. An installed system service is still preferred but is only asked with `systemctl --no-ask-password`. The sudo installer is now optional start-at-boot supervision. New `ting daemon start` needs no login and suits a liveness tick.
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [80 workspace unit tests and one compiling doctest passed](release-validation-019.json), including six on-demand start tests against temporary paths, plus workspace build, CLI smoke, five packaging tests, one installer test, formatting, mirrors, two frontend tests, the frontend build and Windows/Linux cross-compilation. |
+| On-demand daemon acceptance | [Rows 1–10 passed in the tagged release run](native-honeycomb-release-019-results.json) on native runners, run exactly as Silicon runs `ting` (stdin null, captured output, 30-second bound): Linux x86_64 all ten rows, including an installed running and stopped systemd unit; Linux ARM64 and both macOS targets rows 1–6, 9 and 10; both Windows targets rows 1, 2, 3, 5 and 9. A new `no-systemd` job passed the same Unix rows in an `ubuntu:24.04` container as an unprivileged user. Row 5 used strace on Linux. Systemd 258+ polkit behaviour (row 10) was checked only as a terminal-attached start on systemd 255; Ubuntu 26.04 and a fresh EC2 `silicon connect` remain manual checks. |
+| Native and Honeycomb | [All six native builds, the no-systemd job and publication passed](native-honeycomb-release-019-results.json). Every archive matches `SHA256SUMS`. Honeycomb production is publicly published at 0.1.9 with the new `SERVICE.md`; anonymous app and release access return 200 and older releases remain. The published macOS binary reports 0.1.9 and, beside an existing 0.1.x LaunchDaemon, only probes it. |
+| Crates | [Client and CLI 0.1.9 are published and non-yanked](crates-release-019-results.json). Downloaded archive checksums and clean embedded source commits match the release. |
+| Backend | [Backend workflow](https://github.com/teamofsilicons/silicon-ting/actions/runs/36125738790) passed all three jobs for `server-6853b4e247f434e358f4bbd05e5d23d5ae7870cd`. SSM deployment is pending; the server code is unchanged from 0.1.8 apart from its version. |
+| Frontend | Pending: Vercel promotion of the 0.1.9 docs and installers has not run. |
+
+## Historical 0.1.8 release
 
 `ting login` replaces an existing valid, expired, or revoked saved session without requiring logout. Failed exchanges preserve the old session and pending recovery attempt. A successful replacement stops the old session's local webhook forwarding; callers explicitly reattach webhooks for the new session.
 
