@@ -2004,20 +2004,22 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-cli"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "libc",
  "serde",
  "serde_json",
  "silicon-ting-client",
  "tokio",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "silicon-ting-client"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "futures-util",
  "libc",
@@ -2035,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-daemon"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2053,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "silicon-ting-server"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "aes-gcm",
  "anyhow",

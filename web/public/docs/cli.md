@@ -23,7 +23,7 @@ For server requests and delivery messages, see [api.md](api.md).
 
 Identity-specific files live inside `$SILICON_HOME/.ting/`. If `SILICON_HOME` is absent, use the real home directory: `~/.ting/`. An explicitly empty or unusable home is an error. Resolve relative file arguments against the caller's working directory. Create private directories with mode `0700` and files with `0600`, or equivalent owner-only Windows ACLs; replace settings atomically.
 
-There is one daemon per system, managed by the platform service manager. Its discovery endpoint is independent of `SILICON_HOME`; shared state lives in the service owner's real `~/.ting-daemon/`. Concurrent CLI starts must connect to the same service, never launch a daemon per profile. Recipient IPC validates the local caller, profile access and that profile's private Ting session credential; naming another profile directory does not authenticate its identity. A proof-only send passes its supplied proof for server verification and gives no authority over recipient hooks.
+There is one daemon per system, supervised by the platform service manager when installed, otherwise started on demand by the CLI as its owner. Its discovery endpoint is independent of `SILICON_HOME`; shared state lives in the owner's real `~/.ting-daemon/`. Concurrent CLI starts must end with one daemon, never a daemon per profile. Recipient IPC validates the local caller, profile access and that profile's private Ting session credential; naming another profile directory does not authenticate its identity. A proof-only send passes its supplied proof for server verification and gives no authority over recipient hooks.
 
 The daemon uses one shared, prewarmed WebSocket and keeps each identity's permissions separate. Carbons and silicons use the same CLI and webhook commands, each managing only their own hooks, inbox and settings. A stored session is tied to its API URL and verified normal or test context; an override cannot silently reuse it against another server or context.
 
@@ -277,6 +277,7 @@ Turning a preference off stores new tings silently. It does not revoke the app's
 | `ting webhook URL --id hook_123 --takeover` | Same output; explicitly transfers an active registration from another receiver. |
 | `ting webhook list` | `{ "items": [{ "id": "hook_123", "for": "si:assistant", "url": "http://localhost:3000/ting", "state": "connected", "pending": 0 }] }` |
 | `ting unhook hook_123` | `{ "id": "hook_123", "removed": true }` |
+| `ting daemon start` | `{ "running": true }` |
 | `ting daemon status` | `{ "running": true, "socket_connected": true, "pending": 0 }` |
 | `ting daemon reconnect` | `{ "reconnected": true }` |
 
@@ -300,9 +301,11 @@ The URL, health URL and secret stay local to the daemon. They are not sent to th
 
 One hook can have only one active receiver. Updating a registration attached to another active receiver returns `409` unless `--takeover` is supplied with `--id`. Takeover must verify the same recipient's ownership, revoke the former binding, attach the new one and replay unfinished deliveries. The new daemon uses the URL and local settings supplied by this command; it cannot fetch the old machine's secret. Without takeover, an active foreign binding cannot be edited. If no receiver is active, explicit `--id` can reattach the owned registration.
 
-`webhook`, WebSocket sends and `daemon reconnect` start the shared daemon if needed. `state: connected` means the receiver connection and subscription are active, not that the local webhook just accepted a ting. Print connected success only after the verified response confirms the attachment. If a later local step fails after the ID is known, include it in `error.details.webhook_id` so the caller can resume with `--id`; never create a replacement hook automatically.
+`webhook`, WebSocket sends, `daemon reconnect` and `daemon start` start the shared daemon if needed. They connect first; only when nothing answers does the CLI start the `ting-daemon` installed beside it, detached and as the calling account, with no sudo or prompt. An installed system service is preferred but never asked for credentials. The daemon's own output goes to `~/.ting-daemon/daemon.log`. If another account owns `/var/tmp/silicon-ting`, these commands fail with `daemon_identity_mismatch` and start nothing; login, logout and `unhook` skip the local step. `state: connected` means the receiver connection and subscription are active, not that the local webhook just accepted a ting. Print connected success only after the verified response confirms the attachment. If a later local step fails after the ID is known, include it in `error.details.webhook_id` so the caller can resume with `--id`; never create a replacement hook automatically.
 
 Registration states are `connected`, `disconnected`, `paused` and `detached`. Webhook lists include all four. Their `pending` counts unfinished copies, including those currently held by preferences or permissions; it is not an overall unread count. Paginate webhook lists through the normal list flags.
+
+`daemon start` needs no login or selected org and sends no request to the daemon. It returns `{ "running": true }` once the daemon answers. With a running daemon it only probes the socket and never resets hook retry windows, so a caller may run it periodically as a liveness check.
 
 `daemon status` never starts the daemon. It reports process/socket status and the current identity's unfinished delivery-copy count in the selected org. If the daemon is absent, return `{ "running": false, "socket_connected": false, "pending": null }`. If the server count cannot be established, use `pending: null`, not zero.
 
@@ -341,7 +344,7 @@ If a batch is only partly accepted, or its response is lost, retrying can repeat
 
 With `--health-url`, active recovery sends `HEAD` every 5 seconds with a 2-second timeout and the same configured webhook secret. While the probe is unhealthy, it replaces payload attempts. A `2xx` response permits a delivery retry only after at least 60 seconds since the last payload failure. `405` or `501` disables the probe and restores the ordinary 60-second payload retry schedule. Other probe failures keep waiting without sending ting payloads. A probe never ACKs a ting. Stop probing at the 12-hour cutoff.
 
-The daemon checks its forwarding workers every 5 seconds. It restarts a due job more than 15 seconds late from the durable queue, without resetting the shared socket. Scheduled retry waits do not count as stalls. This preserves the server's delivery-ACK retry suppression while recovering stalled local work. The OS service manager restarts a daemon that fails its process health check.
+The daemon checks its forwarding workers every 5 seconds. It restarts a due job more than 15 seconds late from the durable queue, without resetting the shared socket. Scheduled retry waits do not count as stalls. This preserves the server's delivery-ACK retry suppression while recovering stalled local work. When installed, the OS service manager restarts a daemon that fails its process health check; otherwise the next start-capable command starts it again.
 
 WebSocket ping runs every 30 seconds with a 10-second pong timeout. Connection recovery backs off through 1, 2, 4, 8, 16 and then 30 seconds, with up to 20% jitter and a 30-second cap; reset the backoff after one healthy minute. Losing the socket or authorization pauses local forwarding until the identity reauthenticates; reconnect resubscribes retained, attached registrations. Explicitly unhooked hooks stay detached and hooks paused at the 12-hour cutoff require the explicit resume commands above.
 

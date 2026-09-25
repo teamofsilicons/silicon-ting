@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the published CLI and one system service. No IAM login is performed.
 set -eu
-VERSION=${TING_VERSION:-v0.1.8}
+VERSION=${TING_VERSION:-v0.1.9}
 REPOSITORY=https://github.com/teamofsilicons/silicon-ting
 PREFIX=${TING_INSTALL_PREFIX:-/usr/local}
 case "$(uname -s)" in Darwin) OS=apple-darwin;; Linux) OS=unknown-linux-gnu;; *) echo 'Use the PowerShell installer on Windows; this shell installer supports macOS and Linux.' >&2; exit 1;; esac
@@ -84,5 +84,7 @@ UNIT
   sudo install -m 644 "$TMP/silicon-ting.service" /etc/systemd/system/silicon-ting.service
   sudo systemctl daemon-reload
   sudo systemctl enable --now silicon-ting.service
+  # enable --now leaves an already-running daemon on its old binary.
+  sudo systemctl restart silicon-ting.service
 fi
 printf 'Installed Ting %s and the shared system service. Run: ting --help\n' "$VERSION"

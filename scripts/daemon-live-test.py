@@ -5,7 +5,8 @@ Dependencies: requests, websocket-client, aiohttp. Run only after live-test.py:
   python scripts/daemon-live-test.py --fixture deploy/private/live-test.json
 No mocked API responses: a loopback relay only observes and suppresses selected
 WebSocket ACKs. Latency samples bypass that relay. Requires no existing daemon
-or daemon state; only this script's foreground process and directories are removed.
+or daemon state, and ting-daemon installed beside ting: the first phase lets the CLI
+start it on demand. Only this script's daemons and directories are removed.
 """
 import argparse
 import asyncio
@@ -21,6 +22,7 @@ import pwd
 import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import threading
@@ -273,10 +275,28 @@ class Run:
         self.cli("unhook", hid)
         self.hooks.remove(hid)
 
+    def on_demand(self):
+        # With no socket directory, daemon or unit, the CLI starts ting-daemon itself, as Silicon calls it.
+        result = subprocess.run([self.args.ting, "--json", "webhook", self.destinations.origin + "/on-demand"],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, env=self.env, timeout=30)
+        assert result.returncode == 0, "On-demand webhook failed"
+        value = json.loads(result.stdout)
+        self.hooks.append(value["id"])
+        assert value["state"] == "connected"
+        pids = [int(p) for p in subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True, text=True).stdout.split()]
+        assert len(pids) == 1 and os.getsid(pids[0]) == pids[0], "On-demand daemon is not one detached process"
+        info = os.lstat(self.socket_dir)
+        assert stat.S_ISDIR(info.st_mode) and info.st_mode & 0o777 == 0o700 and info.st_uid == os.getuid()
+        self.detach(value["id"])
+        os.kill(pids[0], signal.SIGTERM)
+        wait_for(lambda: subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True).returncode != 0, "on-demand daemon exit")
+        assert not (self.socket_dir / "daemon.sock").exists(), "SIGTERM left a stale socket"
+        self.mark("CLI starts one detached daemon on demand without sudo or an installer; SIGTERM removes its socket")
+
     def run(self):
         if self.state_dir.exists() or self.socket_dir.exists() or subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True).returncode == 0:
             raise AssertionError("Existing daemon/state detected; refusing to touch another daemon")
-        self.socket_dir.mkdir(mode=0o700)
+        # Absent at start: the daemon creates both directories, and they belong only to this run.
         self.created_socket_dir = True
         self.report["cli_version"] = self.cli("--version")["version"]
         self.report["binary_sha256"] = {name: hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
@@ -295,6 +315,7 @@ class Run:
                 break
             self.checks.http("POST", self.checks.prefix + "/inbox/read", {"message_ids": ids})
         self.checks.app_call("/v1/subscriptions", {"org_id": self.checks.org, "app_id": self.checks.app, "for": self.checks.actor}, expected=(200, 201))
+        self.on_demand()
         if not self.args.latency_only:
             self.start()
             self.sender = self.checks.socket()
@@ -391,6 +412,14 @@ class Run:
                 self.checks.http("DELETE", "/v1/session", token=session)
             except Exception:
                 self.report.setdefault("cleanup_errors", []).append("session_revoke")
+        # No daemon ran at startup, so any left now (e.g. an on-demand one) belongs to this run.
+        if self.created_socket_dir:
+            for pid in subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True, text=True).stdout.split():
+                os.kill(int(pid), signal.SIGTERM)
+            try:
+                wait_for(lambda: subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True).returncode != 0, "daemon cleanup", timeout=15)
+            except AssertionError:
+                self.report.setdefault("cleanup_errors", []).append("daemon_stop")
         # These directories were absent at startup and belong only to this run.
         if self.created_socket_dir and subprocess.run(["pgrep", "-x", "ting-daemon"], capture_output=True).returncode != 0:
             shutil.rmtree(self.state_dir, ignore_errors=True)

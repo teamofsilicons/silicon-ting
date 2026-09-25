@@ -37,14 +37,7 @@ impl LocalListener {
                 io::AsRawFd,
             };
             let path = daemon_socket();
-            if !path.parent().unwrap().is_dir() {
-                return Err(Error::new(
-                    "service_not_installed",
-                    "The system service socket directory is missing.",
-                    "Run the Ting installer to register the shared service.",
-                    false,
-                ));
-            }
+            // Creates the directory 0700 if absent; refuses symlinks and other owners.
             private_dir(path.parent().unwrap())?;
             let lock = fs::OpenOptions::new()
                 .create(true)
@@ -57,8 +50,8 @@ impl LocalListener {
             if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
                 return Err(Error::new(
                     "daemon_running",
-                    "Another Ting daemon already owns this system service.",
-                    "Use the existing system service.",
+                    "Another Ting daemon is already running for this account.",
+                    "Use the running daemon.",
                     false,
                 ));
             }
@@ -1315,16 +1308,44 @@ async fn serve(shared: Shared, socket: LocalStream) {
 }
 #[tokio::main]
 async fn main() {
+    // Probes such as `ting-daemon --version` must never start a receiver.
+    let mut args = std::env::args_os().skip(1);
+    match (args.next(), args.next()) {
+        (None, _) => {}
+        (Some(a), None) if a == "--version" => {
+            println!("{}", json!({"version":env!("CARGO_PKG_VERSION")}));
+            return;
+        }
+        _ => {
+            eprintln!("Usage: ting-daemon [--version]");
+            std::process::exit(2)
+        }
+    }
     if let Err(e) = run().await {
         eprintln!("{e}");
         std::process::exit(1)
     }
+}
+/// Completes on Ctrl-C or, on Unix, SIGTERM from `kill` or a service manager.
+fn shutdown() -> Result<impl std::future::Future<Output = ()>> {
+    #[cfg(unix)]
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|_| Error::io())?;
+    Ok(async move {
+        #[cfg(unix)]
+        tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate.recv()=>{}}
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
+    })
 }
 async fn run() -> Result<()> {
     #[cfg(unix)]
     unsafe {
         libc::umask(0o077);
     }
+    // Registered before binding, so an early SIGTERM still removes the socket.
+    let shutdown = shutdown()?;
+    tokio::pin!(shutdown);
     let mut listener = LocalListener::bind()?;
     let dir = real_home()?.join(".ting-daemon");
     private_dir(&dir)?;
@@ -1349,7 +1370,7 @@ async fn run() -> Result<()> {
     let jobs = tokio::spawn(workers(shared.clone()));
     service_notify("READY=1");
     loop {
-        tokio::select! {result=listener.accept()=>{let socket=result?;tokio::spawn(serve(shared.clone(),socket));},_=tokio::signal::ctrl_c()=>break,_=async{while !sockets.is_finished()&&!jobs.is_finished(){tokio::time::sleep(Duration::from_secs(5)).await;}}=>return Err(Error::new("worker_stopped","A daemon supervisor stopped.","The platform service manager will restart Ting.",true))}
+        tokio::select! {result=listener.accept()=>{let socket=result?;tokio::spawn(serve(shared.clone(),socket));},_=&mut shutdown=>break,_=async{while !sockets.is_finished()&&!jobs.is_finished(){tokio::time::sleep(Duration::from_secs(5)).await;}}=>return Err(Error::new("worker_stopped","A daemon supervisor stopped.","Ting restarts on the next ting command, or under the platform service when installed.",true))}
     }
     #[cfg(unix)]
     let _ = fs::remove_file(daemon_socket());

@@ -43,10 +43,12 @@ jobs:
         run: cargo test --locked -p silicon-ting-client -p silicon-ting-cli -p silicon-ting-daemon --target ${{ matrix.target }}
       - name: Build release
         run: cargo build --locked --release -p silicon-ting-cli -p silicon-ting-daemon --target ${{ matrix.target }}
-      - name: CLI integration smoke
+      - name: CLI integration smoke and on-demand daemon
         shell: bash
         env:
           TING_BINARY: target/${{ matrix.target }}/release/ting${{ runner.os == 'Windows' && '.exe' || '' }}
+          # Also checks that an old install's systemd unit keeps working without a prompt.
+          TING_SMOKE_SYSTEM_SERVICE: ${{ matrix.target == 'x86_64-unknown-linux-gnu' && '1' || '' }}
         run: python3 crates/ting-cli/tests/smoke.py
       - name: Package Unix
         if: runner.os != 'Windows'
@@ -72,9 +74,32 @@ jobs:
           name: ting-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
+  no-systemd:
+    # Honeycomb-only installs have no service; Silicon's WSL distro has no systemd at all.
+    needs: build
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ting-x86_64-unknown-linux-gnu
+          path: dist
+      - name: On-demand daemon as an unprivileged user without systemd
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 procps sudo
+          test ! -d /run/systemd/system
+          if command -v systemctl; then echo 'This job must run without systemd.' >&2; exit 1; fi
+          # Like a stock EC2 ubuntu account: NOPASSWD sudo, which Ting must never use.
+          useradd --create-home smoke
+          echo 'smoke ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/smoke
+          mkdir /opt/ting
+          tar -xzf dist/ting-*-x86_64-unknown-linux-gnu.tar.gz -C /opt/ting
+          sudo -u smoke env CI=true TING_BINARY=/opt/ting/ting python3 crates/ting-cli/tests/smoke.py
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, no-systemd]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

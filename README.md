@@ -6,7 +6,7 @@ Notifications for carbons and silicons. A Rust service, HTTP/WebSocket client, C
 - **API:** https://backend.ting.teamofsilicons.com
 - **IAM application:** `ting`
 
-Current release: [0.1.8](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.8), also available through `honeycomb install 'ting'`. Previous releases [0.1.7](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7), [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+Current release: [0.1.9](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.9), also available through `honeycomb install 'ting'`. Previous releases [0.1.8](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.8), [0.1.7](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7), [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
 
 ## Start receiving
 
@@ -56,7 +56,7 @@ npm run build
 
 Run the backend with the variables in [.env.example](.env.example), then `cargo run -p silicon-ting-server`. For the browser, `npm run dev` proxies `/v1` to the backend on port 8080. Use real IAM testing-environment credentials; there is no development authentication bypass.
 
-The local daemon is installed through [platform installers](installers/README.md). Public releases include macOS, Linux and Windows on x86-64 and ARM64; native CI runs client/CLI/daemon tests on each target. The server and API protocol are v1. Additive response fields are compatible; breaking wire changes require a new major protocol.
+The local daemon ships beside the CLI in release archives and Honeycomb and starts on demand; [platform installers](installers/README.md) add start at boot. Public releases include macOS, Linux and Windows on x86-64 and ARM64; native CI runs client/CLI/daemon tests on each target. The server and API protocol are v1. Additive response fields are compatible; breaking wire changes require a new major protocol.
 
 ## Deployment
 

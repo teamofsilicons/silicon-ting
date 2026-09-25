@@ -24,25 +24,25 @@ Before the first client publication, the CLI packaging dry run can use the local
 cargo publish -p silicon-ting-cli --dry-run --allow-dirty --config 'patch.crates-io.silicon-ting-client.path="crates/ting-client"'
 ```
 
-Dispatch `.github/workflows/release.yml` to test native x86_64 and ARM64 builds on Linux, macOS and Windows. A `v0.1.8` tag runs the same checks and publishes six archives plus `SHA256SUMS` on the GitHub release. The workflow rejects a tag that does not match the binary version. Archives contain the CLI and shared daemon; their names match both installers.
+Dispatch `.github/workflows/release.yml` to test native x86_64 and ARM64 builds on Linux, macOS and Windows. A `v0.1.9` tag runs the same checks and publishes six archives plus `SHA256SUMS` on the GitHub release. The workflow rejects a tag that does not match the binary version. Archives contain the CLI and shared daemon; their names match both installers.
 
 To assemble the Honeycomb package from that completed release (Python 3.11+ and the Honeycomb CLI are required):
 
 ```sh
 mkdir -p dist/native
-gh release download v0.1.8 --repo teamofsilicons/silicon-ting --dir dist/native --pattern 'ting-v0.1.8-*' --pattern SHA256SUMS
-python3 scripts/package-honeycomb.py --assets dist/native --output dist/ting-honeycomb-0.1.8.tar.gz
-honeycomb validate dist/ting-honeycomb-0.1.8.tar.gz --json
+gh release download v0.1.9 --repo teamofsilicons/silicon-ting --dir dist/native --pattern 'ting-v0.1.9-*' --pattern SHA256SUMS
+python3 scripts/package-honeycomb.py --assets dist/native --output dist/ting-honeycomb-0.1.9.tar.gz
+honeycomb validate dist/ting-honeycomb-0.1.9.tar.gz --json
 ```
 
-The assembler verifies every archive against its published checksum, accepts only the two expected regular executable files, and runs Honeycomb's own pack validation. It requires all six real native build assets. `honeycomb.yaml` uses JSON syntax, which is valid YAML and readable without a YAML dependency. Its `bin` mappings expose both `ting` and `ting-daemon`. Honeycomb packs its manifest and target trees, so each platform directory carries `LICENSE` and `SERVICE.md`. Honeycomb cannot register system services through this manifest; the explicit installer step is documented there and in [README.md](README.md).
+The assembler verifies every archive against its published checksum, accepts only the two expected regular executable files, and runs Honeycomb's own pack validation. It requires all six real native build assets. `honeycomb.yaml` uses JSON syntax, which is valid YAML and readable without a YAML dependency. Its `bin` mappings expose both `ting` and `ting-daemon`. Honeycomb packs its manifest and target trees, so each platform directory carries `LICENSE` and `SERVICE.md`. Honeycomb cannot register system services through this manifest and needs none: the CLI starts the daemon on demand. The optional start-at-boot installer is documented in `SERVICE.md` and [README.md](README.md).
 
 Fetch the current application revision immediately before the upload. Keep the generated idempotency key and use that same key if a network failure makes the result uncertain. Replace `REVISION` with the numeric `revision` from `apps get`:
 
 ```sh
 honeycomb apps get 'ting' --json
 python3 -c 'import uuid; print(uuid.uuid4())' > dist/honeycomb-upload-key.txt
-honeycomb releases upload 'ting' dist/ting-honeycomb-0.1.8.tar.gz --channel prod --revision REVISION --idempotency-key "$(cat dist/honeycomb-upload-key.txt)" --json
+honeycomb releases upload 'ting' dist/ting-honeycomb-0.1.9.tar.gz --channel prod --revision REVISION --idempotency-key "$(cat dist/honeycomb-upload-key.txt)" --json
 honeycomb apps get 'ting' --json
 honeycomb releases list 'ting' --json
 ```

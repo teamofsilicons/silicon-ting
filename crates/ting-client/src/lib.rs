@@ -781,39 +781,75 @@ fn verify_unix_server(socket: &tokio::net::UnixStream, owner: u32) -> Result<()>
     }
     Ok(())
 }
+/// Maps a failed daemon connect: only a missing or refused endpoint may start a daemon.
+/// Access denied means another account owns the endpoint, where a second daemon cannot bind.
+pub fn daemon_connect_error(error: &std::io::Error) -> Error {
+    #[cfg(unix)]
+    let denied = error.kind() == std::io::ErrorKind::PermissionDenied;
+    #[cfg(windows)]
+    let denied = error.raw_os_error() == Some(5);
+    if denied {
+        return Error::new(
+            "daemon_identity_mismatch",
+            "The Ting socket belongs to another account.",
+            if cfg!(windows) {
+                "Stop that account's Ting daemon, or run as that account."
+            } else {
+                "Remove /var/tmp/silicon-ting as its owner, or run as that account."
+            },
+            false,
+        );
+    }
+    Error::new(
+        "daemon_unavailable",
+        "The Ting daemon is not running.",
+        "Run ting daemon start; log: ~/.ting-daemon/daemon.log",
+        true,
+    )
+}
+#[cfg(unix)]
+type DaemonStream = tokio::net::UnixStream;
+#[cfg(windows)]
+type DaemonStream = tokio::net::windows::named_pipe::NamedPipeClient;
+/// Connects to a daemon endpoint and verifies that it runs as this account.
+async fn connect_daemon(endpoint: &Path) -> Result<DaemonStream> {
+    #[cfg(unix)]
+    {
+        let socket = tokio::net::UnixStream::connect(endpoint)
+            .await
+            .map_err(|e| daemon_connect_error(&e))?;
+        verify_unix_server(&socket, unsafe { libc::geteuid() })?;
+        Ok(socket)
+    }
+    #[cfg(windows)]
+    {
+        let mut attempts = 0;
+        let pipe = loop {
+            match tokio::net::windows::named_pipe::ClientOptions::new().open(endpoint) {
+                Ok(s) => break s,
+                Err(e) if e.raw_os_error() == Some(231) && attempts < 20 => {
+                    attempts += 1;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(e) => return Err(daemon_connect_error(&e)),
+            }
+        };
+        windows::verify_pipe_server(&pipe)?;
+        Ok(pipe)
+    }
+}
+/// Whether this account's daemon answers at `endpoint`. Sends no request.
+pub async fn daemon_answers(endpoint: &Path) -> Result<bool> {
+    match connect_daemon(endpoint).await {
+        Ok(_) => Ok(true),
+        Err(e) if e.code == "daemon_unavailable" => Ok(false),
+        Err(e) => Err(e),
+    }
+}
 pub async fn ipc(request: Value) -> Result<Value> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let task = async {
-        let missing = || {
-            Error::new(
-                "daemon_unavailable",
-                "The system Ting service is not running.",
-                "Install or start the shared Ting service with the published installer.",
-                true,
-            )
-        };
-        #[cfg(unix)]
-        let mut socket = tokio::net::UnixStream::connect(daemon_socket())
-            .await
-            .map_err(|_| missing())?;
-        #[cfg(unix)]
-        verify_unix_server(&socket, unsafe { libc::geteuid() })?;
-        #[cfg(windows)]
-        let mut socket = {
-            let mut attempts = 0;
-            loop {
-                match tokio::net::windows::named_pipe::ClientOptions::new().open(daemon_socket()) {
-                    Ok(s) => break s,
-                    Err(e) if e.raw_os_error() == Some(231) && attempts < 20 => {
-                        attempts += 1;
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                    }
-                    Err(_) => return Err(missing()),
-                }
-            }
-        };
-        #[cfg(windows)]
-        windows::verify_pipe_server(&socket)?;
+        let mut socket = connect_daemon(&daemon_socket()).await?;
         let mut bytes =
             serde_json::to_vec(&request).map_err(|_| Error::input("Invalid daemon request."))?;
         bytes.push(b'\n');
@@ -896,6 +932,26 @@ mod tests {
             peer.try_read(&mut [0; 1]).unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
         );
+    }
+    #[test]
+    fn only_missing_daemon_endpoints_may_start_a_daemon() {
+        use std::io::{Error as Io, ErrorKind};
+        for kind in [
+            ErrorKind::NotFound,
+            ErrorKind::ConnectionRefused,
+            ErrorKind::TimedOut,
+        ] {
+            let e = daemon_connect_error(&Io::from(kind));
+            assert_eq!(e.code, "daemon_unavailable");
+            assert!(e.retryable);
+        }
+        #[cfg(unix)]
+        let denied = Io::from(ErrorKind::PermissionDenied);
+        #[cfg(windows)]
+        let denied = Io::from_raw_os_error(5);
+        let e = daemon_connect_error(&denied);
+        assert_eq!(e.code, "daemon_identity_mismatch");
+        assert!(!e.retryable);
     }
     #[test]
     fn strict_and_proof() {

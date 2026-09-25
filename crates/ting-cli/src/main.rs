@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use ting_client::*;
+mod service;
 fn a(name: &'static str) -> Arg {
     Arg::new(name).long(name).value_name(name.to_uppercase())
 }
@@ -84,7 +85,7 @@ fn cli() -> Command {
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
  .subcommand(command("unhook","Detach one destination while retaining its stable ID and pending history").arg(arg("id").required(true)))
- .subcommand(group("daemon","Inspect the one shared system receiver").subcommand(command("status","Report status without starting the service")).subcommand(command("reconnect","Resume this identity's attached or paused hooks in the selected org")))
+ .subcommand(group("daemon","Start or inspect the local Ting receiver").subcommand(command("start","Start the local receiver if it is not running; needs no login")).subcommand(command("status","Report status without starting the daemon")).subcommand(command("reconnect","Resume this identity's attached or paused hooks in the selected org")))
  .subcommand(group("config","Manage private profile settings").subcommand(command("list","List settings")).subcommand(command("get","Get a setting").arg(arg("key").required(true))).subcommand(command("set","Set a setting").arg(arg("key").required(true)).arg(arg("value").required(true).value_parser(["true","false"]))))
  .subcommand(group("bug","Submit an explicit bug report").subcommand(command("report","Upload supplied report and attachments to Ting support storage").arg(a("title").required(true)).arg(a("body").conflicts_with("body-file")).arg(a("body-file")).arg(a("attach").action(ArgAction::Append)).arg(a("pr"))))
 }
@@ -229,8 +230,7 @@ async fn execute_proof(
         let test = TestHeaders::environment()?;
         let api = origin(root)?;
         if op == ProofOperation::Send && s(m, "transport") == Some("websocket") {
-            start_service().await;
-            return ipc(json!({"op":"send","api_url":api,"proof_token":proof,"body":String::from_utf8(p.body).map_err(|_|Error::input("Request must be UTF-8."))?,"headers":test})).await;
+            return service::ipc_starting(json!({"op":"send","api_url":api,"proof_token":proof,"body":String::from_utf8(p.body).map_err(|_|Error::input("Request must be UTF-8."))?,"headers":test})).await;
         }
         let mut result = p.execute(&Client::new(&api)?, &proof, &test).await?;
         if op == ProofOperation::SentList {
@@ -293,27 +293,6 @@ async fn execute_proof(
     }
     Prepared::new(op, serde_json::to_vec(&v).unwrap(), org)?.write(Path::new(out))
 }
-async fn start_service() {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut c = tokio::process::Command::new("launchctl");
-        c.args(["kickstart", "system/com.silicon.ting"]);
-        c
-    };
-    #[cfg(target_os = "linux")]
-    let mut command = {
-        let mut c = tokio::process::Command::new("systemctl");
-        c.args(["start", "silicon-ting.service"]);
-        c
-    };
-    #[cfg(windows)]
-    let mut command = {
-        let mut c = tokio::process::Command::new("schtasks.exe");
-        c.args(["/Run", "/TN", "SiliconTingDaemon"]);
-        c
-    };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), command.output()).await;
-}
 async fn daemon(
     profile: &Profile,
     api: &str,
@@ -330,9 +309,14 @@ async fn daemon(
     o.insert("profile".into(), json!(profile.dir));
     o.insert("session_token".into(), json!(session.token));
     if start {
-        start_service().await
+        service::ipc_starting(args).await
+    } else {
+        ipc(args).await
     }
-    ipc(args).await
+}
+/// No receiver of this account is reachable, so it holds no local state to update.
+fn no_local_daemon(e: &Error) -> bool {
+    ["daemon_unavailable", "daemon_identity_mismatch"].contains(&e.code.as_str())
 }
 async fn run(root: &ArgMatches) -> Result<Value> {
     if b(root, "version") {
@@ -351,6 +335,11 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         return Ok(
             json!({"app_id":"ting","api_version":"v1","repository_url":option_env!("TING_REPOSITORY_URL").unwrap_or("https://github.com/teamofsilicons/silicon-ting"),"docs_url":option_env!("TING_DOCS_URL").unwrap_or("https://ting.teamofsilicons.com/docs"),"rust_package":option_env!("TING_RUST_PACKAGE").unwrap_or("silicon-ting-client")}),
         );
+    }
+    if name == "daemon" && m.subcommand_name() == Some("start") {
+        // Needs no login or org and sends no IPC op; cheap enough for a liveness tick.
+        service::ensure_daemon().await?;
+        return Ok(json!({"running":true}));
     }
     let profile = Profile::current()?;
     let profile_mutation = name == "logout"
@@ -524,7 +513,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             )
             .await
             {
-                if e.code != "daemon_unavailable" {
+                if !no_local_daemon(&e) {
                     return Err(e);
                 }
             }
@@ -557,7 +546,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             .json("DELETE", "/v1/session", None, Some(&sess.token), &test)
             .await;
         if let Err(e) = local {
-            if e.code != "daemon_unavailable" {
+            if !no_local_daemon(&e) {
                 return Err(e);
             }
         }
@@ -875,7 +864,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             )
             .await
             {
-                Err(e) if e.code == "daemon_unavailable" => {
+                Err(e) if no_local_daemon(&e) => {
                     recipient(
                         &client,
                         &profile,
@@ -939,9 +928,10 @@ async fn main() {
     while let Some((_, sub)) = leaf.subcommand() {
         leaf = sub;
     }
-    if let Some((command, _)) = matches.subcommand() {
+    if let Some((command, sub)) = matches.subcommand() {
         if result.is_ok()
             && !["docs", "iam", "config", "org"].contains(&command)
+            && !(command == "daemon" && sub.subcommand_name() == Some("start"))
             && s(leaf, "write-request").is_none()
         {
             if let (Ok(api), Ok(profile)) = (origin(&matches), Profile::current()) {
