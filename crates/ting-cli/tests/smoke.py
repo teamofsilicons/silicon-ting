@@ -220,7 +220,9 @@ with tempfile.TemporaryDirectory() as d:
         if WINDOWS:
             rows = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq ting-daemon.exe', '/FO', 'CSV', '/NH'], capture_output=True, text=True).stdout
             return sorted(int(row.split('","')[1]) for row in rows.splitlines() if row.startswith('"ting-daemon.exe"'))
-        return sorted(int(pid) for pid in subprocess.run(['pgrep', '-x', 'ting-daemon'], capture_output=True, text=True).stdout.split())
+        pids = subprocess.run(['pgrep', '-x', 'ting-daemon'], capture_output=True, text=True).stdout.split()
+        # An exited daemon stays a zombie until PID 1 reaps it; it no longer runs.
+        return sorted(int(pid) for pid in pids if subprocess.run(['ps', '-o', 'stat=', '-p', pid], capture_output=True, text=True).stdout.strip()[:1] not in ('', 'Z'))
     def wait_until(check, label, timeout=15):
         deadline = time.monotonic() + timeout
         while not check():

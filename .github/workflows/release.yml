@@ -78,7 +78,10 @@ jobs:
     # Honeycomb-only installs have no service; Silicon's WSL distro has no systemd at all.
     needs: build
     runs-on: ubuntu-24.04
-    container: ubuntu:24.04
+    container:
+      image: ubuntu:24.04
+      # A reaping PID 1, as WSL's /init provides; the default `tail` never reaps orphans.
+      options: --init
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
