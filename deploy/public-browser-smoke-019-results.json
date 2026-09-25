@@ -1,0 +1,246 @@
+{
+  "checked_at": "2026-09-25T11:25:09.501718+00:00",
+  "version": "0.1.9",
+  "source_commit": "6853b4e247f434e358f4bbd05e5d23d5ae7870cd",
+  "passed": 45,
+  "production_notification_writes": 0,
+  "targets": [
+    {
+      "url": "https://backend.ting.teamofsilicons.com",
+      "passed": 23,
+      "checks": [
+        {
+          "check": "discovery",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "unauthenticated session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "foreign browser origin",
+          "status": 403,
+          "passed": true
+        },
+        {
+          "check": "browser mutation without origin",
+          "status": 403,
+          "passed": true
+        },
+        {
+          "check": "duplicate JSON keys",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "unknown telemetry table",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "telemetry byte limit",
+          "status": 413,
+          "passed": true
+        },
+        {
+          "check": "HTTP body byte limit",
+          "status": 413,
+          "passed": true
+        },
+        {
+          "check": "untrusted session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "scoped receiver requires capability",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "full session cannot substitute for receiver capability",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "receiver capability cannot substitute for full session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "receiver bootstrap validates signed input",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "unknown route",
+          "status": 404,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "url": "https://ting.teamofsilicons.com",
+      "passed": 22,
+      "checks": [
+        {
+          "check": "discovery",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "unauthenticated session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "foreign browser origin",
+          "status": 403,
+          "passed": true
+        },
+        {
+          "check": "browser mutation without origin",
+          "status": 403,
+          "passed": true
+        },
+        {
+          "check": "duplicate JSON keys",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "unknown telemetry table",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "telemetry byte limit",
+          "status": 413,
+          "passed": true
+        },
+        {
+          "check": "HTTP body byte limit",
+          "status": 413,
+          "passed": true
+        },
+        {
+          "check": "untrusted session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "scoped receiver requires capability",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "full session cannot substitute for receiver capability",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "receiver capability cannot substitute for full session",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "receiver bootstrap validates signed input",
+          "status": 400,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://dm.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://interface.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com discovery CORS",
+          "status": 200,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com error CORS",
+          "status": 401,
+          "passed": true
+        },
+        {
+          "check": "https://hook.teamofsilicons.com preflight CORS",
+          "status": 204,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

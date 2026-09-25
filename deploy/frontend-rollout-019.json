@@ -1,0 +1,138 @@
+{
+  "checked_at": "2026-09-25T11:24:00.255930+00:00",
+  "release": "0.1.9",
+  "source_commit": "6853b4e247f434e358f4bbd05e5d23d5ae7870cd",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "project_id": "prj_fmUYGOFrpAykugX7cX4uZd6Cf6H8",
+    "deployment_id": "dpl_DKaxRAv2kHohc8MBypNzUQrzLrmU",
+    "url": "https://silicon-ting-6mjvh5ay8-shubham-guptas-projects-7ecb7811.vercel.app",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/DKaxRAv2kHohc8MBypNzUQrzLrmU",
+    "alias": "https://silicon-ting.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "promoted": true,
+    "project_and_domains_preserved": true,
+    "promotion_waited_for_native_release_and_backend": true,
+    "source_input": "Clean git archive of the pinned commit's web directory (22 files) with the existing project binding; no local dependencies, build output or credentials uploaded.",
+    "superseded_deployment": {
+      "deployment_id": "dpl_3PiFVe2fFvp4bVoXGCZDnWqtQSbX",
+      "issue": "Built without the telemetry build inputs, so browser telemetry was disabled for a few minutes until this deployment replaced it."
+    }
+  },
+  "local_checks": {
+    "frontend_unit_tests": {
+      "passed": true,
+      "tests": 2
+    },
+    "typescript_and_production_build": "passed",
+    "source_mirrors": "passed",
+    "production_telemetry_tables_preserved": true,
+    "telemetry_build_inputs": [
+      "VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics",
+      "VITE_SS_EVENTS_TABLE=tingfrontendevents"
+    ]
+  },
+  "public_resources_by_origin": {
+    "https://ting.teamofsilicons.com": {
+      "/": {
+        "status": 200,
+        "sha256": "814b2874e20914ed72a6384b98cf94f4e09157a08aa0e738df042e7dad55bd5f",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-BbForarz.css": {
+        "status": 200,
+        "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-vh7i7rh7.js": {
+        "status": 200,
+        "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5",
+        "matches_tested_production_build": true,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      },
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3",
+        "matches_tested_production_build": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "e517d586efdb0b8f92b08c589d34e59e6fd546c1539e4e51185a94d9e21872c7",
+        "matches_tested_production_build": true,
+        "on_demand_daemon_contract_present": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4",
+        "matches_tested_production_build": true
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "c25aa7d490fb75d42c71c5953b91ec17e6618e2bbe3027cdd0436908b0bea207",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.9"
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "9dbacf95a6264496ecd893f8495cc2278619fe37083e8e08761f0620dc33d14f",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.9"
+      }
+    },
+    "https://silicon-ting.vercel.app": {
+      "/": {
+        "status": 200,
+        "sha256": "814b2874e20914ed72a6384b98cf94f4e09157a08aa0e738df042e7dad55bd5f",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-BbForarz.css": {
+        "status": 200,
+        "sha256": "40d38efb6d3e044e83d7aa2218f90066daa48780a149d5b6e0c835926659bbb0",
+        "matches_tested_production_build": true
+      },
+      "/assets/index-vh7i7rh7.js": {
+        "status": 200,
+        "sha256": "ee78542d34ea3fefb833e222c214b7fad7826170fde885de932998b2ad5e90c5",
+        "matches_tested_production_build": true,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      },
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "4473c752a0b0b36ebf447904023171b65f141c8de01277caadb5b4028171b9d3",
+        "matches_tested_production_build": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "e517d586efdb0b8f92b08c589d34e59e6fd546c1539e4e51185a94d9e21872c7",
+        "matches_tested_production_build": true,
+        "on_demand_daemon_contract_present": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "fc93031620ac1479eda22354eb3f619f2ab42a69b2d3cf9726df32c027ffc6d4",
+        "matches_tested_production_build": true
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "c25aa7d490fb75d42c71c5953b91ec17e6618e2bbe3027cdd0436908b0bea207",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.9"
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "9dbacf95a6264496ecd893f8495cc2278619fe37083e8e08761f0620dc33d14f",
+        "matches_tested_production_build": true,
+        "default_version": "0.1.9"
+      }
+    }
+  }
+}

@@ -47,4 +47,14 @@ honeycomb apps get 'ting' --json
 honeycomb releases list 'ting' --json
 ```
 
-Check the returned visibility/publication status; requesting public visibility does not itself mean an application is approved. Keep the native GitHub archives available because the system service installers download those versioned assets and verify `SHA256SUMS`.
+Check the returned visibility/publication status; requesting public visibility does not itself mean an application is approved.
+
+Deploy the frontend after the native release and backend, from a clean archive of the release commit with the existing Vercel project binding. Pass the Space Station tables as build inputs; the project does not store them, and a build without them silently disables browser telemetry:
+
+```sh
+rm -rf /tmp/ting-web && mkdir /tmp/ting-web && git archive HEAD web | tar -x -C /tmp/ting-web
+cp -R web/.vercel /tmp/ting-web/web/
+cd /tmp/ting-web/web && npx vercel deploy --prod --yes --build-env VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics --build-env VITE_SS_EVENTS_TABLE=tingfrontendevents
+```
+
+Then check that `/install.sh`, `/install.ps1` and `/docs/*.md` match the source, that the served JavaScript names both telemetry tables, and run `scripts/public-smoke.py` against the backend and, with `--api-only`, the frontend proxy, passing each integration origin with `--browser-origin`. Keep the native GitHub archives available because the system service installers download those versioned assets and verify `SHA256SUMS`.

@@ -1,0 +1,33 @@
+{
+  "release": "6853b4e247f434e3-069e71b1d40b",
+  "commit": "6853b4e247f434e358f4bbd05e5d23d5ae7870cd",
+  "checksum": "069e71b1d40b4bec4b045155a5a73c2aed54c1f4dcd5440425b5abc99fbaec2e",
+  "instance": "i-0559f9a77b4c1ca43",
+  "command_id": "3e54897d-79c4-4e27-bd9e-107f109518ac",
+  "checked_at": "2026-09-25T11:24:00.255930+00:00",
+  "version": "0.1.9",
+  "workflow_url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/36125738790",
+  "workflow_conclusion": "success",
+  "jobs": [
+    {
+      "name": "caddy",
+      "conclusion": "success"
+    },
+    {
+      "name": "server",
+      "conclusion": "success"
+    },
+    {
+      "name": "publish",
+      "conclusion": "success"
+    }
+  ],
+  "deployment_status": "Success",
+  "public_health": {
+    "service": "ting",
+    "status": "ok",
+    "version": "0.1.9"
+  },
+  "backend_release_url": "https://github.com/teamofsilicons/silicon-ting/releases/tag/server-6853b4e247f434e358f4bbd05e5d23d5ae7870cd",
+  "note": "Server code is unchanged from 0.1.8 apart from its version. The installer's in-host health polling logged connection-refused retries while the service restarted, then reported 0.1.9 locally and through HTTPS."
+}
