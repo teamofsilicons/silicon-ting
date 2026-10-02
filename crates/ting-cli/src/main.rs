@@ -70,17 +70,17 @@ fn prefs(c: Command) -> Command {
 fn cli() -> Command {
     Command::new("ting").about("Durable notifications for carbons and silicons.").disable_version_flag(true)
  .arg(flag("json").global(true)).arg(a("org").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
- .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain an IAM App Proof Token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
+ .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain a separately approved IAM OBO access token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
  .subcommand(command("iam","Show Ting application information"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
  .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
  .subcommand(group("org","Choose an IAM organisation").subcommand(page(command("list","List accessible organisations"))).subcommand(command("current","Show effective organisation and selection source")).subcommand(command("use","Validate and save an organisation").arg(arg("id").required(true))))
- .subcommand(group("apps","Inspect visible Honeycomb applications").subcommand(page(command("list","List visible applications"))))
+ .subcommand(group("apps","Inspect visible Honeycomb applications").subcommand(page(command("list","List visible applications"))).subcommand(group("authorize","Approve Honeycomb catalog access separately from login").subcommand(command("start","Review the returned consent URL in IAM").arg(a("key").help("Reuse this idempotency key when retrying a start"))).subcommand(command("status","Inspect one authorization").arg(arg("id").required(true))).subcommand(command("complete","Save explicit approval; tokens remain on the server").arg(arg("id").required(true)).arg(a("state").required(true)).arg(a("code-file").required(true).help("Private file containing the single-use IAM code")))))
  .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
  .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(command("revoke","Revoke a grant as recipient or proof-authorized app").arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
- .subcommand(proof(command("send","Prepare or submit one proof-bound notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
- .subcommand(group("sent","Inspect and update application sent history using fresh proofs").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
+ .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
+ .subcommand(group("sent","Inspect and update application sent history using reusable OBO access tokens").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
@@ -208,7 +208,7 @@ async fn execute_proof(
         let file_secret = s(m, if obo { "obo-file" } else { "proof-token-file" });
         if stdin == file_secret.is_some() {
             return Err(Error::input(
-                "Execution requires exactly one matching proof input.",
+                "Execution requires exactly one matching OBO access-token input.",
             ));
         }
         if obo && (b(m, "proof-token-stdin") || s(m, "proof-token-file").is_some()) {
@@ -635,7 +635,39 @@ async fn run(root: &ArgMatches) -> Result<Value> {
     let base = format!("/v1/orgs/{}", segment(org));
     match name {
         "apps" => {
-            let (_, m) = m.subcommand().unwrap();
+            let (sub, m) = m.subcommand().unwrap();
+            if sub == "authorize" {
+                let (step, m) = m.subcommand().unwrap();
+                let (method, path, body) = match step {
+                    "start" => (
+                        "POST",
+                        format!("{base}/catalog-authorizations"),
+                        Some(
+                            json!({"idempotency_key":s(m,"key").map(str::to_owned).unwrap_or_else(||uuid::Uuid::new_v4().to_string())}),
+                        ),
+                    ),
+                    "status" => (
+                        "GET",
+                        format!(
+                            "{base}/catalog-authorizations/{}",
+                            segment(required(m, "id")?)
+                        ),
+                        None,
+                    ),
+                    "complete" => (
+                        "POST",
+                        format!(
+                            "{base}/catalog-authorizations/{}/complete",
+                            segment(required(m, "id")?)
+                        ),
+                        Some(
+                            json!({"state":required(m,"state")?,"code":secret(Some(required(m,"code-file")?))?}),
+                        ),
+                    ),
+                    _ => return Err(Error::input("Unknown authorization operation")),
+                };
+                return recipient(&client, &profile, &test, method, &path, body).await;
+            }
             recipient(
                 &client,
                 &profile,

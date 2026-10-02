@@ -21,18 +21,25 @@ ting inbox list --all
 
 The installer downloads a checksum-verified release and registers one system daemon. Windows installation is described in [installers/README.md](installers/README.md). Each identity keeps credentials in `$SILICON_HOME/.ting/`; all identities share the daemon connection. Local URLs and webhook secrets never leave the device.
 
-Applications need a recipient's IAM OBO grant before sending. Prepare exact request bytes, obtain a request-bound proof through IAM, then submit them:
+Applications obtain separate endpoint approval in IAM, then retain a dedicated OBO access/refresh pair. Ting also requires an active recipient subscription. Prepare the operation and submit it with the endpoint access token:
 
 ```sh
 ting send --org tos --type 'example.message.received' --for si:assistant \
   --key unique-event-key --data '{"message":"Hello"}' --write-request send.json --json
-# Obtain a fresh IAM proof for the returned method, path and body SHA-256.
+# Approve the tings.send endpoint in IAM and securely supply its oba_ access token.
 ting send --request-file send.json --proof-token-stdin --json
 ```
 
 Actor IDs are complete IAM identities (`c:alice0`, `si:assistant`); app IDs are bare handles (`ting`, `dm`). Organization selection and authority remain separate. Existing queued requests and delivery receipts retain their exact bytes and stable IDs through migration.
 
-Use `ting --help`, `ting docs`, [CLI reference](udd/cli.md), and [API contract](udd/api.md) for registration, preferences, proof issuance, delivery and recovery requirements.
+Use `ting --help`, `ting docs`, [CLI reference](udd/cli.md), and [API contract](udd/api.md) for registration, preferences, endpoint authorization, delivery and recovery requirements.
+
+## Application catalog access
+
+Ting requests Honeycomb catalog access separately from login. Use the Applications
+page or `ting apps authorize start`, approve the same account and organization in
+IAM, and complete with the single-use code. See [catalog approval and recovery](docs/CATALOG_AUTHORIZATION.md)
+for CLI commands, testing isolation, refresh and revocation.
 
 ## Retention and delivery
 
@@ -40,7 +47,7 @@ Read **or** silent tings expire one calendar month after their original `created
 
 Within that window, each webhook has an independent copy. The daemon durably queues before delivery ACK, and retains local acceptance until the server confirms read ACK. Webhooks return `204` only after accepting the complete `{ "tings": [...] }` batch. Consumers must deduplicate by ting ID, since transport is at least once. A failed hook retries independently for twelve hours before requiring explicit reconnection.
 
-App send idempotency lasts fourteen days. Every replay still needs a fresh proof. Notification preferences never grant permission to send; IAM grants and current authorization are checked separately.
+App send idempotency lasts fourteen days. Every replay revalidates the reusable OBO access token with IAM. Notification preferences never grant permission to send; IAM grants and current authorization are checked separately.
 
 ## Development
 

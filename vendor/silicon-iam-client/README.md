@@ -1,7 +1,7 @@
 # silicon-iam-client
 
 Batch login authenticates once:
-select organizations per app, and receive up to 100 independent SLTs. See the
+select one organization per app, and receive up to 100 independent SLTs. See the
 [batch login guide](../BATCH_LOGIN.md) for browser, API, Rust and CLI examples.
 
 A Rust client for the [Silicon IAM](https://backend.iam.teamofsilicons.com) API:
@@ -14,12 +14,14 @@ provider callbacks, and browser navigations remain outside this crate.
 
 ```toml
 [dependencies]
-silicon-iam-client = "4.0.0"
+silicon-iam-client = "5.0.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Version 2 uses public membership IDs such as `saket[tos]` and
-`helper:tos[tos]` in place of UUID membership references. Upgrade membership
+Version 5 requires separate OBO endpoint consent and reusable OBO tokens. Legacy proof exchange and verification routes are retired. Each application login selects exactly one account and organization; applications retain separate logins when they support multiple organizations. Upgrade calling and receiving applications together; ordinary login permissions cannot become OBO grants. See the [OBO cutover guide](../OBO_CUTOVER.md).
+
+Version 2 introduced public membership IDs such as `c:saket[tos]` and
+`si:helper[tos]` in place of UUID membership references. Upgrade membership
 arguments and stored public references to strings. Existing official 1.x clients
 retain their UUID wire representation during rollout, including introspection;
 all current clients and ordinary API requests use the canonical IDs. Existing
@@ -29,7 +31,7 @@ foreign keys or invalidating sessions.
 
 The client speaks HTTP API major `v1` and requires Rust 1.98 or newer.
 The crate SemVer and HTTP API major are separate: upgrading the crate within
-the 2.x line does not select a different wire major. `Client::new` and
+the 5.x line does not select a different wire major. `Client::new` and
 `ClientBuilder::build` perform no network handshake; call
 `client.system().negotiate().await?` during startup when you want an upfront
 compatibility check. It validates the service identity, ordered version
@@ -43,7 +45,8 @@ and backend release together. The complete hosted manual is at
 [docs.iam.teamofsilicons.com/client](https://docs.iam.teamofsilicons.com/client).
 
 Applications declare IAM and external endpoint permissions separately from webhook event
-subscriptions. Direct IAM login reviews those permissions before organization selection.
+subscriptions. Direct IAM login reviews IAM permissions before organization selection;
+OBO actions require separate endpoint consent when the app requests it.
 The SDK exposes scope review discussions, application bundles, cross-organization OBO,
 and application-initiated test environments with transitive dependency provisioning.
 
@@ -129,7 +132,7 @@ let issued = caller.app_verification()
     .issue(&models::AppAccessKeyIssue { ttl_seconds: Some(300) }).await?;
 // Send issued.app_id and issued.app_access_key to the receiving application.
 let receiver = Client::new("https://backend.iam.teamofsilicons.com")?
-    .with_credential(Credential::application("vendor>billing", receiver_secret));
+    .with_credential(Credential::application("billing", receiver_secret));
 let verified = receiver.app_verification().verify(&models::AppAccessKeyVerify {
     app_id: issued.app_id,
     app_access_key: issued.app_access_key,
@@ -170,7 +173,8 @@ Every group hangs off the client and borrows it, so obtaining one is free:
 | `client.applications()` | Applications, secrets, webhooks |
 | `client.oauth()` | Short-lived-token exchange, introspection, revocation |
 | `client.app_verification()` | Issue and verify short-lived application identity keys |
-| `client.obo()` | Catalog-bound signing and delegated access between applications |
+| `client.ata()` | Application-only endpoint discovery, refresh and recipient verification; no user or OBO authority |
+| `client.obo()` | Separate OBO consent, reusable tokens, verification and downstream delegation |
 | `client.sso()` | An organization's SSO configuration |
 | `client.environments()` | Testing environments |
 
@@ -245,10 +249,11 @@ Application session. Renew an existing session separately with
 `OAuth::refresh(app_id, refresh_token, mutation)`.
 
 For a direct IAM Carbon/Silicon session, call `auth().login_organizations(app_id)`
-and display its `scopes` before selecting organizations. After the user approves, call
+and select exactly one organization. Display its `scopes` and obtain explicit consent
+when critical IAM permissions require it, then call
 `auth().short_lived_token_for_organizations(app_id, &selected_org_ids, choices.scope_version, &approved_scopes, &Mutation::new())`.
-Supply the exact reviewed flat scope strings, including `obo:{app_id}:{endpoint_id}` external
-permissions. The selected organization set is additive on the same parent login. For a fully
+Supply the exact reviewed IAM scope strings. OBO endpoint permissions require separate
+on-demand consent and are excluded from ordinary login. The selected organization set is additive on the same parent login. For a fully
 specified request, `short_lived_token(&ShortLivedTokenRequest, mutation)` also supports a callback.
 An application change invalidates stale consent; fetch a new view and obtain consent again.
 Applications never call these methods with their own credentials; initiate
@@ -256,14 +261,12 @@ IAM browser login and receive an SLT instead.
 
 See [organization consent](../ORGANIZATION_CONSENT.md) for scope consent and CLI details.
 
-For OBO, hash the exact downstream bytes with
-`api::obo::body_sha256`, build one `OboExchangeRequest`, and pass that request,
-the discovered audience catalog, and one `Mutation` to
-`obo().exchange_signed(...)`. The client selects the registered path, uses the
-same Application secret for Basic authentication and HMAC, and signs a fresh
-timestamp. An immediate uncertain retry reuses the request and `Mutation` but
-gets a new timestamp/signature; restoring an old timestamp can fall outside the
-60-second signature window.
+For OBO, start a separate authorization request for the required endpoint(s), show
+the IAM consent page, and redeem the approved authorization code with the requesting
+application's credentials. Keep the resulting access/refresh pair for each root
+endpoint. Receivers verify the access token with IAM before each request; verification
+does not consume it. See the [OBO client guide](obo.html) for consent, refresh,
+shared graph tokens, provider contexts and revocation.
 
 ## Refresh, introspection, revocation, and logout
 
@@ -308,7 +311,7 @@ authority bound to it. This form cannot request account-wide `all_sessions`.
 ## Applications, discovery, and secret rotation
 
 Application creation takes a local handle and an owning organization. IAM
-returns the canonical public identifier `{org_id}>{handle}`; use that canonical
+returns the globally unique bare identifier `{handle}`; use that exact
 value for every later login, credential, path, discovery, and OBO call. The
 required `base_url` is the pathless application-backend origin without a
 trailing slash, such as `https://billing.example`. It is not a login redirect
@@ -512,7 +515,7 @@ fixed code `000000`.
 
 Credentials do not cross the boundary in either direction: production access
 and refresh tokens, short-lived tokens, STKs, Application secrets, sessions,
-and OBO proofs are refused in a test environment, and test credentials are
+and OBO tokens are refused in a test environment, and test credentials are
 refused in production. IAM does not currently expose a caller API-key
 credential; a future API-key surface must retain this same plane binding. Keep
 one credential store per environment or key it by the environment UUID.
@@ -542,7 +545,7 @@ assert_eq!(created.application.app_id, "checkout");
 # }
 ```
 
-The local handle is qualified with the owning organization. A newly created
+The application ID is a globally unique bare handle; ownership is separate. A newly created
 test application cannot claim a canonical ID that already exists in
 production.
 
@@ -627,10 +630,11 @@ minimum, prove:
 
 - Carbon signup and login use the fixed test-plane code, while an Application
   receives only the resulting SLT; prove explicit scope consent and both single-organization
-  and multiple-organization selections;
+  selection and rejection of empty or multiple-organization selections;
 - token exchange, refresh, current introspection, refresh-family revocation,
   and post-revocation `active: false` all agree;
-- an OBO proof verifies exactly once for the registered method, path and exact body,
+- OBO requires separate consent and verifies repeatedly for its approved endpoint,
+  while wrong audiences, endpoints, revoked grants and expired tokens are rejected,
   including audiences in other organizations; missing declaration, missing critical approval,
   unconsented scopes, wrong subject audience, and unselected organizations are refused;
 - valid webhook bytes verify, while a changed byte, stale timestamp, wrong

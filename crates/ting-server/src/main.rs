@@ -506,6 +506,32 @@ async fn http(
         return Err(Error::not_found());
     }
     let org = app.auth.org(&p, parts[1]).await?;
+    match (method.as_str(), parts[2..].as_ref()) {
+        ("POST", ["catalog-authorizations"]) => {
+            v::fields(&b, &["idempotency_key"], &["idempotency_key"])?;
+            let key = b["idempotency_key"]
+                .as_str()
+                .ok_or_else(|| Error::invalid("idempotency_key must be a string"))?;
+            return Ok(response(200, app.auth.catalog_start(&p, &org, key).await?));
+        }
+        ("GET", ["catalog-authorizations", id]) => {
+            return Ok(response(200, app.auth.catalog_status(&p, &org, id).await?));
+        }
+        ("POST", ["catalog-authorizations", id, "complete"]) => {
+            v::fields(&b, &["code", "state"], &["code", "state"])?;
+            let code = b["code"]
+                .as_str()
+                .ok_or_else(|| Error::invalid("code must be a string"))?;
+            let state = b["state"]
+                .as_str()
+                .ok_or_else(|| Error::invalid("state must be a string"))?;
+            return Ok(response(
+                200,
+                app.auth.catalog_complete(&p, &org, id, code, state).await?,
+            ));
+        }
+        _ => {}
+    }
     let apps = match (method.as_str(), parts[2..].as_ref()) {
         ("GET", ["apps"]) => Some(app.auth.apps(&p, &org).await?),
         ("GET", ["apps", aid, "types"]) => {

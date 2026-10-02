@@ -56,7 +56,7 @@ impl Error {
         Self::new(
             "connection_failed",
             "The request failed or timed out; its outcome may be uncertain.",
-            "Check connectivity. Obtain a fresh proof before retrying an app request; preserve its key and exact bytes.",
+            "Check connectivity. Use a valid OBO access token before retrying an app request; preserve its key and exact bytes.",
             true,
         )
     }

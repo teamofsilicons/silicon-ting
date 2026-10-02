@@ -8,6 +8,39 @@ use crate::{Client, Mutation, Paging, Result, models};
 pub struct Silicons<'a>(pub(super) &'a Client);
 
 impl Silicons<'_> {
+    /// Reads organization custody settings for an identity this organization owns.
+    /// # Errors
+    /// Requires organization.update; invited identities retain their original custody.
+    pub async fn organization_custody(
+        &self,
+        org_id: &str,
+        silicon_id: &str,
+    ) -> Result<models::SiliconCustody> {
+        self.0
+            .get(&["organizations", org_id, "silicons", silicon_id, "custody"])
+            .await
+    }
+
+    /// Changes whether an organization-owned Silicon may create its own organizations.
+    /// # Errors
+    /// Requires the current version, organization.update and exact organization custody.
+    pub async fn set_organization_custody(
+        &self,
+        org_id: &str,
+        silicon_id: &str,
+        version: i64,
+        allowed: bool,
+        mutation: &Mutation,
+    ) -> Result<models::SiliconCustody> {
+        self.0
+            .patch(
+                &["organizations", org_id, "silicons", silicon_id, "custody"],
+                version,
+                &serde_json::json!({"can_create_organizations":allowed}),
+                mutation,
+            )
+            .await
+    }
     /// Reads the authenticated Silicon and its authoritative owning organization.
     /// # Errors
     /// Requires an authenticated Silicon session.
@@ -370,5 +403,56 @@ impl Silicons<'_> {
                 mutation,
             )
             .await
+    }
+}
+
+impl Silicons<'_> {
+    /// Reads the signed-in Silicon's global identity profile.
+    /// # Errors
+    /// Requires a Silicon IAM session.
+    pub async fn identity(&self) -> Result<models::SiliconIdentityProfile> {
+        self.0.get(&["me"]).await
+    }
+    /// Changes the signed-in Silicon profile independently of organization membership.
+    /// # Errors
+    /// Fails on invalid fields, insufficient authority or stale profile version.
+    pub async fn update_identity(
+        &self,
+        version: i64,
+        patch: &models::CarbonProfilePatch,
+        mutation: &Mutation,
+    ) -> Result<models::SiliconIdentityProfile> {
+        self.0.patch(&["me"], version, patch, mutation).await
+    }
+}
+
+impl Silicons<'_> {
+    /// Uploads a PNG, JPEG or WebP profile photo, at most 512 KiB.
+    ///
+    /// # Errors
+    /// Returns an error for invalid image bytes, stale versions or unauthorized callers.
+    pub async fn upload_photo(
+        &self,
+        version: i64,
+        content_type: &str,
+        content: Vec<u8>,
+        mutation: &Mutation,
+    ) -> Result<models::SiliconIdentityProfile> {
+        if content.is_empty()
+            || content.len() > 512 * 1024
+            || !matches!(content_type, "image/png" | "image/jpeg" | "image/webp")
+        {
+            return Err(crate::Error::Invalid(
+                "Profile photo must be a PNG, JPEG or WebP image up to 512 KiB".to_owned(),
+            ));
+        }
+        let request = mutation.apply(
+            self.0
+                .route(reqwest::Method::PUT, &["me", "photo"])?
+                .header(reqwest::header::IF_MATCH, format!("\"{version}\""))
+                .header(reqwest::header::CONTENT_TYPE, content_type)
+                .body(content),
+        );
+        self.0.send_json(request).await
     }
 }

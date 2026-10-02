@@ -14,6 +14,7 @@ pub mod application_mutations;
 pub mod application_reads;
 pub mod application_scopes;
 pub mod applications;
+pub mod ata;
 pub mod auth;
 pub mod bundles;
 pub mod carbons;
@@ -34,6 +35,12 @@ pub mod trust;
 use crate::Client;
 
 impl Client {
+    /// Application-only ATA credentials and endpoint verification.
+    #[must_use]
+    pub const fn ata(&self) -> ata::Ata<'_> {
+        ata::Ata(self)
+    }
+
     /// Version and readiness of the service itself.
     #[must_use]
     pub const fn system(&self) -> system::System<'_> {

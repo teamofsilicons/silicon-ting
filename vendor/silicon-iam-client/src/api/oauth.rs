@@ -17,9 +17,9 @@ impl OAuth<'_> {
     /// receives or submits the principal's OTP or any other authentication
     /// credential; IAM completes that ceremony and hands the Application the
     /// single-use `slt`. In a verified testing environment, `slt` may also be
-    /// an existing Carbon ID (`alice`) or Silicon ID (`worker:tos`). This test
-    /// shortcut selects the actor's current active organizations and the
-    /// Application's approved scopes; production accepts only issued codes.
+    /// an existing Carbon ID (`c:alice`) or Silicon ID (`si:worker`). This test
+    /// shortcut requires exactly one active organization. Use `login_testing_actor`
+    /// to select one explicitly; production accepts only issued codes.
     ///
     /// # Errors
     ///
@@ -33,6 +33,22 @@ impl OAuth<'_> {
     ) -> Result<models::OAuthTokenResponse> {
         self.exchange(&application_login_request(app_id, slt), mutation)
             .await
+    }
+
+    /// Selects one existing testing actor and organization. Production rejects actor IDs.
+    ///
+    /// # Errors
+    /// Returns an error if the actor is not a current member or the app cannot use that organization.
+    pub async fn login_testing_actor(
+        &self,
+        app_id: &str,
+        actor_id: &str,
+        org_id: &str,
+        mutation: &Mutation,
+    ) -> Result<models::OAuthTokenResponse> {
+        let mut request = application_login_request(app_id, actor_id);
+        request.org_id = Some(org_id.to_owned());
+        self.exchange(&request, mutation).await
     }
 
     /// Rotates an Application refresh token after a successful login.
@@ -209,6 +225,7 @@ impl OAuth<'_> {
 
 fn application_login_request(app_id: &str, slt: &str) -> models::ApplicationTokenRequest {
     models::ApplicationTokenRequest {
+        org_id: None,
         app_id: app_id.to_owned(),
         slt: Some(slt.to_owned()),
         refresh_token: None,
@@ -220,6 +237,7 @@ fn application_refresh_request(
     refresh_token: &str,
 ) -> models::ApplicationTokenRequest {
     models::ApplicationTokenRequest {
+        org_id: None,
         app_id: app_id.to_owned(),
         slt: None,
         refresh_token: Some(refresh_token.to_owned()),

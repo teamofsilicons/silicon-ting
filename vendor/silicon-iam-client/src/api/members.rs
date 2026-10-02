@@ -12,6 +12,21 @@ use crate::{Client, Mutation, Paging, Result, models};
 /// Organization membership and directory.
 pub struct Members<'a>(pub(super) &'a Client);
 
+/// Effective directional directory visibility for an organization or viewer.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DirectoryVisibility {
+    /// Optimistic concurrency version.
+    pub version: i64,
+    /// all, self, selected; member overrides may also inherit.
+    pub mode: String,
+    /// Canonical visible membership IDs for selected mode.
+    pub visible_membership_ids: Vec<String>,
+    /// Resolved organization/member mode.
+    pub effective_mode: String,
+    /// Resolved visible membership selection.
+    pub effective_visible_membership_ids: Vec<String>,
+}
+
 /// Narrows a member listing.
 #[derive(Clone, Debug, Default)]
 pub struct MemberFilter {
@@ -40,6 +55,54 @@ impl MemberFilter {
 }
 
 impl Members<'_> {
+    /// Reads one member's view of the organization directory.
+    ///
+    /// # Errors
+    /// Requires direct IAM login and `members.update_directory`.
+    pub async fn directory_visibility(
+        &self,
+        org: &str,
+        member: &str,
+    ) -> Result<DirectoryVisibility> {
+        self.0
+            .get(&[
+                "organizations",
+                org,
+                "members",
+                member,
+                "directory-visibility",
+            ])
+            .await
+    }
+    /// Replaces one member's visibility override; this never changes capabilities.
+    ///
+    /// # Errors
+    /// Fails for stale version, foreign membership IDs or insufficient authority.
+    pub async fn replace_directory_visibility(
+        &self,
+        org: &str,
+        member: &str,
+        version: i64,
+        mode: &str,
+        targets: &[String],
+        mutation: &Mutation,
+    ) -> Result<DirectoryVisibility> {
+        self.0
+            .put(
+                &[
+                    "organizations",
+                    org,
+                    "members",
+                    member,
+                    "directory-visibility",
+                ],
+                version,
+                &serde_json::json!({"mode":mode,"visible_membership_ids":targets}),
+                mutation,
+            )
+            .await
+    }
+
     /// Every visible active member with all permitted details and caller-relative trust.
     ///
     /// The dictionary is keyed by Carbon ID or full Silicon ID, without pagination.
