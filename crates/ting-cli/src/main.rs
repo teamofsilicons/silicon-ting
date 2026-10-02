@@ -233,13 +233,13 @@ async fn execute_proof(
             return service::ipc_starting(json!({"op":"send","api_url":api,"proof_token":proof,"body":String::from_utf8(p.body).map_err(|_|Error::input("Request must be UTF-8."))?,"headers":test})).await;
         }
         let mut result = p.execute(&Client::new(&api)?, &proof, &test).await?;
-        if op == ProofOperation::SentList {
-            if let Some(items) = result["items"].as_array_mut() {
-                for item in items {
-                    if let Some(o) = item.as_object_mut() {
-                        o.remove("data");
-                        o.remove("metadata");
-                    }
+        if op == ProofOperation::SentList
+            && let Some(items) = result["items"].as_array_mut()
+        {
+            for item in items {
+                if let Some(o) = item.as_object_mut() {
+                    o.remove("data");
+                    o.remove("metadata");
                 }
             }
         }
@@ -507,16 +507,14 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 .into(),
             context: v.get("context").cloned(),
         };
-        if let Some(old) = previous_session {
-            if let Err(e) = ipc(
+        if let Some(old) = previous_session
+            && let Err(e) = ipc(
                 json!({"op":"logout","profile":profile.dir,"api_url":old.api_url,"session_token":old.token}),
             )
             .await
-            {
-                if !no_local_daemon(&e) {
-                    return Err(e);
-                }
-            }
+            && !no_local_daemon(&e)
+        {
+            return Err(e);
         }
         profile.save("session.json", &sess)?;
         profile.remove("login-attempt.json")?;
@@ -545,15 +543,15 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         let remote = client
             .json("DELETE", "/v1/session", None, Some(&sess.token), &test)
             .await;
-        if let Err(e) = local {
-            if !no_local_daemon(&e) {
-                return Err(e);
-            }
+        if let Err(e) = local
+            && !no_local_daemon(&e)
+        {
+            return Err(e);
         }
-        if let Err(error) = remote {
-            if !["session_expired", "authentication_required"].contains(&error.code.as_str()) {
-                return Err(error);
-            }
+        if let Err(error) = remote
+            && !["session_expired", "authentication_required"].contains(&error.code.as_str())
+        {
+            return Err(error);
         }
         profile.remove("session.json")?;
         profile.remove("login-attempt.json")?;
@@ -960,25 +958,21 @@ async fn main() {
     while let Some((_, sub)) = leaf.subcommand() {
         leaf = sub;
     }
-    if let Some((command, sub)) = matches.subcommand() {
-        if result.is_ok()
-            && !["docs", "iam", "config", "org"].contains(&command)
-            && !(command == "daemon" && sub.subcommand_name() == Some("start"))
-            && s(leaf, "write-request").is_none()
-        {
-            if let (Ok(api), Ok(profile)) = (origin(&matches), Profile::current()) {
-                if profile
-                    .read::<Settings>("settings.json")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default()
-                    .telemetry
-                    .unwrap_or(true)
-                {
-                    telemetry(&api,"cli_command",json!({"command":command,"success":result.is_ok(),"duration_ms":started.elapsed().as_millis().min(u64::MAX as u128) as u64})).await;
-                }
-            }
-        }
+    if let Some((command, sub)) = matches.subcommand()
+        && result.is_ok()
+        && !["docs", "iam", "config", "org"].contains(&command)
+        && !(command == "daemon" && sub.subcommand_name() == Some("start"))
+        && s(leaf, "write-request").is_none()
+        && let (Ok(api), Ok(profile)) = (origin(&matches), Profile::current())
+        && profile
+            .read::<Settings>("settings.json")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .telemetry
+            .unwrap_or(true)
+    {
+        telemetry(&api,"cli_command",json!({"command":command,"success":result.is_ok(),"duration_ms":started.elapsed().as_millis().min(u64::MAX as u128) as u64})).await;
     }
     match result {
         Ok(v) => {
