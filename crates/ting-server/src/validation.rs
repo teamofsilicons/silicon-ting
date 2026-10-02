@@ -209,26 +209,66 @@ pub fn preference(v: &Value, write: bool) -> Result<()> {
     if service.is_some() && typ.is_some() {
         return Err(Error::invalid("Specify either service or type, not both."));
     }
-    if let Some(s) = service {
-        if !s.as_str().is_some_and(segment) {
-            return Err(Error::invalid("Invalid service name."));
-        }
+    if let Some(s) = service
+        && !s.as_str().is_some_and(segment)
+    {
+        return Err(Error::invalid("Invalid service name."));
     }
-    if let Some(t) = typ {
-        if type_parts(
+    if let Some(t) = typ
+        && type_parts(
             t.as_str()
                 .ok_or_else(|| Error::invalid("type must be text."))?,
         )?
         .0 != app
-        {
-            return Err(Error::invalid("The type must belong to app_id."));
-        }
+    {
+        return Err(Error::invalid("The type must belong to app_id."));
     }
     if write {
         optional_bool(v, "enabled")?;
     }
     Ok(())
 }
+
+pub fn filters(b: &Value) -> Result<()> {
+    if b.get("app_id")
+        .is_some_and(|v| !v.as_str().is_some_and(app_id))
+    {
+        return Err(Error::invalid("app_id must be a bare IAM application ID."));
+    }
+    if b.get("for")
+        .is_some_and(|v| v.as_str().and_then(actor_kind).is_none())
+    {
+        return Err(Error::invalid(
+            "for must be a complete c:<handle> or si:<handle> identity.",
+        ));
+    }
+    for k in [
+        "org_id",
+        "app_id",
+        "for",
+        "id",
+        "type",
+        "cursor",
+        "deliveries_cursor",
+    ] {
+        if b.get(k).is_some() {
+            string(b, k, if k.ends_with("cursor") { 4096 } else { 255 })?;
+        }
+    }
+    for k in ["read", "silent"] {
+        optional_bool(b, k)?;
+    }
+    if let Some(limit) = b.get("limit")
+        && !limit.as_u64().is_some_and(|n| (1..=100).contains(&n))
+    {
+        return Err(Error::invalid("limit must be an integer from 1 to 100."));
+    }
+    if let Some(t) = b.get("type").and_then(Value::as_str) {
+        type_parts(t)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,44 +303,4 @@ mod tests {
             assert_eq!(actor_kind(invalid), None);
         }
     }
-}
-
-pub fn filters(b: &Value) -> Result<()> {
-    if b.get("app_id")
-        .is_some_and(|v| !v.as_str().is_some_and(app_id))
-    {
-        return Err(Error::invalid("app_id must be a bare IAM application ID."));
-    }
-    if b.get("for")
-        .is_some_and(|v| v.as_str().and_then(actor_kind).is_none())
-    {
-        return Err(Error::invalid(
-            "for must be a complete c:<handle> or si:<handle> identity.",
-        ));
-    }
-    for k in [
-        "org_id",
-        "app_id",
-        "for",
-        "id",
-        "type",
-        "cursor",
-        "deliveries_cursor",
-    ] {
-        if b.get(k).is_some() {
-            string(b, k, if k.ends_with("cursor") { 4096 } else { 255 })?;
-        }
-    }
-    for k in ["read", "silent"] {
-        optional_bool(b, k)?;
-    }
-    if let Some(limit) = b.get("limit") {
-        if !limit.as_u64().is_some_and(|n| (1..=100).contains(&n)) {
-            return Err(Error::invalid("limit must be an integer from 1 to 100."));
-        }
-    }
-    if let Some(t) = b.get("type").and_then(Value::as_str) {
-        type_parts(t)?;
-    }
-    Ok(())
 }

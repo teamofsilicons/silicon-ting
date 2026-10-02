@@ -315,23 +315,22 @@ fn header<'a>(h: &'a HeaderMap, k: &str) -> Result<&'a str> {
         .ok_or_else(|| Error::invalid(format!("A nonempty {k} header is required.")))
 }
 fn origin(app: &App, h: &HeaderMap) -> Result<()> {
-    if let Some(o) = h.get("origin") {
-        if o.to_str().ok() != Some(&app.config.frontend_origin)
+    if let Some(o) = h.get("origin")
+        && (o.to_str().ok() != Some(&app.config.frontend_origin)
             && o.to_str().ok() != Some(&app.config.public_origin)
             && !app
                 .config
                 .browser_origins
                 .iter()
                 .any(|allowed| o.to_str().ok() == Some(allowed))
-            || h.get_all("origin").iter().count() != 1
-        {
-            return Err(Error::new(
-                403,
-                "permission_denied",
-                "This browser origin is not permitted.",
-                "Use a browser origin explicitly permitted by Ting.",
-            ));
-        }
+            || h.get_all("origin").iter().count() != 1)
+    {
+        return Err(Error::new(
+            403,
+            "permission_denied",
+            "This browser origin is not permitted.",
+            "Use a browser origin explicitly permitted by Ting.",
+        ));
     }
     Ok(())
 }

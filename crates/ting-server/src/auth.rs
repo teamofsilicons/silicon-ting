@@ -24,6 +24,8 @@ use std::{
 };
 use tokio::sync::Mutex as AsyncMutex;
 
+type LoginReceiptRow = (String, i64, Option<Vec<u8>>, Option<Vec<u8>>);
+
 #[derive(Clone)]
 pub struct Principal {
     pub context: String,
@@ -660,20 +662,20 @@ impl Auth {
     pub async fn authenticate(&self, token: &str, headers: &HeaderMap) -> Result<Principal> {
         let id = Self::session_id(token)?;
         let (session, _) = self.live(&id).await?;
-        if let Some(test) = self.test_headers(headers).await? {
-            if session.test.as_ref().is_none_or(|s| {
+        if let Some(test) = self.test_headers(headers).await?
+            && session.test.as_ref().is_none_or(|s| {
                 s.id != test.id
                     || s.secret != test.secret
                     || s.key != test.key
                     || s.generation != test.generation
-            }) {
-                return Err(Error::new(
-                    403,
-                    "test_context_mismatch",
-                    "Test headers do not match this session.",
-                    "Use the session's original current testing credentials.",
-                ));
-            }
+            })
+        {
+            return Err(Error::new(
+                403,
+                "test_context_mismatch",
+                "Test headers do not match this session.",
+                "Use the session's original current testing credentials.",
+            ));
         }
         Ok(Principal {
             context: session.context,
@@ -722,7 +724,7 @@ impl Auth {
                 "Obtain a fresh IAM short-lived token and start a new login attempt.",
             ));
         }
-        let prior: Option<(String, i64, Option<Vec<u8>>, Option<Vec<u8>>)> = self
+        let prior: Option<LoginReceiptRow> = self
             .db
             .lock()
             .unwrap()
@@ -979,10 +981,10 @@ impl Auth {
                     |r| r.get(0),
                 )
                 .optional();
-            if let Ok(Some(bytes)) = bytes {
-                if let Ok(s) = self.open::<Session>(&id, &bytes) {
-                    let _ = self.revoke(&id, &s).await;
-                }
+            if let Ok(Some(bytes)) = bytes
+                && let Ok(s) = self.open::<Session>(&id, &bytes)
+            {
+                let _ = self.revoke(&id, &s).await;
             }
         }
         // ponytail: encrypted login receipts live with session rows; collect both together
@@ -1880,12 +1882,13 @@ pub(crate) mod tests {
                 ("c:alice", "silicon"),
                 ("si:assistant", "carbon"),
             ] {
-                let mut reply = f.iam.reply.lock().unwrap();
-                reply["public_id"] = actor.into();
-                reply["actor_type"] = kind.into();
-                reply["authorization"]["public_id"] = actor.into();
-                reply["authorization"]["actor_type"] = kind.into();
-                drop(reply);
+                {
+                    let mut reply = f.iam.reply.lock().unwrap();
+                    reply["public_id"] = actor.into();
+                    reply["actor_type"] = kind.into();
+                    reply["authorization"]["public_id"] = actor.into();
+                    reply["authorization"]["actor_type"] = kind.into();
+                }
                 assert_eq!(
                     f.app
                         .auth
@@ -2373,14 +2376,15 @@ pub(crate) mod tests {
                 json!({"authenticated":false})
             );
             assert_eq!(state(), (true, false));
-            let requests = f.iam.revoke_requests.lock().unwrap();
-            assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
-            assert_eq!(requests[0].0, original.revoke_key);
-            assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
-            if unavailable {
-                assert_eq!(requests[0], requests[1]);
+            {
+                let requests = f.iam.revoke_requests.lock().unwrap();
+                assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
+                assert_eq!(requests[0].0, original.revoke_key);
+                assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
+                if unavailable {
+                    assert_eq!(requests[0], requests[1]);
+                }
             }
-            drop(requests);
             f.iam.status.store(503, Ordering::SeqCst);
             assert_eq!(
                 reopened.logout(&f.principal).await.unwrap(),
