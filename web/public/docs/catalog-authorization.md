@@ -37,7 +37,7 @@ account, organization and testing generation. Ordinary logout preserves consent.
 Revoke the grant in IAM to stop access; a denied or revoked grant requires a new
 explicit approval. Test-world cleanup removes its saved requests and grants.
 
-This release pins the official IAM 5.0.0 SDK at `52dd5ea7d48571e29e3b79371dfc27405644fbd9`. Deploy the matching IAM and Honeycomb
+This release pins the official IAM 5.0.0 SDK at `f1e9c4768029aacabe337ca41be52e05023d1631`. Deploy the matching IAM and Honeycomb
 reusable-token contracts, register the catalog endpoint and dependencies, preserve
 Ting's encryption key, and verify real approval, pagination, refresh and revocation
 before enabling it in production.

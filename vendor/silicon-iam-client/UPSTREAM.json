@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/teamofsilicons/silicon-iam",
-  "commit": "52dd5ea7d48571e29e3b79371dfc27405644fbd9",
+  "commit": "f1e9c4768029aacabe337ca41be52e05023d1631",
   "path": "crates/client",
   "version": "5.0.0",
   "dirty": false
