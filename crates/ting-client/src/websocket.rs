@@ -461,6 +461,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(
+        clippy::result_large_err,
+        reason = "the tungstenite handshake callback fixes its error response type"
+    )]
     async fn scoped_receiver_uses_its_own_route_and_keeps_capability_out_of_url() {
         let (listener, client) = fixture().await;
         let server = tokio::spawn(async move {

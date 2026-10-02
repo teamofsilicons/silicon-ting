@@ -524,19 +524,19 @@ impl Prepared {
                 )?,
             }
         }
-        if let Some(org) = selected_org {
-            if v["org_id"] != org {
-                return Err(Error::input(
-                    "Prepared request org differs from the selected org.",
-                ));
-            }
+        if let Some(org) = selected_org
+            && v["org_id"] != org
+        {
+            return Err(Error::input(
+                "Prepared request org differs from the selected org.",
+            ));
         }
         if let Some(t) = v.get("type").and_then(Value::as_str) {
             let app = type_app(t)?;
-            if let Some(a) = v.get("app_id").and_then(Value::as_str) {
-                if a != app {
-                    return Err(Error::input("Type does not belong to the selected app."));
-                }
+            if let Some(a) = v.get("app_id").and_then(Value::as_str)
+                && a != app
+            {
+                return Err(Error::input("Type does not belong to the selected app."));
             }
         }
         if v.get("key")
@@ -638,10 +638,10 @@ pub fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 pub fn write_private(path: &Path, bytes: &[u8], exclusive: bool) -> Result<()> {
-    if let Some(p) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        if !p.exists() {
-            return Err(Error::io());
-        }
+    if let Some(p) = path.parent().filter(|p| !p.as_os_str().is_empty())
+        && !p.exists()
+    {
+        return Err(Error::io());
     }
     let target = if exclusive {
         path.to_owned()
@@ -891,6 +891,22 @@ pub fn unique_ids(ids: Vec<String>) -> Result<Vec<String>> {
         })
         .collect()
 }
+/// Best-effort, bounded diagnostic events. Callers must pass categories and timings only.
+/// Credentials, user request bodies, attachment contents and local paths are never included.
+pub async fn telemetry(origin: &str, event: &str, data: Value) {
+    let Ok(origin) = api_origin(origin) else {
+        return;
+    };
+    let Ok(http) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_millis(1500))
+        .build()
+    else {
+        return;
+    };
+    let _ = http.post(format!("{origin}/v1/telemetry")).json(&json!({"table":"tingclidaemon","events":[{"id":uuid::Uuid::new_v4().to_string(),"type":event,"data":data,"metadata":{"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS}}]})).send().await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,20 +1071,4 @@ mod tests {
             );
         }
     }
-}
-
-/// Best-effort, bounded diagnostic events. Callers must pass categories and timings only.
-/// Credentials, user request bodies, attachment contents and local paths are never included.
-pub async fn telemetry(origin: &str, event: &str, data: Value) {
-    let Ok(origin) = api_origin(origin) else {
-        return;
-    };
-    let Ok(http) = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_millis(1500))
-        .build()
-    else {
-        return;
-    };
-    let _ = http.post(format!("{origin}/v1/telemetry")).json(&json!({"table":"tingclidaemon","events":[{"id":uuid::Uuid::new_v4().to_string(),"type":event,"data":data,"metadata":{"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS}}]})).send().await;
 }
