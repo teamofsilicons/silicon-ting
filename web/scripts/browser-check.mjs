@@ -42,7 +42,8 @@ try {
   await page.routeWebSocket('**/v1/ws?protocol=v1', ws => { inboxSocket = ws; ws.send(JSON.stringify({ op: 'ready', receiver_id: 'smoke-receiver', protocol: 'v1' })); ws.onMessage(data => { const message = JSON.parse(data); if (message.op === 'watch_inbox') ws.send(JSON.stringify({ op: 'watching_inbox', request_id: message.request_id, org_id: message.org_id })); }); });
   await page.goto(origin);
   await page.getByRole('heading', { name: /Good things start/ }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Connect with IAM', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Continue as Carbon', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Continue as Silicon', exact: true }).count(), 1);
   await page.screenshot({ path: '/tmp/ting-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Mobile layout must not overflow');
@@ -163,6 +164,58 @@ try {
     }), true, `Required-delivery consent must fit at ${width}px`);
   }
   await page.screenshot({ path: '/tmp/ting-mobile-connections.png', fullPage: true });
+  // Exercise real top-level navigation when the browser blocks popup windows.
+  const fallbackContext = await browser.newContext();
+  await fallbackContext.addInitScript(() => { window.open = () => null; });
+  const fallbackPage = await fallbackContext.newPage();
+  fallbackPage.on('pageerror', error => errors.push(error.message));
+  let fallbackKind = '', catalogAllowed = false, approvalAttempt = 0;
+  const approvalKeys = [];
+  await fallbackPage.route('**/v1/**', async route => {
+    const url = new URL(route.request().url());
+    let status = 200, body;
+    if (url.pathname === '/v1/session/login') {
+      fallbackKind = url.searchParams.get('identity_kind');
+      assert.ok(['carbon', 'silicon'].includes(fallbackKind));
+      assert.match(url.searchParams.get('popup_nonce'), /^[a-f0-9]{64}$/);
+      await route.fulfill({ status: 303, headers: { location: `${origin}/?iam_popup=complete&nonce=${url.searchParams.get('popup_nonce')}&result=ok` } });
+      return;
+    }
+    if (url.pathname === '/v1/me') {
+      status = fallbackKind ? 200 : 401;
+      body = fallbackKind ? { id: `${fallbackKind}:fallback`, kind: fallbackKind, authenticated: true } : { error: { code: 'authentication_required', message: 'Sign in required.' } };
+    } else if (url.pathname === '/v1/orgs') body = { items: [{ id: 'bricks', name: 'Bricks' }] };
+    else if (url.pathname.endsWith('/catalog-authorizations')) {
+      const request = route.request().postDataJSON();
+      approvalKeys.push(request.idempotency_key);
+      // The first response is uncertain; retry must preserve the original key.
+      catalogAllowed = ++approvalAttempt % 2 === 0;
+      body = { redirect_url: `${origin}/?iam_popup=complete&nonce=${request.popup_nonce}&result=${catalogAllowed ? 'ok' : 'error'}` };
+    } else if (url.pathname.endsWith('/apps')) {
+      status = catalogAllowed ? 200 : 403;
+      body = catalogAllowed ? { items: [{ app_id: 'local', name: 'Local app', can_manage_tings: true }] } : { error: { code: 'catalog_authorization_required', message: 'Approve Honeycomb access.' } };
+    } else body = { items: [] };
+    await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await fallbackPage.routeWebSocket('**/v1/ws?protocol=v1', ws => { ws.send(JSON.stringify({ op: 'ready', receiver_id: 'fallback', protocol: 'v1' })); });
+  for (const kind of ['Carbon', 'Silicon']) {
+    fallbackKind = ''; catalogAllowed = false;
+    await fallbackPage.goto(origin + '/?test-login=' + kind + '#apps');
+    await fallbackPage.getByRole('button', { name: `Continue as ${kind}`, exact: true }).last().click();
+    await fallbackPage.getByRole('heading', { name: 'Connect your applications', exact: true }).waitFor();
+    assert.equal(new URL(fallbackPage.url()).hash, '#apps', 'Full-page login returns to the requested page');
+    await fallbackPage.getByRole('button', { name: 'Review Honeycomb access', exact: true }).click();
+    await fallbackPage.getByRole('alert').filter({ hasText: 'Honeycomb approval did not finish.' }).waitFor();
+    assert.equal(new URL(fallbackPage.url()).hash, '#apps', 'Unfinished approval preserves its destination');
+    await fallbackPage.getByRole('button', { name: 'Review Honeycomb access', exact: true }).click();
+    await fallbackPage.getByRole('button', { name: 'Register type', exact: true }).waitFor();
+    assert.equal(new URL(fallbackPage.url()).hash, '#apps', 'Full-page approval returns to Applications');
+    assert.equal(await fallbackPage.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('ting.catalog.approval:')).length), 0, 'Successful approval clears its saved mutation key');
+  }
+  assert.equal(approvalKeys[0], approvalKeys[1], 'Carbon approval retry keeps its mutation key');
+  assert.equal(approvalKeys[2], approvalKeys[3], 'Silicon approval retry keeps its mutation key');
+  assert.notEqual(approvalKeys[0], approvalKeys[2], 'Different accounts get separate approval attempts');
+  await fallbackContext.close();
   assert.deepEqual(errors, [], 'No browser runtime errors');
-  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible/repeated view ACK, app unread refresh and read race, reconnect/foreground drawer reconciliation, safe URLs, silent filtering, canonical Carbon IDs, stale organization rejection, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout. No live IAM login or external API writes.');
+  console.log('Mock Chrome browser checks passed: public/mobile/docs, authenticated inbox, no background read ACK, visible/repeated view ACK, app unread refresh and read race, reconnect/foreground drawer reconciliation, safe URLs, silent filtering, canonical Carbon IDs, stale organization rejection, cross-org app filtering/preferences without management access, type ownership validation, explicit required-delivery enable/disable and failed-update preservation, mobile Connections layout, Carbon/Silicon full-page login, approval return destinations, stable retry keys and success cleanup. No live IAM login or external API writes.');
 } finally { await browser.close(); }
