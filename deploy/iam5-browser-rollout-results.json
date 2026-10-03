@@ -1,0 +1,409 @@
+{
+  "recorded_at": "2026-10-03T18:02:26.395319+00:00",
+  "version": "0.2.0",
+  "pull_request": "https://github.com/teamofsilicons/silicon-ting/pull/4",
+  "merge_commit": "469c22b0c74ad81733c048795c241bcced4525ba",
+  "backend": {
+    "release": "053255f394691f28-bd53fd5f31ce",
+    "commit": "053255f394691f2834dd631e9682cf9c01545c14",
+    "checksum": "bd53fd5f31ce4131b1e5d8588cbb19c8d15cb25c9395c956f049f727d30ade18",
+    "instance": "i-0559f9a77b4c1ca43",
+    "command_id": "0095f82f-e846-417b-b1ab-565b22419563",
+    "status": "success",
+    "workflow": "https://github.com/teamofsilicons/silicon-ting/actions/runs/37141819891",
+    "backup": {
+      "command_id": "352e1f6c-af1f-4373-a570-73d45d03c232",
+      "result": "success",
+      "completed_at": "2026-10-03T17:44:54Z"
+    }
+  },
+  "runtime": {
+    "changed": true,
+    "previous_version_id": "9b9f51f5-f151-4b39-a80d-14afc85ef061",
+    "version_id": "c5bd09aa-e7e2-4c4b-9346-1bc1626bb9f0",
+    "previous_consent_url": "https://iam.teamofsilicons.com/login",
+    "consent_url": "https://auth.iam.teamofsilicons.com/login"
+  },
+  "frontend": {
+    "id": "dpl_DXED4Lw4YruBkQbrbD6dZN6MoCyb",
+    "url": "silicon-ting-97s261hxn-shubham-guptas-projects-7ecb7811.vercel.app",
+    "state": "READY",
+    "target": "production",
+    "commit": "469c22b0c74ad81733c048795c241bcced4525ba"
+  },
+  "validation": {
+    "ci": "https://github.com/teamofsilicons/silicon-ting/actions/runs/37142423438",
+    "workspace_tests": 88,
+    "frontend_unit_tests": 8,
+    "formatting": "passed",
+    "strict_clippy": "passed",
+    "frontend_build": "passed",
+    "chrome_regression": "passed; includes both identity kinds, blocked popup fallback, approval retry identity, account separation, mobile layout and existing inbox/subscription behavior"
+  },
+  "public_backend_checks": [
+    {
+      "check": "discovery",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "unauthenticated session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "foreign browser origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "browser mutation without origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "duplicate JSON keys",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "unknown telemetry table",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "telemetry byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "HTTP body byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "untrusted session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "scoped receiver requires capability",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "full session cannot substitute for receiver capability",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "receiver capability cannot substitute for full session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "receiver bootstrap validates signed input",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "unknown route",
+      "status": 404,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com discovery CORS",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com error CORS",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com preflight CORS",
+      "status": 204,
+      "passed": true
+    },
+    {
+      "check": "https://dm.teamofsilicons.com discovery CORS",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "https://dm.teamofsilicons.com error CORS",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "https://dm.teamofsilicons.com preflight CORS",
+      "status": 204,
+      "passed": true
+    },
+    {
+      "check": "https://interface.teamofsilicons.com discovery CORS",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "https://interface.teamofsilicons.com error CORS",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "https://interface.teamofsilicons.com preflight CORS",
+      "status": 204,
+      "passed": true
+    },
+    {
+      "check": "https://hook.teamofsilicons.com discovery CORS",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "https://hook.teamofsilicons.com error CORS",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "https://hook.teamofsilicons.com preflight CORS",
+      "status": 204,
+      "passed": true
+    },
+    {
+      "passed": 26,
+      "url": "https://backend.ting.teamofsilicons.com"
+    }
+  ],
+  "public_frontend_checks": [
+    {
+      "check": "discovery",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "unauthenticated session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "foreign browser origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "browser mutation without origin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "duplicate JSON keys",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "unknown telemetry table",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "telemetry byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "HTTP body byte limit",
+      "status": 413,
+      "passed": true
+    },
+    {
+      "check": "untrusted session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "scoped receiver requires capability",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "full session cannot substitute for receiver capability",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "receiver capability cannot substitute for full session",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "receiver bootstrap validates signed input",
+      "status": 400,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com discovery CORS",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com error CORS",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "https://ting.teamofsilicons.com preflight CORS",
+      "status": 204,
+      "passed": true
+    },
+    {
+      "passed": 16,
+      "url": "https://ting.teamofsilicons.com"
+    }
+  ],
+  "iam_browser_http_checks": [
+    {
+      "check": "carbon full page",
+      "passed": true
+    },
+    {
+      "check": "carbon popup",
+      "passed": true
+    },
+    {
+      "check": "silicon full page",
+      "passed": true
+    },
+    {
+      "check": "silicon popup",
+      "passed": true
+    },
+    {
+      "check": "invalid kind, nonce and return destination rejected",
+      "passed": true
+    },
+    {
+      "check": "catalog callback requires authenticated session",
+      "passed": true
+    }
+  ],
+  "live_browser": {
+    "url": "https://ting.teamofsilicons.com/",
+    "http_status": 200,
+    "mobile": [
+      {
+        "width": 390,
+        "overflow": false
+      },
+      {
+        "width": 320,
+        "overflow": false
+      }
+    ],
+    "login_redirects": [
+      {
+        "status": 200,
+        "identity_kind": "carbon",
+        "display": "popup"
+      },
+      {
+        "status": 200,
+        "identity_kind": "silicon",
+        "display": "popup"
+      }
+    ],
+    "errors": []
+  },
+  "isolated_login": {
+    "checked_at": "2026-10-03T17:58:49.219212+00:00",
+    "backend": "https://backend.ting.teamofsilicons.com",
+    "backend_commit": "053255f394691f2834dd631e9682cf9c01545c14",
+    "backend_commit_evidence_ssm_command": "0095f82f-e846-417b-b1ab-565b22419563",
+    "environment_id": "5dc74d75-6802-4dbd-9289-691c4360c452",
+    "operation": "isolated_existing_actor_fresh_slt_login_post_deploy",
+    "production_identities_used": false,
+    "notification_writes": 0,
+    "external_catalog_grants": 0,
+    "scope_configuration_changes": 0,
+    "test_login_scope_approval": "Only current Ting IAM login scopes from authoritative choices",
+    "results": [
+      {
+        "kind": "carbon",
+        "statuses": {
+          "iam_challenge": 201,
+          "iam_authenticate": 200,
+          "iam_login_choices": 200,
+          "iam_fresh_slt": 201,
+          "login": 201,
+          "me": 200,
+          "orgs": 200,
+          "logout": 200,
+          "after_logout": 401,
+          "iam_logout": 204,
+          "iam_after_logout": 401
+        },
+        "checks": {
+          "login_identity_matches": true,
+          "me_identity_matches": true,
+          "test_environment_matches": true,
+          "test_generation_present": true,
+          "fixture_org_available": true
+        },
+        "cleanup_completed": true,
+        "login_scope_count": 3,
+        "consent_required": false,
+        "environment": {
+          "kind": "testing",
+          "id": "5dc74d75-6802-4dbd-9289-691c4360c452",
+          "generation": 1
+        },
+        "errors": {
+          "after_logout": "session_expired",
+          "iam_after_logout": "unauthenticated"
+        },
+        "passed": true
+      },
+      {
+        "kind": "silicon",
+        "statuses": {
+          "iam_authenticate": 200,
+          "iam_login_choices": 200,
+          "iam_fresh_slt": 201,
+          "login": 201,
+          "me": 200,
+          "orgs": 200,
+          "logout": 200,
+          "after_logout": 401,
+          "iam_logout": 204,
+          "iam_after_logout": 401
+        },
+        "checks": {
+          "login_identity_matches": true,
+          "me_identity_matches": true,
+          "test_environment_matches": true,
+          "test_generation_present": true,
+          "fixture_org_available": true
+        },
+        "cleanup_completed": true,
+        "login_scope_count": 3,
+        "consent_required": false,
+        "environment": {
+          "kind": "testing",
+          "id": "5dc74d75-6802-4dbd-9289-691c4360c452",
+          "generation": 1
+        },
+        "errors": {
+          "after_logout": "session_expired",
+          "iam_after_logout": "unauthenticated"
+        },
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "limitations": [
+    "No production-user login or new external Honeycomb catalog grant was created during verification. Catalog completion, decline, mismatch and uncertain-exchange recovery were covered by automated tests.",
+    "Raw curl probes to the IAM login host returned empty HTTP 404 responses; the real Chrome browser received HTTP 200 and rendered the expected Carbon and Silicon login screens."
+  ]
+}

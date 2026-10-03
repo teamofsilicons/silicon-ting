@@ -1,8 +1,22 @@
 # Deployment verification
 
-Updated 2026-09-25 UTC. Ting **0.1.9**, release source `6853b4e247f434e358f4bbd05e5d23d5ae7870cd`, is published natively, on Honeycomb and crates.io, and the backend is [deployed and healthy](backend-019-deployment-results.json). Public targets are [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
+Updated 2026-10-03 UTC. Ting **0.2.0** is deployed at [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com). The [IAM 5 browser rollout record](iam5-browser-rollout-results.json) identifies the exact sources and verification scope.
 
-## Current 0.1.9 release
+## Current 0.2.0 IAM 5 browser rollout
+
+[PR #4](https://github.com/teamofsilicons/silicon-ting/pull/4) adds separate Carbon/Silicon login choices and automatic Honeycomb catalog-approval callbacks. Blocked popups continue in the same tab and return to the original page; approval retries retain their operation identity. Exchanges without an actor use authenticated introspection before local session creation. The CLI manual-code contract remains available.
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | 88 workspace unit tests, strict Clippy, formatting, 8 frontend unit tests and production build passed. Chrome regression covers popup correlation, both identity kinds, full-page fallback, approval retry keys, account isolation and mobile layout alongside existing inbox checks. |
+| Backend | Tested ARM64 archive `053255f394691f2834dd631e9682cf9c01545c14` was checksum-verified and installed through SSM after a successful consistent backup. Health checks passed. Runtime consent URL now uses `https://auth.iam.teamofsilicons.com/login`; other runtime configuration is preserved. |
+| Frontend | Vercel production promoted merge source `469c22b0c74ad81733c048795c241bcced4525ba`. Later rollout-record changes do not alter its application code. Real Chrome rendered the production page and both matching IAM login screens with HTTP 200, no runtime errors and no overflow at 390px or 320px. |
+| Public boundaries | 26 backend HTTP/CORS checks, 16 frontend-proxy checks and 6 browser-login/callback groups passed. Invalid account kind, nonce, return destination and unauthenticated callbacks are rejected. |
+| Isolated IAM login | Existing Carbon and Silicon actors obtained fresh IAM SLTs, logged into deployed Ting, verified identity, exact test environment/generation and organization, then logged out. Both Ting and IAM sessions were rejected afterward. No production identities or notifications were used. |
+
+No new external Honeycomb catalog grant or production-user login was created during verification; catalog completion and recovery were checked by automated tests. Raw curl probes to IAM returned 404 even while actual Chrome login pages rendered successfully, so those probes are not treated as proof of a browser outage.
+
+## Historical 0.1.9 release
 
 After a Honeycomb-only install, the first `ting webhook` starts the daemon itself, as the calling account, with no sudo, prompt, installer or service manager. The CLI connects first and starts nothing while a daemon answers. An installed system service is still preferred but is only asked with `systemctl --no-ask-password`. The sudo installer is now optional start-at-boot supervision. New `ting daemon start` needs no login and suits a liveness tick.
 
