@@ -1,6 +1,6 @@
 # Ting CLI
 
-> **Integration preview for Ting 0.2.0 / IAM 5.0.0.** Documentation is published before the coordinated runtime rollout. The new catalog authorization routes require the matching deployed Ting and Honeycomb services.
+> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
 
 
 The v1 implementation contract, based on [understanding.md](understanding.md), [iam.md](iam.md), and the latest product decisions. These commands are not implemented yet. Examples show JSON output; without `--json`, print the same information in readable text. The CLI and daemon use the stateless Rust client library.

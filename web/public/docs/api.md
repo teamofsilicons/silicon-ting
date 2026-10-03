@@ -1,6 +1,6 @@
 # Ting API — v1 implementation contract
 
-> **Integration preview for Ting 0.2.0 / IAM 5.0.0.** Documentation is published before the coordinated runtime rollout. The new catalog authorization routes require the matching deployed Ting and Honeycomb services.
+> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
 
 
 This is the contract to build. Examples use sample IDs and timestamps. [cli.md](cli.md) defines the matching commands; [understanding.md](understanding.md) and [iam.md](iam.md) contain the original notes. The decisions here include the later product changes.
