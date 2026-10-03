@@ -1595,7 +1595,7 @@ pub(crate) mod tests {
                 }
                 "/api/v1/obo-access/authorizations" => {
                     let reply = iam.reply.lock().unwrap().clone();
-                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://iam.example/obo/consent?request=catalog"})
+                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://auth.iam.teamofsilicons.com/obo/consent?request=00000000-0000-4000-8000-000000000010"})
                 }
                 "/api/v1/obo-access/tokens" => {
                     let key = request.headers()["idempotency-key"]
@@ -1848,9 +1848,69 @@ pub(crate) mod tests {
             .1
             .to_string();
         let attempt: crate::BrowserLoginAttempt =
-            serde_json::from_str(&f.app.store.take_login_attempt(&state).unwrap()).unwrap();
+            serde_json::from_str(&f.app.store.read_login_attempt(&state).unwrap()).unwrap();
         assert_eq!(attempt.identity_kind.as_deref(), Some("silicon"));
         assert_eq!(attempt.popup_nonce, Some("a".repeat(64)));
+    }
+
+    #[tokio::test]
+    async fn browser_callback_recovers_the_same_login_after_an_uncertain_exchange() {
+        let f = fixture(false).await;
+        let attempt = crate::BrowserLoginAttempt {
+            next: "/".into(),
+            identity_kind: Some("silicon".into()),
+            popup_nonce: Some("a".repeat(64)),
+        };
+        let state = f
+            .app
+            .store
+            .login_attempt(&serde_json::to_string(&attempt).unwrap())
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", format!("ting_login={state}").parse().unwrap());
+        let callback = json!({"state":state,"slt":"browser-original"});
+        f.iam.status.store(503, Ordering::SeqCst);
+        let temporary = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(temporary.status(), 503);
+        assert!(!f.app.store.read_login_attempt(&state).unwrap().is_empty());
+        f.iam.status.store(200, Ordering::SeqCst);
+        let recovered = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(recovered.status(), 303);
+        assert!(
+            recovered.headers()["location"]
+                .to_str()
+                .unwrap()
+                .contains("result=ok")
+        );
+        let calls = f.iam.token_requests.lock().unwrap().clone();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], calls[1]);
+        // Lost browser responses replay only the original session, never a changed SLT.
+        let replay = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(
+            replay.headers()["set-cookie"],
+            recovered.headers()["set-cookie"]
+        );
+        let changed = crate::browser_callback(
+            &f.app,
+            &headers,
+            &json!({"state":state,"slt":"browser-changed"}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            changed.headers()["location"]
+                .to_str()
+                .unwrap()
+                .contains("result=error")
+        );
+        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]

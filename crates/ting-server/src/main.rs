@@ -527,6 +527,7 @@ async fn http(
                     .and_then(Value::as_str)
                     .filter(|_| f.get("error").is_none()),
                 state,
+                v::string(&f, "authorization_id", 36)?,
             )
             .await?;
         return popup_login_response(&app, &nonce, success);
@@ -1003,7 +1004,7 @@ async fn browser_callback(app: &App, h: &HeaderMap, f: &Value) -> Result<Respons
             "Start a new login from Ting.",
         ));
     }
-    let saved = app.store.take_login_attempt(state)?;
+    let saved = app.store.read_login_attempt(state)?;
     let attempt: BrowserLoginAttempt = if saved.starts_with('/') {
         BrowserLoginAttempt {
             next: saved,
@@ -1025,6 +1026,10 @@ async fn browser_callback(app: &App, h: &HeaderMap, f: &Value) -> Result<Respons
     let (_, session) = match exchanged {
         Ok(value) => value,
         Err(error) => {
+            if error.status >= 500 || error.status == 429 {
+                return Ok((StatusCode::SERVICE_UNAVAILABLE, [("Content-Type", "text/html; charset=utf-8"), ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer")],
+                    r#"<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Retry Ting sign-in</title><main><h1>Sign-in was interrupted</h1><p>Your original sign-in is still saved. Try again to finish it safely.</p><a href="">Retry sign-in</a></main></html>"#).into_response());
+            }
             if let Some(nonce) = attempt.popup_nonce.as_deref() {
                 return popup_login_response(app, nonce, false);
             }

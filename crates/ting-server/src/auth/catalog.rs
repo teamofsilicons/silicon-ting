@@ -220,9 +220,22 @@ impl Auth {
                 .map_err(iam_error)?;
             let url = result.authorization_url.as_ref().ok_or_else(unavailable)?;
             let url = url::Url::parse(url).map_err(|_| unavailable())?;
-            if !(url.scheme() == "https"
-                || (url.scheme() == "http"
-                    && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
+            let configured = url::Url::parse(
+                &std::env::var("TING_IAM_CONSENT_URL")
+                    .unwrap_or_else(|_| "https://auth.iam.teamofsilicons.com/login".into()),
+            )
+            .map_err(|_| unavailable())?;
+            let request_ids: Vec<_> = url
+                .query_pairs()
+                .filter(|(key, _)| key == "request")
+                .map(|(_, value)| value.into_owned())
+                .collect();
+            if url.origin() != configured.origin()
+                || url.path() != "/obo/consent"
+                || request_ids != [result.id.to_string()]
+                || !(url.scheme() == "https"
+                    || (url.scheme() == "http"
+                        && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
                 || !url.username().is_empty()
                 || url.password().is_some()
                 || url.fragment().is_some()
@@ -255,6 +268,7 @@ impl Auth {
         id: &str,
         code: Option<&str>,
         state: &str,
+        iam_id: &str,
     ) -> Result<(String, bool)> {
         let (session, authority) = self.authority(p, org).await?;
         let lock = self.lock(&format!("catalog-request/{id}"));
@@ -262,7 +276,13 @@ impl Auth {
         let mut pending = self
             .catalog_record::<Pending>("pending", id)?
             .ok_or_else(Error::not_found)?;
-        if pending.binding != binding(&session, &authority.org_id) || pending.state != state {
+        if pending.binding != binding(&session, &authority.org_id)
+            || pending.state != state
+            || pending
+                .authorization
+                .as_ref()
+                .is_none_or(|a| a.id.to_string() != iam_id)
+        {
             return Err(Error::not_found());
         }
         let nonce = pending.popup_nonce.clone().ok_or_else(Error::not_found)?;
@@ -456,23 +476,56 @@ mod tests {
         let id = request["authorization_id"].as_str().unwrap();
         let state = request["state"].as_str().unwrap();
         assert!(
-            auth.catalog_browser_callback(p, "tos", id, Some("obc_browser"), "wrong-state")
-                .await
-                .is_err()
+            auth.catalog_browser_callback(
+                p,
+                "tos",
+                id,
+                Some("obc_browser"),
+                "wrong-state",
+                "00000000-0000-4000-8000-000000000010"
+            )
+            .await
+            .is_err()
         );
         assert!(
-            auth.catalog_browser_callback(p, "elsewhere", id, Some("obc_browser"), state)
-                .await
-                .is_err()
+            auth.catalog_browser_callback(
+                p,
+                "elsewhere",
+                id,
+                Some("obc_browser"),
+                state,
+                "00000000-0000-4000-8000-000000000010"
+            )
+            .await
+            .is_err()
         );
         assert!(
             auth.catalog_start(p, "tos", "browser-catalog-flow-key")
                 .await
                 .is_err()
         );
+        assert!(
+            auth.catalog_browser_callback(
+                p,
+                "tos",
+                id,
+                Some("obc_browser"),
+                state,
+                "00000000-0000-4000-8000-000000000099"
+            )
+            .await
+            .is_err()
+        );
         f.iam.catalog_token_status.store(503, Ordering::SeqCst);
         let (nonce, success) = auth
-            .catalog_browser_callback(p, "tos", id, Some("obc_browser"), state)
+            .catalog_browser_callback(
+                p,
+                "tos",
+                id,
+                Some("obc_browser"),
+                state,
+                "00000000-0000-4000-8000-000000000010",
+            )
             .await
             .unwrap();
         assert_eq!(nonce, "a".repeat(64));
