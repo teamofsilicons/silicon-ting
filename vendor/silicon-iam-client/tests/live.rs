@@ -108,8 +108,8 @@ async fn enrol(anonymous: &Client, handle: &str, fixed_code: Option<&str>) -> Cl
         .complete(
             session,
             &models::CarbonSignupComplete {
-                carbon_id: format!("c:{handle}"),
-                display_name: handle.to_owned(),
+                carbon_id: Some(format!("c:{handle}")),
+                display_name: Some(handle.to_owned()),
                 timezone: None,
                 profile_photo: None,
             },
@@ -1037,11 +1037,18 @@ async fn application_testing_imports_cycles_and_preserves_obo_authority() {
                     webhook_secret: "testing-webhook-secret-at-least-32-characters".to_owned(),
                     base_url: "https://testing.example.test".to_owned(),
                     obo_endpoints: Some(vec![models::ApplicationOboEndpoint {
+                        obo_id: None,
+                        name: None,
+                        description: None,
+                        note_to_user: None,
+                        additional_warnings: None,
                         ttl_seconds: Some(900),
                         critical: true,
                         endpoint_id: "operation".to_owned(),
                         path: "/operation".to_owned(),
                         metadata: serde_json::json!({}),
+                        downstream: None,
+                        downstream_ttl_seconds: None,
                     }]),
                 },
                 &Mutation::new(),
@@ -1292,7 +1299,8 @@ async fn application_testing_imports_cycles_and_preserves_obo_authority() {
         choices
             .scopes
             .iter()
-            .any(|scope| scope.scope.starts_with("obo:"))
+            .all(|scope| !scope.scope.starts_with("obo:")),
+        "ordinary login never grants OBO endpoint permissions"
     );
     let slt = user
         .auth()
@@ -1347,39 +1355,76 @@ async fn application_testing_imports_cycles_and_preserves_obo_authority() {
             .await
             .is_err()
     );
-    let digest = silicon_iam_client::api::obo::body_sha256(b"{\"operation\":1}");
-    let exchange = models::OboExchangeRequest {
-        org_id: None,
-        subject_token: tokens.access_token,
-        audience: apps[1].application.app_id.clone(),
-        endpoint_id: "operation".to_owned(),
-        metadata: serde_json::json!({}),
-        request: models::OboExchangeRequestBinding {
-            method: "POST".to_owned(),
-            body_sha256: digest.clone(),
-        },
-    };
-    let proof = caller
+    let authorization = caller
         .obo()
-        .exchange_signed(&exchange, &catalog, &Mutation::new())
+        .authorize(
+            &models::OboAuthorizationRequest {
+                redirect_uri: None,
+                state: None,
+                subject_token: tokens.access_token,
+                org_id: user_org.clone(),
+                endpoints: vec![models::OboAuthorizationEndpoint {
+                    audience: apps[1].application.app_id.clone(),
+                    endpoint_id: "operation".to_owned(),
+                }],
+            },
+            &Mutation::new(),
+        )
         .await
-        .expect("declared and consented cross-org test OBO");
+        .expect("separate OBO authorization request");
+    let shown = user
+        .obo()
+        .consent(authorization.id)
+        .await
+        .expect("direct user reviews OBO");
+    let approved = user
+        .obo()
+        .decide(
+            shown.id,
+            &models::OboConsentDecision {
+                contexts: None,
+                decision: models::OboConsentDecisionDecision::Approve,
+                version: shown.version,
+            },
+            &Mutation::new(),
+        )
+        .await
+        .expect("affirmative OBO consent");
+    let issued = caller
+        .obo()
+        .exchange_code(
+            authorization.id,
+            approved
+                .authorization_code
+                .as_deref()
+                .expect("approval code"),
+            &Mutation::new(),
+        )
+        .await
+        .expect("endpoint-specific OBO token pair");
+    assert_eq!(issued.items.len(), 1);
+    let token = &issued.items[0];
     assert_eq!(
-        proof.expires_in, 900,
+        token.expires_in, 900,
         "test imports preserve provider lifetime"
     );
-    let context = proof.testing_context.expect("audience test credentials");
+    let context = token
+        .testing_context
+        .as_ref()
+        .expect("audience test credentials");
     assert_eq!(context.app_id, apps[1].application.app_id);
     assert_ne!(context.app_secret, apps[1].app_secret);
     assert_eq!(context.iam_test_key, created.iam_test_key);
-    let audience =
-        sandbox.with_credential(Credential::application(context.app_id, context.app_secret));
-    let verification = models::OboVerifyRequest {
-        access_proof: proof.access_proof,
-        request: models::OboVerifyRequestBinding {
+    let audience = sandbox.with_credential(Credential::application(
+        context.app_id.clone(),
+        context.app_secret.clone(),
+    ));
+    let verification = models::OboTokenVerificationRequest {
+        access_token: token.access_token.clone(),
+        endpoint_id: "operation".to_owned(),
+        request: models::OboTokenRequestBinding {
             method: "POST".to_owned(),
             path: "/operation".to_owned(),
-            body_sha256: digest,
         },
     };
     let mut wrong_request = verification.clone();
@@ -1410,8 +1455,30 @@ async fn application_testing_imports_cycles_and_preserves_obo_authority() {
     assert!(verified.authorization.org_role.is_none());
     assert!(verified.authorization.tags.is_none());
     assert!(
+        audience.obo().verify(&verification).await.is_ok(),
+        "endpoint token is reusable"
+    );
+    let refreshed = caller
+        .obo()
+        .refresh(&token.refresh_token, &Mutation::new())
+        .await
+        .expect("rotate OBO refresh");
+    assert_ne!(refreshed.items[0].refresh_token, token.refresh_token);
+    user.obo()
+        .revoke(token.grant_id, &Mutation::new())
+        .await
+        .expect("user revokes OBO grant");
+    assert!(
         audience.obo().verify(&verification).await.is_err(),
-        "proof is single use"
+        "revocation ends issued access"
+    );
+    assert!(
+        caller
+            .obo()
+            .refresh(&refreshed.items[0].refresh_token, &Mutation::new())
+            .await
+            .is_err(),
+        "revocation ends refresh"
     );
 
     // Human imports reuse the same graph implementation. Re-importing after

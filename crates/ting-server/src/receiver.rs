@@ -554,7 +554,7 @@ mod tests {
         HeaderMap::from_iter([
             (
                 axum::http::header::AUTHORIZATION,
-                "Bearer fixture-proof".parse().unwrap(),
+                "Bearer oba_fixture".parse().unwrap(),
             ),
             (
                 "iam_test_app_secret".parse().unwrap(),
@@ -590,7 +590,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_requires_fresh_proof_and_recovers_exact_bytes_without_extending_expiry() {
+    async fn bootstrap_reverifies_reusable_authority_and_recovers_exact_bytes_without_extending_expiry()
+     {
         let f = fixture(true).await;
         let b = body(&f, "lost-response");
         let raw = serde_json::to_vec(&b).unwrap();
@@ -609,7 +610,7 @@ mod tests {
         assert_eq!(
             f.take_calls()
                 .iter()
-                .filter(|p| p.as_str() == "/api/v1/obo-access/verify")
+                .filter(|p| p.as_str() == "/api/v1/obo-access/token-verifications")
                 .count(),
             2
         );

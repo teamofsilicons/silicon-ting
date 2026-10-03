@@ -56,6 +56,19 @@ impl Auth<'_> {
             .await
     }
 
+    /// Proves the current Silicon password for one protected action and resource.
+    /// # Errors
+    /// Requires a Silicon IAM session and the exact current STK.
+    pub async fn silicon_step_up(
+        &self,
+        action: &models::StepUpAction,
+        resource_id: &str,
+        silicon_token: &str,
+        mutation: &Mutation,
+    ) -> Result<models::StepUpTokenResponse> {
+        self.0.post(&["silicon-auth","step-up"],&serde_json::json!({"action":action,"resource_id":resource_id,"silicon_token":silicon_token}),mutation).await
+    }
+
     /// Exchanges a refresh token for a new pair.
     ///
     /// Refresh tokens rotate: the presented one is consumed. Store the new one

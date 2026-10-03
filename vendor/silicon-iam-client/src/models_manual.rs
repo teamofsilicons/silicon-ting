@@ -73,3 +73,22 @@ mod tests {
         assert!(encoded.get("tag_id").is_none());
     }
 }
+
+/// Completed Carbon signup, profile and authenticated session in one flattened wire object.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CarbonSignupResult {
+    /// Newly created profile.
+    #[serde(flatten)]
+    pub profile: crate::models::CarbonSelf,
+    /// Session established atomically with account creation.
+    #[serde(flatten)]
+    pub tokens: crate::models::IamTokenResponse,
+    /// Required next onboarding step.
+    pub onboarding: SignupOnboarding,
+}
+/// Next required account onboarding step.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignupOnboarding {
+    /// True when the account must create or join its first organization.
+    pub requires_organization: bool,
+}

@@ -152,7 +152,7 @@ impl WebSocket {
     }
 
     /// Send the original UTF-8 body string once. A transport error/cancellation may
-    /// follow server acceptance; retain these bytes/key and obtain a fresh proof.
+    /// follow server acceptance; retain these bytes/key and use a valid OBO access token.
     pub async fn send(
         &mut self,
         prepared: &Prepared,
@@ -204,7 +204,7 @@ impl WebSocket {
     }
 
     /// Start a scoped receiver watch using a capability from
-    /// `receivers.bootstrap`. Obtain a fresh proof and a new operation key for
+    /// `receivers.bootstrap`. Use a valid OBO access token and a new operation key for
     /// renewal, then reconnect; an old operation never extends its original expiry.
     pub async fn watch_receiver(&mut self, receiver_token: &str) -> Result<Value> {
         bounded(receiver_token, "Receiver token", 32768)?;
@@ -318,7 +318,7 @@ fn protocol_error() -> Error {
     Error::new(
         "invalid_server_response",
         "Server returned an invalid WebSocket response; an in-flight request's outcome may be uncertain.",
-        "Check protocol compatibility. Preserve the original send bytes/key and obtain a fresh proof before retrying.",
+        "Check protocol compatibility. Preserve the original send bytes/key and use a valid OBO access token before retrying.",
         false,
     )
 }
@@ -461,6 +461,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(
+        clippy::result_large_err,
+        reason = "the tungstenite handshake callback fixes its error response type"
+    )]
     async fn scoped_receiver_uses_its_own_route_and_keeps_capability_out_of_url() {
         let (listener, client) = fixture().await;
         let server = tokio::spawn(async move {
@@ -725,7 +729,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, "connection_failed");
-        assert!(error.hint.contains("fresh proof"));
+        assert!(error.hint.contains("valid OBO access token"));
         let mut socket = WebSocket::connect(&client).await.unwrap();
         assert_eq!(
             socket

@@ -8,6 +8,86 @@ use crate::{Client, Mutation, Paging, Result, models};
 pub struct Invitations<'a>(pub(super) &'a Client);
 
 impl Invitations<'_> {
+    /// Existing Silicons visible through one of your active source organizations.
+    /// # Errors
+    /// Requires members.invite in the destination organization.
+    pub async fn silicon_candidates(&self, org: &str) -> Result<serde_json::Value> {
+        self.0
+            .get(&["organizations", org, "silicon-invitations", "candidates"])
+            .await
+    }
+    /// Invitations issued to existing Silicon accounts.
+    /// # Errors
+    /// Requires members.invite.
+    pub async fn silicon_list(&self, org: &str) -> Result<serde_json::Value> {
+        self.0
+            .get(&["organizations", org, "silicon-invitations"])
+            .await
+    }
+    /// Invites a visible Silicon from another organization you belong to.
+    /// # Errors
+    /// Fails for an unrelated/hidden Silicon, existing member or missing authority.
+    pub async fn silicon_create(
+        &self,
+        org: &str,
+        silicon_id: &str,
+        mutation: &Mutation,
+    ) -> Result<serde_json::Value> {
+        self.0
+            .post(
+                &["organizations", org, "silicon-invitations"],
+                &serde_json::json!({"silicon_id":silicon_id}),
+                mutation,
+            )
+            .await
+    }
+    /// Reads invitations addressed to the directly authenticated Silicon.
+    /// # Errors
+    /// Rejects Carbon and application sessions.
+    pub async fn silicon_inbox(&self) -> Result<serde_json::Value> {
+        self.0.get(&["me", "silicon-invitations"]).await
+    }
+    /// Accepts or declines an invitation as its Silicon account; custody is unchanged.
+    /// # Errors
+    /// Rejects another account, stale invitations or lost inviter authority.
+    pub async fn silicon_decide(
+        &self,
+        id: Uuid,
+        accept: bool,
+        mutation: &Mutation,
+    ) -> Result<serde_json::Value> {
+        self.0
+            .post(
+                &["me", "silicon-invitations", &id.to_string(), "decision"],
+                &serde_json::json!({"decision":if accept{"accept"}else{"decline"}}),
+                mutation,
+            )
+            .await
+    }
+    /// Revokes a pending invitation created in the organization.
+    /// # Errors
+    /// Requires members.invite; an accepted invitation is not a membership removal.
+    pub async fn silicon_revoke(
+        &self,
+        org: &str,
+        id: Uuid,
+        mutation: &Mutation,
+    ) -> Result<serde_json::Value> {
+        self.0
+            .post(
+                &[
+                    "organizations",
+                    org,
+                    "silicon-invitations",
+                    &id.to_string(),
+                    "revoke",
+                ],
+                &serde_json::json!({}),
+                mutation,
+            )
+            .await
+    }
+
     /// Invitations issued by this organization.
     ///
     /// # Errors

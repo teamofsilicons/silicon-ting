@@ -6,6 +6,49 @@ use crate::{Client, Mutation, Paging, Result, models};
 pub struct Organizations<'a>(pub(super) &'a Client);
 
 impl Organizations<'_> {
+    /// Reads the default directory visibility inherited by organization members.
+    ///
+    /// # Errors
+    /// Requires direct IAM login and `organization.update`.
+    pub async fn directory_visibility(
+        &self,
+        org: &str,
+    ) -> Result<super::members::DirectoryVisibility> {
+        self.0
+            .get(&["organizations", org, "directory-visibility"])
+            .await
+    }
+    /// Lists membership choices available to a directory policy manager.
+    ///
+    /// # Errors
+    /// Requires `organization.update` or `members.update_directory`.
+    pub async fn directory_visibility_candidates(&self, org: &str) -> Result<serde_json::Value> {
+        self.0
+            .get(&["organizations", org, "directory-visibility", "candidates"])
+            .await
+    }
+    /// Replaces the organization's default directional visibility policy.
+    ///
+    /// # Errors
+    /// Fails for stale version, foreign member IDs or insufficient authority.
+    pub async fn replace_directory_visibility(
+        &self,
+        org: &str,
+        version: i64,
+        mode: &str,
+        targets: &[String],
+        mutation: &Mutation,
+    ) -> Result<super::members::DirectoryVisibility> {
+        self.0
+            .put(
+                &["organizations", org, "directory-visibility"],
+                version,
+                &serde_json::json!({"mode":mode,"visible_membership_ids":targets}),
+                mutation,
+            )
+            .await
+    }
+
     /// Whether an organization handle can still be claimed.
     ///
     /// # Errors

@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
+/// Stored hook ID, context, organization, recipient, and session.
+pub type ActiveHookRow = (String, String, String, String, String);
+
 pub fn id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
@@ -755,7 +758,9 @@ impl Store {
         let db = self.lock()?;
         let row:Option<(String,String)>=db.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='hook' AND key=? AND expires>?",params![p.context,org,p.id,key,now()],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((fp, res)) = row {
-            if fp != b.to_string() {
+            // Compare the stored serialized fingerprint, not a JSON string value.
+            let request_fingerprint = b.to_string();
+            if fp != request_fingerprint {
                 return Err(conflict(
                     "idempotency_conflict",
                     "The webhook key belongs to a different creation request.",
@@ -926,10 +931,7 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    pub fn active_hooks(
-        &self,
-        receiver: &str,
-    ) -> Result<Vec<(String, String, String, String, String)>> {
+    pub fn active_hooks(&self, receiver: &str) -> Result<Vec<ActiveHookRow>> {
         let db = self.lock()?;
         let mut q = db.prepare(
             "SELECT id,ctx,org,recipient,session FROM hooks WHERE receiver=? AND state='connected'",
@@ -1312,12 +1314,12 @@ mod tests {
         assert!(completed.iter().all(|d| d["read_acked"] == false));
         // App read state cannot complete or discard a webhook's pending work.
         assert!(s.offer("a", &a).unwrap().is_some());
-        s.ack("a", &proof.org_id, &a, &[mid.clone()], "read")
+        s.ack("a", &proof.org_id, &a, std::slice::from_ref(&mid), "read")
             .unwrap();
         let receipts = s.deliveries(&mid).unwrap();
         change(false, "app-unread");
         assert_eq!(s.deliveries(&mid).unwrap(), receipts);
-        s.ack("a", &proof.org_id, &a, &[mid.clone()], "read")
+        s.ack("a", &proof.org_id, &a, std::slice::from_ref(&mid), "read")
             .unwrap();
         assert_eq!(
             s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
@@ -1328,14 +1330,15 @@ mod tests {
         assert!(s.offer("c", &c).unwrap().is_some());
         assert!(s.offer("b", &b).unwrap().is_some());
         // A genuinely new receiver completion may mark it read again.
-        s.ack("b", &proof.org_id, &b, &[mid.clone()], "read")
+        s.ack("b", &proof.org_id, &b, std::slice::from_ref(&mid), "read")
             .unwrap();
         assert_eq!(
             s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
             true
         );
         change(false, "unread-again");
-        s.read(&p, &proof.org_id, &[mid.clone()]).unwrap();
+        s.read(&p, &proof.org_id, std::slice::from_ref(&mid))
+            .unwrap();
         assert_eq!(
             s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
             true
@@ -1475,11 +1478,23 @@ mod tests {
         assert_eq!(offered["org_id"], other.org_id);
         assert_eq!(offered["tings"][0]["id"], mid);
         assert!(
-            s.ack("other", &proof.org_id, &other_hook, &[mid.clone()], "read")
-                .is_err()
+            s.ack(
+                "other",
+                &proof.org_id,
+                &other_hook,
+                std::slice::from_ref(&mid),
+                "read"
+            )
+            .is_err()
         );
-        s.ack("other", &other.org_id, &other_hook, &[mid.clone()], "read")
-            .unwrap();
+        s.ack(
+            "other",
+            &other.org_id,
+            &other_hook,
+            std::slice::from_ref(&mid),
+            "read",
+        )
+        .unwrap();
         assert_eq!(s.deliveries(&mid).unwrap()[0]["read_acked"], true);
         let grant = s
             .grants(&p.context, &proof.org_id, Some(&p.id), Some(&proof.app_id))
@@ -1592,7 +1607,11 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        assert!(!s.read(&p, "org-uuid", &[read.clone()]).unwrap().1);
+        assert!(
+            !s.read(&p, "org-uuid", std::slice::from_ref(&read))
+                .unwrap()
+                .1
+        );
         s.preference(
             &p,
             "org-uuid",
@@ -1637,7 +1656,11 @@ mod tests {
         assert_eq!(s.prune().unwrap(), 2);
         assert!(s.deliveries(&read).unwrap().is_empty());
         assert!(s.deliveries(&unread).unwrap().len() == 1);
-        assert!(s.read(&p, "org-uuid", &[unread.clone()]).unwrap().1);
+        assert!(
+            s.read(&p, "org-uuid", std::slice::from_ref(&unread))
+                .unwrap()
+                .1
+        );
         assert_eq!(s.hooks(&p, "org-uuid").unwrap()[0]["pending"], 0);
         assert_eq!(s.prune().unwrap(), 1);
     }
@@ -1662,12 +1685,12 @@ mod tests {
             )
             .unwrap();
         assert!(
-            !s.ack("a", "org-uuid", &a, &[mid.clone()], "delivery")
+            !s.ack("a", "org-uuid", &a, std::slice::from_ref(&mid), "delivery")
                 .unwrap()
                 .2
         );
         assert!(
-            s.ack("a", "org-uuid", &a, &[mid.clone()], "read")
+            s.ack("a", "org-uuid", &a, std::slice::from_ref(&mid), "read")
                 .unwrap()
                 .2
         );
@@ -1754,11 +1777,17 @@ mod tests {
             .unwrap()
             .to_owned();
         assert!(s.offer("recv_a", &a).unwrap().is_some());
-        s.ack("recv_a", "org-uuid", &a, &[mid.clone()], "delivery")
-            .unwrap();
+        s.ack(
+            "recv_a",
+            "org-uuid",
+            &a,
+            std::slice::from_ref(&mid),
+            "delivery",
+        )
+        .unwrap();
         assert!(s.offer("recv_a", &a).unwrap().is_none());
         assert!(s.offer("recv_b", &b).unwrap().is_some());
-        s.ack("recv_b", "org-uuid", &b, &[mid.clone()], "read")
+        s.ack("recv_b", "org-uuid", &b, std::slice::from_ref(&mid), "read")
             .unwrap();
         assert_eq!(
             s.ting(&p.context, "org-uuid", &mid, Some(&p.id), None)
@@ -1766,17 +1795,36 @@ mod tests {
             true
         );
         s.release_receiver("recv_a").unwrap();
-        s.bind(&p, "org-uuid", "recv_new", &[a.clone()], false, false)
-            .unwrap();
+        s.bind(
+            &p,
+            "org-uuid",
+            "recv_new",
+            std::slice::from_ref(&a),
+            false,
+            false,
+        )
+        .unwrap();
         assert!(s.offer("recv_new", &a).unwrap().is_some());
         assert!(
-            s.ack("recv_a", "org-uuid", &a, &[mid.clone()], "read")
+            s.ack("recv_a", "org-uuid", &a, std::slice::from_ref(&mid), "read")
                 .is_err()
         );
-        s.ack("recv_new", "org-uuid", &a, &[mid.clone()], "read")
-            .unwrap();
-        s.ack("recv_new", "org-uuid", &a, &[mid.clone()], "delivery")
-            .unwrap();
+        s.ack(
+            "recv_new",
+            "org-uuid",
+            &a,
+            std::slice::from_ref(&mid),
+            "read",
+        )
+        .unwrap();
+        s.ack(
+            "recv_new",
+            "org-uuid",
+            &a,
+            std::slice::from_ref(&mid),
+            "delivery",
+        )
+        .unwrap();
         assert!(
             s.deliveries(&mid)
                 .unwrap()
@@ -1813,7 +1861,7 @@ mod tests {
         )
         .unwrap();
         s.invalidate(&p.context, "org-uuid", &p.id).unwrap();
-        s.bind(&p, "org-uuid", "r", &[h.clone()], false, false)
+        s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), false, false)
             .unwrap();
         assert!(s.offer("r", &h).unwrap().is_none());
         s.ack(
@@ -1936,8 +1984,15 @@ mod tests {
         s.required_delivery(&p, &proof.org_id, sid, Some(false))
             .unwrap();
         s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
-        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
-            .unwrap();
+        s.bind(
+            &p,
+            &proof.org_id,
+            "r",
+            std::slice::from_ref(&h),
+            false,
+            false,
+        )
+        .unwrap();
         assert!(s.offer("r", &h).unwrap().is_none());
         let new_hook = hook(&s, &p, "new");
         assert!(s.offer("new", &new_hook).unwrap().is_none());
@@ -1963,8 +2018,15 @@ mod tests {
         s.revoke(&p.context, &proof.org_id, sid, Some(&p.id), None)
             .unwrap();
         s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
-        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
-            .unwrap();
+        s.bind(
+            &p,
+            &proof.org_id,
+            "r",
+            std::slice::from_ref(&h),
+            false,
+            false,
+        )
+        .unwrap();
         assert!(s.offer("r", &h).unwrap().is_none());
         assert_eq!(
             s.required_delivery(&p, &proof.org_id, sid, Some(true))
@@ -2014,13 +2076,21 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        s.read(&p, &proof.org_id, &[mid.clone()]).unwrap();
+        s.read(&p, &proof.org_id, std::slice::from_ref(&mid))
+            .unwrap();
         let after_read = hook(&s, &p, "after-read");
         assert!(s.offer("after-read", &after_read).unwrap().is_none());
         assert!(s.offer("r", &h).unwrap().is_some());
         s.release_receiver("r").unwrap();
-        s.bind(&p, &proof.org_id, "r", &[h.clone()], false, false)
-            .unwrap();
+        s.bind(
+            &p,
+            &proof.org_id,
+            "r",
+            std::slice::from_ref(&h),
+            false,
+            false,
+        )
+        .unwrap();
         let created = (chrono::Utc::now() - chrono::Months::new(2))
             .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
         s.lock()
@@ -2043,7 +2113,10 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        assert!(s.ack("r", "org-uuid", &h, &[mid.clone()], "read").is_err());
+        assert!(
+            s.ack("r", "org-uuid", &h, std::slice::from_ref(&mid), "read")
+                .is_err()
+        );
         s.offer("r", &h).unwrap();
         assert!(
             s.ack(
@@ -2074,12 +2147,12 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        s.read(&p, "org-uuid", &[mid.clone()]).unwrap();
+        s.read(&p, "org-uuid", std::slice::from_ref(&mid)).unwrap();
         assert!(
-            s.bind(&p, "org-uuid", "r", &[h.clone()], false, false)
+            s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), false, false)
                 .is_err()
         );
-        s.bind(&p, "org-uuid", "r", &[h.clone()], true, false)
+        s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), true, false)
             .unwrap();
         assert!(s.offer("r", &h).unwrap().is_some());
         let new = hook(&s, &p, "r2");
@@ -2107,12 +2180,12 @@ mod tests {
             response = s.send(&proof, &body("one")).unwrap().1;
             mid = response["id"].as_str().unwrap().to_owned();
             s.offer("r", &h).unwrap();
-            s.ack("r", "org-uuid", &h, &[mid.clone()], "delivery")
+            s.ack("r", "org-uuid", &h, std::slice::from_ref(&mid), "delivery")
                 .unwrap();
         }
         let s = Store::open(path.to_str().unwrap()).unwrap();
         assert_eq!(s.send(&proof, &body("one")).unwrap(), (200, response));
-        s.bind(&p, "org-uuid", "r2", &[h.clone()], false, false)
+        s.bind(&p, "org-uuid", "r2", std::slice::from_ref(&h), false, false)
             .unwrap();
         assert_eq!(s.offer("r2", &h).unwrap().unwrap()["tings"][0]["id"], mid);
     }

@@ -1,4 +1,6 @@
 //! Upstream authority is always checked live; only encrypted credentials are stored locally.
+mod catalog;
+
 use crate::{
     error::{Error, Result},
     validation as v,
@@ -21,6 +23,8 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex as AsyncMutex;
+
+type LoginReceiptRow = (String, i64, Option<Vec<u8>>, Option<Vec<u8>>);
 
 #[derive(Clone)]
 pub struct Principal {
@@ -190,7 +194,9 @@ impl Auth {
             CREATE TABLE IF NOT EXISTS logins (id TEXT PRIMARY KEY, slt_hash TEXT NOT NULL, created INTEGER NOT NULL, payload BLOB, response BLOB);
             CREATE INDEX IF NOT EXISTS logins_slt ON logins(slt_hash);
             CREATE TABLE IF NOT EXISTS invalidated_logins (id TEXT PRIMARY KEY);
-            CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);")?;
+            CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS catalog_authorizations(id TEXT PRIMARY KEY,payload BLOB NOT NULL,context TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS catalog_grants(id TEXT PRIMARY KEY,payload BLOB NOT NULL,context TEXT NOT NULL);")?;
         // Read the authoritative lifecycle generation without duplicating it in credentials.
         db.execute("ATTACH DATABASE ? AS delivery", [&config.database_path])?;
         let iam = Client::new(&config.iam_url)?.with_credential(Credential::application(
@@ -303,6 +309,13 @@ impl Auth {
         let tx = db.transaction().map_err(storage)?;
         tx.execute("INSERT INTO testing_contexts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,key_hash=excluded.key_hash",params![context,state,key_hash]).map_err(storage)?;
         if revoke {
+            tx.execute(
+                "DELETE FROM catalog_authorizations WHERE context=?",
+                [context],
+            )
+            .map_err(storage)?;
+            tx.execute("DELETE FROM catalog_grants WHERE context=?", [context])
+                .map_err(storage)?;
             // ponytail: lifecycle scans encrypted sessions; add a context index if this becomes large.
             let rows: Vec<(String, Vec<u8>)> = {
                 let mut q = tx
@@ -649,20 +662,20 @@ impl Auth {
     pub async fn authenticate(&self, token: &str, headers: &HeaderMap) -> Result<Principal> {
         let id = Self::session_id(token)?;
         let (session, _) = self.live(&id).await?;
-        if let Some(test) = self.test_headers(headers).await? {
-            if session.test.as_ref().is_none_or(|s| {
+        if let Some(test) = self.test_headers(headers).await?
+            && session.test.as_ref().is_none_or(|s| {
                 s.id != test.id
                     || s.secret != test.secret
                     || s.key != test.key
                     || s.generation != test.generation
-            }) {
-                return Err(Error::new(
-                    403,
-                    "test_context_mismatch",
-                    "Test headers do not match this session.",
-                    "Use the session's original current testing credentials.",
-                ));
-            }
+            })
+        {
+            return Err(Error::new(
+                403,
+                "test_context_mismatch",
+                "Test headers do not match this session.",
+                "Use the session's original current testing credentials.",
+            ));
         }
         Ok(Principal {
             context: session.context,
@@ -711,7 +724,7 @@ impl Auth {
                 "Obtain a fresh IAM short-lived token and start a new login attempt.",
             ));
         }
-        let prior: Option<(String, i64, Option<Vec<u8>>, Option<Vec<u8>>)> = self
+        let prior: Option<LoginReceiptRow> = self
             .db
             .lock()
             .unwrap()
@@ -968,10 +981,10 @@ impl Auth {
                     |r| r.get(0),
                 )
                 .optional();
-            if let Ok(Some(bytes)) = bytes {
-                if let Ok(s) = self.open::<Session>(&id, &bytes) {
-                    let _ = self.revoke(&id, &s).await;
-                }
+            if let Ok(Some(bytes)) = bytes
+                && let Ok(s) = self.open::<Session>(&id, &bytes)
+            {
+                let _ = self.revoke(&id, &s).await;
             }
         }
         // ponytail: encrypted login receipts live with session rows; collect both together
@@ -1024,12 +1037,7 @@ impl Auth {
     }
     pub async fn apps(&self, p: &Principal, org: &str) -> Result<Value> {
         let (s, a) = self.authority(p, org).await?;
-        let client = self.client(s.test.as_ref())?;
-        let catalog = client
-            .obo()
-            .endpoints("honeycomb")
-            .await
-            .map_err(iam_error)?;
+        let proof = self.catalog_token(p, &s, &a.org_id).await?;
         let mut items = Vec::new();
         let mut after: Option<String> = None;
         loop {
@@ -1038,39 +1046,22 @@ impl Auth {
                 body["after"] = json!(after);
             }
             let raw = serde_json::to_vec(&body).map_err(storage)?;
-            let proof = client
-                .obo()
-                .exchange_signed(
-                    &models::OboExchangeRequest {
-                        org_id: Some(a.org_id.clone()),
-                        subject_token: s.access.clone(),
-                        audience: "honeycomb".into(),
-                        endpoint_id: "honeycomb.apps.list".into(),
-                        metadata: json!({}),
-                        request: models::OboExchangeRequestBinding {
-                            method: "POST".into(),
-                            body_sha256: hash(&raw),
-                        },
-                    },
-                    &catalog,
-                    &Mutation::new(),
-                )
-                .await
-                .map_err(iam_error)?;
             let mut request = self
                 .http
                 .post(format!("{}/api/v1/obo/apps/list", self.honeycomb))
                 .header("Content-Type", "application/json")
-                .header("X-IAM-OBO-Access-Proof", proof.access_proof)
+                .header("X-IAM-OBO-Access-Token", &proof.access_token)
                 .body(raw);
-            if let Some(test) = proof.testing_context {
+            if let Some(test) = &proof.testing_context {
                 request = request
-                    .header("X-Testing-Environment-Key", test.iam_test_key)
-                    .header("IAM_TEST_APP_SECRET", test.app_secret);
+                    .header("X-Testing-Environment-Key", &test.iam_test_key)
+                    .header("IAM_TEST_APP_SECRET", &test.app_secret);
             }
             let response = request.send().await.map_err(|_| unavailable())?;
             if matches!(response.status().as_u16(), 401 | 403) {
-                return Err(forbidden());
+                self.forget_catalog(&s, &a.org_id, &proof.access_token)
+                    .await?;
+                return Err(catalog::required());
             }
             if !response.status().is_success() {
                 return Err(unavailable());
@@ -1133,17 +1124,25 @@ impl Auth {
             .as_str()
             .ok_or_else(|| Error::invalid("org_id is required."))?;
         let test = self.test_headers(headers).await?;
-        let verified=self.client(test.as_ref())?.obo().verify(&models::OboVerifyRequest {access_proof:proof.into(),request:models::OboVerifyRequestBinding {method:"POST".into(),path:path.into(),body_sha256:hash(raw)}}).await.map_err(|e|match e {
-            silicon_iam_client::Error::Api(a) if matches!(a.status,400|401|403|404|409|410)=>{
-                let code=if a.code.contains("consum") {"proof_consumed"} else if a.code.contains("expir") {"proof_expired"} else {"invalid_proof"};
-                Error::new(401,code,"IAM rejected this request-bound proof.","Obtain a fresh proof for the exact body, endpoint, audience and organization.")
-            }
-            _=>Error::new(503,"proof_verification_uncertain","IAM proof verification could not be confirmed; nothing was executed.","Retry the same Ting operation using a fresh proof."),
+        if !proof.starts_with("oba_") {
+            return Err(Error::new(
+                401,
+                "invalid_obo_token",
+                "A separately approved OBO access token is required.",
+                "Request and approve Ting endpoint permission in IAM.",
+            ));
+        }
+        let verified=self.client(test.as_ref())?.obo().verify(&models::OboTokenVerificationRequest {
+            access_token:proof.into(), endpoint_id:endpoint.into(),
+            request:models::OboTokenRequestBinding{method:"POST".into(),path:path.into()},
+        }).await.map_err(|e|match e {
+            silicon_iam_client::Error::Api(a) if matches!(a.status,400|401|403|404|409|410)=>Error::new(401,"invalid_obo_token","IAM rejected this OBO authority.","Refresh the dedicated token or request new endpoint approval if it was revoked."),
+            _=>Error::new(503,"obo_verification_uncertain","IAM verification could not be confirmed; nothing was executed.","Retry the same Ting operation and idempotency key."),
         })?;
         let a = &verified.authorization;
         let actor_kind = serde_json::to_value(&verified.actor.type_field).map_err(storage)?;
-        if verified.valid != true
-            || verified.audience != self.app_id
+        if !verified.active
+            || verified.endpoint.app_id != self.app_id
             || a.audience != self.app_id
             || verified.endpoint.path != path
             || verified.endpoint.endpoint_id != endpoint
@@ -1157,10 +1156,7 @@ impl Auth {
             || a.testing_environment_id.map(|v| v.to_string()).as_deref()
                 != test.as_ref().map(|v| v.id.as_str())
             || verified.expires_at.unix_timestamp() <= now()
-            || verified.expires_at.unix_timestamp() - verified.consumed_at.unix_timestamp() > 60
-            || verified.consumed_at > verified.expires_at
             || !v::app_id(&verified.issuer_app_id)
-            || !verified.metadata.as_object().is_some_and(|m| m.is_empty())
             || !a
                 .scopes
                 .contains(&format!("obo:{}:{}", self.app_id, endpoint))
@@ -1168,8 +1164,8 @@ impl Auth {
             return Err(Error::new(
                 401,
                 "invalid_proof",
-                "The verified proof does not authorize this request.",
-                "Obtain a new proof matching the exact request and current consent.",
+                "The verified OBO token does not authorize this request.",
+                "Use the approved endpoint, provider account, organization and current grant.",
             ));
         }
         if body
@@ -1406,6 +1402,7 @@ pub(crate) mod tests {
         pub revoke_requests: Mutex<Vec<(String, Vec<u8>)>>,
         pub proof_requests: Mutex<Vec<Value>>,
         pub status: AtomicU16,
+        pub catalog_token_status: AtomicU16,
         pub calls: Mutex<Vec<String>>,
         pub block_next: AtomicBool,
         pub block_path: Mutex<Option<String>>,
@@ -1480,6 +1477,7 @@ pub(crate) mod tests {
                 "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
             ),
             status: AtomicU16::new(200),
+            catalog_token_status: AtomicU16::new(200),
             token_replies: Mutex::new(std::collections::VecDeque::new()),
             token_requests: Mutex::new(vec![]),
             revoke_requests: Mutex::new(vec![]),
@@ -1542,7 +1540,7 @@ pub(crate) mod tests {
                         .push((key, raw.to_vec()));
                     json!({})
                 }
-                "/api/v1/obo-access/verify" => {
+                "/api/v1/obo-access/token-verifications" => {
                     let raw = axum::body::to_bytes(request.into_body(), 1024 * 1024)
                         .await
                         .unwrap();
@@ -1562,11 +1560,10 @@ pub(crate) mod tests {
                     let reply = iam.reply.lock().unwrap().clone();
                     let mut authorization = reply["authorization"].clone();
                     authorization["scopes"] = json!([format!("obo:ting:{endpoint}")]);
-                    json!({"valid":true,"proof_id":uuid::Uuid::new_v4(),"issuer_app_id":"example","audience":"ting",
+                    json!({"active":true,"token_id":uuid::Uuid::new_v4(),"grant_id":uuid::Uuid::new_v4(),"issuer_app_id":"example","originating_app_id":"example","chain":[],
                         "actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":authorization["org_id"],"authorization":authorization,
-                        "endpoint":{"endpoint_id":endpoint,"path":target},"metadata":{},
-                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339(),
-                        "consumed_at":chrono::Utc::now().to_rfc3339()})
+                        "endpoint":{"app_id":"ting","endpoint_id":endpoint,"path":target},
+                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339()})
                 }
                 path if path.starts_with("/api/v1/obo-access/applications/")
                     && path.ends_with("/endpoints") =>
@@ -1574,11 +1571,40 @@ pub(crate) mod tests {
                     json!({"application":{"app_id":"honeycomb","org_id":"tos"},
                         "endpoints":[{"endpoint_id":"honeycomb.apps.list","path":"/api/v1/obo/apps/list","critical":false,"metadata":{}}]})
                 }
-                "/api/v1/obo-access/exchanges" => {
-                    json!({"access_proof":"catalog-proof","proof_id":uuid::Uuid::new_v4(),"expires_in":30,
-                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339()})
+                "/api/v1/obo-access/authorizations" => {
+                    let reply = iam.reply.lock().unwrap().clone();
+                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://iam.example/obo/consent?request=catalog"})
+                }
+                "/api/v1/obo-access/tokens" => {
+                    let key = request.headers()["idempotency-key"]
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    let raw = axum::body::to_bytes(request.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    let body: Value = serde_json::from_slice(&raw).unwrap();
+                    iam.proof_requests
+                        .lock()
+                        .unwrap()
+                        .push(json!({"key":key,"catalog_token_request":body}));
+                    let token_status = iam.catalog_token_status.load(Ordering::SeqCst);
+                    if token_status != 200 {
+                        return (axum::http::StatusCode::from_u16(token_status).unwrap(), Json(json!({"error":{"code":"invalid_grant","message":"Mock catalog token rejected."}}))).into_response();
+                    }
+                    let reply = iam.reply.lock().unwrap().clone();
+                    let mut pair = json!({"grant_id":"00000000-0000-4000-8000-000000000011","access_token":"oba_catalog_fixture","refresh_token":"obr_catalog_fixture","token_type":"Bearer","expires_in":1800,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(30)).to_rfc3339(),"audience":"honeycomb","endpoint_id":"honeycomb.apps.list","org_id":reply["authorization"]["org_id"],"actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"scope":"obo:honeycomb:honeycomb.apps.list"});
+                    if reply["authorization"]["testing_environment_id"].is_string() {
+                        pair["testing_context"] = json!({"app_id":"honeycomb","app_secret":"ask_catalog_fixture","iam_test_key":"k".repeat(32)});
+                    }
+                    json!({"items":[pair]})
                 }
                 "/api/v1/obo/apps/list" => {
+                    assert_eq!(
+                        request.headers()["X-IAM-OBO-Access-Token"],
+                        "oba_catalog_fixture"
+                    );
+                    assert!(!request.headers().contains_key("X-IAM-OBO-Access-Proof"));
                     let raw = axum::body::to_bytes(request.into_body(), 65536)
                         .await
                         .unwrap();
@@ -1730,7 +1756,7 @@ pub(crate) mod tests {
         for testing in [false, true] {
             let f = fixture(testing).await;
             let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
             if testing {
                 headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
                 headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
@@ -1856,12 +1882,13 @@ pub(crate) mod tests {
                 ("c:alice", "silicon"),
                 ("si:assistant", "carbon"),
             ] {
-                let mut reply = f.iam.reply.lock().unwrap();
-                reply["public_id"] = actor.into();
-                reply["actor_type"] = kind.into();
-                reply["authorization"]["public_id"] = actor.into();
-                reply["authorization"]["actor_type"] = kind.into();
-                drop(reply);
+                {
+                    let mut reply = f.iam.reply.lock().unwrap();
+                    reply["public_id"] = actor.into();
+                    reply["actor_type"] = kind.into();
+                    reply["authorization"]["public_id"] = actor.into();
+                    reply["authorization"]["actor_type"] = kind.into();
+                }
                 assert_eq!(
                     f.app
                         .auth
@@ -2349,14 +2376,15 @@ pub(crate) mod tests {
                 json!({"authenticated":false})
             );
             assert_eq!(state(), (true, false));
-            let requests = f.iam.revoke_requests.lock().unwrap();
-            assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
-            assert_eq!(requests[0].0, original.revoke_key);
-            assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
-            if unavailable {
-                assert_eq!(requests[0], requests[1]);
+            {
+                let requests = f.iam.revoke_requests.lock().unwrap();
+                assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
+                assert_eq!(requests[0].0, original.revoke_key);
+                assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
+                if unavailable {
+                    assert_eq!(requests[0], requests[1]);
+                }
             }
-            drop(requests);
             f.iam.status.store(503, Ordering::SeqCst);
             assert_eq!(
                 reopened.logout(&f.principal).await.unwrap(),
@@ -2619,7 +2647,7 @@ pub(crate) mod tests {
                 reply["authorization"]["org_role"] = "admin".into();
             }
             let mut proof_headers = HeaderMap::new();
-            proof_headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            proof_headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
             proof_headers.insert("content-type", "application/json".parse().unwrap());
             if testing {
                 proof_headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
@@ -2688,8 +2716,7 @@ pub(crate) mod tests {
                 assert_eq!(
                     verified["request"],
                     json!({
-                        "method":"POST", "path":"/v1/sent/read",
-                        "body_sha256":hash(&serde_json::to_vec(&update).unwrap())
+                        "method":"POST", "path":"/v1/sent/read"
                     })
                 );
                 for (headers, method, path, query) in [
@@ -2788,6 +2815,23 @@ pub(crate) mod tests {
                 .unwrap();
                 assert_eq!(retained["read"], false);
             }
+            let consent = f
+                .app
+                .auth
+                .catalog_start(&f.principal, "bricks", "bricks-catalog-test")
+                .await
+                .unwrap();
+            f.app
+                .auth
+                .catalog_complete(
+                    &f.principal,
+                    "bricks",
+                    consent["authorization_id"].as_str().unwrap(),
+                    "obc_bricks",
+                    consent["state"].as_str().unwrap(),
+                )
+                .await
+                .unwrap();
             for (method, path, body) in [
                 (Method::GET, "orgs/bricks/apps/example/types", json!({})),
                 (
@@ -2814,6 +2858,23 @@ pub(crate) mod tests {
                 reply["authorization"]["org_id"] = "tos".into();
                 reply["authorization"]["organization_id"] = f.owner_org.clone().into();
             }
+            let consent = f
+                .app
+                .auth
+                .catalog_start(&f.principal, "tos", "tos-catalog-test")
+                .await
+                .unwrap();
+            f.app
+                .auth
+                .catalog_complete(
+                    &f.principal,
+                    "tos",
+                    consent["authorization_id"].as_str().unwrap(),
+                    "obc_tos",
+                    consent["state"].as_str().unwrap(),
+                )
+                .await
+                .unwrap();
             let (_, types) = request(
                 &f,
                 &session_headers,
@@ -2920,10 +2981,11 @@ pub(crate) mod tests {
                 json!({"org_id":f.proof.org_id,"app_id":"example"})
             };
             let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer fixture-proof".parse().unwrap());
+            headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
             headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
             headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-            *f.iam.block_path.lock().unwrap() = Some("/api/v1/obo-access/verify".into());
+            *f.iam.block_path.lock().unwrap() =
+                Some("/api/v1/obo-access/token-verifications".into());
             let gate = f.app.mutations.lock().await;
             let app = f.app.clone();
             let (h, b) = (headers.clone(), body.clone());
@@ -3064,5 +3126,61 @@ pub(crate) mod tests {
         assert!(validate_report(&json!({"title":"Bug","body":"Exact content","attachments":[{"name":"../log","encoding":"base64","content":"YWJj"}]})).is_err());
         assert!(validate_report(&json!({"title":"Bug","body":"Exact content","attachments":[{"name":"log","encoding":"base64","content":"YWJj\n"}]})).is_err());
         assert!(validate_report(&json!({"title":"Bug","body":"a".repeat(192*1024)})).is_err());
+    }
+    #[tokio::test]
+    async fn reusable_obo_is_verified_each_time_and_never_accepts_legacy_proofs() {
+        for testing in [false, true] {
+            let f = fixture(testing).await;
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", "Bearer oba_reusable".parse().unwrap());
+            if testing {
+                headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
+                headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
+            }
+            let raw = serde_json::to_vec(&json!({"org_id":"tos","app_id":"example"})).unwrap();
+            for _ in 0..2 {
+                let proof = f
+                    .app
+                    .auth
+                    .proof(&headers, "/v1/subscriptions", &raw)
+                    .await
+                    .unwrap();
+                assert_eq!(proof.actor_id, "si:fixture");
+            }
+            let requests = f.iam.proof_requests.lock().unwrap().clone();
+            assert_eq!(requests.len(), 2);
+            assert_eq!(requests[0], requests[1]);
+            assert_eq!(requests[0]["access_token"], "oba_reusable");
+            assert_eq!(requests[0]["endpoint_id"], "subscriptions.register");
+            assert_eq!(
+                requests[0]["request"],
+                json!({"method":"POST","path":"/v1/subscriptions"})
+            );
+            assert!(requests[0]["request"].get("body_sha256").is_none());
+            headers.insert("authorization", "Bearer obp_retired".parse().unwrap());
+            assert_eq!(
+                f.app
+                    .auth
+                    .proof(&headers, "/v1/subscriptions", &raw)
+                    .await
+                    .err()
+                    .unwrap()
+                    .status,
+                401
+            );
+            assert_eq!(f.iam.proof_requests.lock().unwrap().len(), 2);
+            headers.insert("authorization", "Bearer oba_reusable".parse().unwrap());
+            f.iam.status.store(403, Ordering::SeqCst);
+            assert!(matches!(
+                f.app
+                    .auth
+                    .proof(&headers, "/v1/subscriptions", &raw)
+                    .await
+                    .err()
+                    .unwrap()
+                    .status,
+                401 | 403
+            ));
+        }
     }
 }

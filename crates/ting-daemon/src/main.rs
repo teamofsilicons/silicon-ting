@@ -526,10 +526,11 @@ async fn restore(shared: &Shared, api: &str) {
                 if shared.store.state(&h.id, "pause_pending").is_err() {
                     continue;
                 }
-                if let Ok(session) = session_for(&h) {
-                    if shared.ws(api,json!({"op":"subscribe","org_id":h.org,"session_token":session.token,"webhook_ids":[h.id]})).await.is_ok() {
-                        if shared.ws(api,json!({"op":"unsubscribe","org_id":h.org,"webhook_ids":[h.id],"pause":true})).await.is_ok(){let _=shared.store.state(&h.id,"paused");}
-                    }
+                if let Ok(session) = session_for(&h)
+                    && shared.ws(api,json!({"op":"subscribe","org_id":h.org,"session_token":session.token,"webhook_ids":[h.id]})).await.is_ok()
+                    && shared.ws(api,json!({"op":"unsubscribe","org_id":h.org,"webhook_ids":[h.id],"pause":true})).await.is_ok()
+                {
+                    let _=shared.store.state(&h.id,"paused");
                 }
                 shared.socket.write().await.authorized.remove(&h.id);
                 continue;
@@ -629,15 +630,19 @@ async fn socket_loop(shared: Shared, mut rx: mpsc::Receiver<SocketCommand>) {
         let mut pong_deadline: Option<std::time::Instant> = None;
         loop {
             tokio::select! {
-             command=rx.recv()=>{let Some(c)=command else{return};if c.reply.is_closed(){continue}if c.api!=api{let pinned=!pending.is_empty()||shared.leases.lock().unwrap().0.as_deref()==Some(&api)||shared.store.hooks().unwrap_or_default().iter().any(|h|h.api==api&&h.state=="attached");if pinned{let _=c.reply.send(Err(Error::new("daemon_api_conflict","The shared socket is active on another API origin.","Use HTTP or detach the existing receivers before switching origins.",false)));continue}else{let tx=shared.tx.clone();tokio::spawn(async move{let _=tx.send(c).await;});break}}let id=c.body["request_id"].as_str().unwrap().to_owned();if ws.send(Message::Text(c.body.to_string().into())).await.is_err(){let _=c.reply.send(Err(Error::network()));break}pending.insert(id,(c.reply,std::time::Instant::now()));},
+             command=rx.recv()=>{let Some(c)=command else{return};if c.reply.is_closed(){continue}
+             if c.api!=api{let pinned=!pending.is_empty()||shared.leases.lock().unwrap().0.as_deref()==Some(&api)||shared.store.hooks().unwrap_or_default().iter().any(|h|h.api==api&&h.state=="attached");if pinned{let _=c.reply.send(Err(Error::new("daemon_api_conflict","The shared socket is active on another API origin.","Use HTTP or detach the existing receivers before switching origins.",false)));continue}else{let tx=shared.tx.clone();tokio::spawn(async move{let _=tx.send(c).await;});break}}let id=c.body["request_id"].as_str().unwrap().to_owned();if ws.send(Message::Text(c.body.to_string().into())).await.is_err(){let _=c.reply.send(Err(Error::network()));break}pending.insert(id,(c.reply,std::time::Instant::now()));},
              incoming=ws.next()=>{match incoming{
               Some(Ok(Message::Text(s)))=>{if s.len()>1024*1024{break}let Ok(v)=strict_json(s.as_bytes())else{break};match v["op"].as_str().unwrap_or(""){
                "tings"=>{match shared.store.queue(&v,&api){Ok(ids)=>{if ids.is_empty(){continue}shared.wake.notify_one();let ack=json!({"op":"ack","request_id":uuid::Uuid::new_v4().to_string(),"org_id":v["org_id"],"webhook_id":v["webhook_id"],"message_ids":ids,"kind":"delivery"});if ws.send(Message::Text(ack.to_string().into())).await.is_err(){break}},Err(_)=>{if let Some(id)=v["webhook_id"].as_str(){shared.socket.write().await.authorized.remove(id);}}}},
                "paused"=>{let ids:Vec<String>=v["webhook_ids"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(str::to_owned)).collect()).unwrap_or_default();let reason=v["reason"].as_str().unwrap_or("");{let mut s=shared.socket.write().await;for id in &ids{s.authorized.remove(id);}}let _=shared.store.pause(&ids,reason);if ["preference_changed","permission_changed","authorization_unavailable"].contains(&reason){let sh=shared.clone();let a=api.clone();tokio::spawn(async move{tokio::time::sleep(Duration::from_secs(1)).await;restore(&sh,&a).await;});}},
                "subscribed"=>{if let Some(ids)=v["webhook_ids"].as_array(){let mut st=shared.socket.write().await;for id in ids.iter().filter_map(Value::as_str){if !st.blocked.contains(id){st.authorized.insert(id.into());}}shared.wake.notify_one();}},_=>{}}
-               if let Some(id)=v["request_id"].as_str(){if let Some((reply,_))=pending.remove(id){let r=if v["op"]=="error"{Err(serde_json::from_value(v["error"].clone()).unwrap_or_else(|_|Error::network()))}else{Ok(v)};let _=reply.send(r);}}
+               if let Some(id)=v["request_id"].as_str() && let Some((reply,_))=pending.remove(id){let r=if v["op"]=="error"{Err(serde_json::from_value(v["error"].clone()).unwrap_or_else(|_|Error::network()))}else{Ok(v)};let _=reply.send(r);}
               },Some(Ok(Message::Ping(p)))=>{if ws.send(Message::Pong(p)).await.is_err(){break}},Some(Ok(Message::Pong(_)))=>{pong_deadline=None},Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,_=>{}}},
-             _=tick.tick()=>{let n=std::time::Instant::now();if reauth_at.elapsed()>=Duration::from_secs(30){reauth_at=n;let sh=shared.clone();let a=api.clone();tokio::spawn(async move{restore(&sh,&a).await;});}if healthy.elapsed()>=Duration::from_secs(60){failures=0}if pong_deadline.is_some_and(|d|n>=d){break}if n.duration_since(ping_at)>=Duration::from_secs(30){if ws.send(Message::Ping(vec![1].into())).await.is_err(){break}ping_at=n;pong_deadline=Some(n+Duration::from_secs(10));}let expired:Vec<_>=pending.iter().filter(|(_,(_,at))|at.elapsed()>=Duration::from_secs(29)).map(|(id,_)|id.clone()).collect();for id in expired{if let Some((r,_))=pending.remove(&id){let _=r.send(Err(Error::network()));}}}
+             _=tick.tick()=>{let n=std::time::Instant::now();if reauth_at.elapsed()>=Duration::from_secs(30){reauth_at=n;let sh=shared.clone();let a=api.clone();tokio::spawn(async move{restore(&sh,&a).await;});}
+             if healthy.elapsed()>=Duration::from_secs(60){failures=0}
+             if pong_deadline.is_some_and(|d|n>=d){break}
+             if n.duration_since(ping_at)>=Duration::from_secs(30){if ws.send(Message::Ping(vec![1].into())).await.is_err(){break}ping_at=n;pong_deadline=Some(n+Duration::from_secs(10));}let expired:Vec<_>=pending.iter().filter(|(_,(_,at))|at.elapsed()>=Duration::from_secs(29)).map(|(id,_)|id.clone()).collect();for id in expired{if let Some((r,_))=pending.remove(&id){let _=r.send(Err(Error::network()));}}}
             }
         }
         {
@@ -753,25 +758,25 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|_| Error::network())?;
-    if hook.first_failure.is_some() {
-        if let Some(health) = &hook.health {
-            let mut req = http.head(health).timeout(Duration::from_secs(2));
-            if let Some(s) = &hook.secret {
-                req = req.bearer_auth(s)
+    if hook.first_failure.is_some()
+        && let Some(health) = &hook.health
+    {
+        let mut req = http.head(health).timeout(Duration::from_secs(2));
+        if let Some(s) = &hook.secret {
+            req = req.bearer_auth(s)
+        }
+        match req.send().await {
+            Ok(r) if r.status().as_u16() == 405 || r.status().as_u16() == 501 => {
+                shared
+                    .store
+                    .db
+                    .lock()
+                    .unwrap()
+                    .execute("UPDATE hooks SET health=NULL WHERE id=?1", [&hook.id])
+                    .map_err(sql)?;
             }
-            match req.send().await {
-                Ok(r) if r.status().as_u16() == 405 || r.status().as_u16() == 501 => {
-                    shared
-                        .store
-                        .db
-                        .lock()
-                        .unwrap()
-                        .execute("UPDATE hooks SET health=NULL WHERE id=?1", [&hook.id])
-                        .map_err(sql)?;
-                }
-                Ok(r) if r.status().is_success() => {}
-                _ => return Ok(()),
-            }
+            Ok(r) if r.status().is_success() => {}
+            _ => return Ok(()),
         }
     }
     if now() < hook.next_attempt {
@@ -837,10 +842,10 @@ async fn workers(shared: Shared) {
             .map(|(id, _)| id.clone())
             .collect();
         for id in done {
-            if let Some((j, _)) = jobs.remove(&id) {
-                if !j.is_finished() {
-                    j.abort();
-                }
+            if let Some((j, _)) = jobs.remove(&id)
+                && !j.is_finished()
+            {
+                j.abort();
             }
         }
         let hooks = shared.store.hooks().unwrap_or_default();

@@ -16,6 +16,35 @@ pub struct CarbonSuggestions {
 }
 
 impl Carbons<'_> {
+    /// Uploads a PNG, JPEG or WebP profile photo, at most 512 KiB.
+    ///
+    /// # Errors
+    /// Returns an error for invalid image bytes, stale versions or unauthorized callers.
+    pub async fn upload_photo(
+        &self,
+        version: i64,
+        content_type: &str,
+        content: Vec<u8>,
+        mutation: &Mutation,
+    ) -> Result<models::CarbonSelf> {
+        if content.is_empty()
+            || content.len() > 512 * 1024
+            || !matches!(content_type, "image/png" | "image/jpeg" | "image/webp")
+        {
+            return Err(crate::Error::Invalid(
+                "Profile photo must be a PNG, JPEG or WebP image up to 512 KiB".to_owned(),
+            ));
+        }
+        let request = mutation.apply(
+            self.0
+                .route(reqwest::Method::PUT, &["me", "photo"])?
+                .header(reqwest::header::IF_MATCH, format!("\"{version}\""))
+                .header(reqwest::header::CONTENT_TYPE, content_type)
+                .body(content),
+        );
+        self.0.send_json(request).await
+    }
+
     /// The signed-in Carbon's own profile, contacts included.
     ///
     /// # Errors

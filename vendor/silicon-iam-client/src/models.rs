@@ -62,14 +62,6 @@ pub type ExistingCarbonId = String;
 /// or actor tokens.
 pub type HoneycombRecord = serde_json::Value;
 
-/// Lowercase hexadecimal SHA-256 digest of the exact downstream request body
-/// bytes.
-pub type OboBodySha256 = String;
-
-/// Canonical uppercase HTTP method included byte-for-byte in the OBO HMAC and
-/// proof binding.
-pub type OboRequestMethod = String;
-
 /// Contract alias for `OrgId`.
 pub type OrgId = String;
 
@@ -180,6 +172,28 @@ pub enum ApplicationAuthorizationActorType {
     Carbon,
     /// `silicon`
     Silicon,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationOboEndpointAdditionalWarnings {
+    /// `uses_credits`
+    UsesCredits,
+    /// `incurs_cost`
+    IncursCost,
+    /// `stores_data`
+    StoresData,
+    /// `shares_data`
+    SharesData,
+    /// `deletes_data`
+    DeletesData,
+    /// `external_service`
+    ExternalService,
     /// A value this crate predates. Held verbatim rather than
     /// failing the response it arrived in.
     #[serde(untagged)]
@@ -387,6 +401,50 @@ pub enum ApprovalStatus {
 /// Closed vocabulary from the contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AtaDiscoveredEndpointAdditionalWarnings {
+    /// `uses_credits`
+    UsesCredits,
+    /// `incurs_cost`
+    IncursCost,
+    /// `stores_data`
+    StoresData,
+    /// `shares_data`
+    SharesData,
+    /// `deletes_data`
+    DeletesData,
+    /// `external_service`
+    ExternalService,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AtaEndpointAdditionalWarnings {
+    /// `uses_credits`
+    UsesCredits,
+    /// `incurs_cost`
+    IncursCost,
+    /// `stores_data`
+    StoresData,
+    /// `shares_data`
+    SharesData,
+    /// `deletes_data`
+    DeletesData,
+    /// `external_service`
+    ExternalService,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CarbonSelfStatus {
     /// `active`
     Active,
@@ -408,6 +466,75 @@ pub enum DirectoryRoleOrgRole {
     Admin,
     /// `member`
     Member,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectoryVisibilityCandidateType {
+    /// `carbon`
+    Carbon,
+    /// `silicon`
+    Silicon,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectoryVisibilityInputMode {
+    /// `all`
+    All,
+    /// `self`
+    #[serde(rename = "self")]
+    SelfOnly,
+    /// `selected`
+    Selected,
+    /// `inherit`
+    Inherit,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectoryVisibilityPolicyEffectiveMode {
+    /// `all`
+    All,
+    /// `self`
+    #[serde(rename = "self")]
+    SelfOnly,
+    /// `selected`
+    Selected,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectoryVisibilityPolicyMode {
+    /// `all`
+    All,
+    /// `self`
+    #[serde(rename = "self")]
+    SelfOnly,
+    /// `selected`
+    Selected,
+    /// `inherit`
+    Inherit,
     /// A value this crate predates. Held verbatim rather than
     /// failing the response it arrived in.
     #[serde(untagged)]
@@ -689,6 +816,114 @@ pub enum OAuthRevocationRequestTokenTypeHint {
 /// Closed vocabulary from the contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum OboAccessTokenTokenType {
+    /// `Bearer`
+    #[serde(rename = "Bearer")]
+    Bearer,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboConsentDecisionDecision {
+    /// `approve`
+    Approve,
+    /// `decline`
+    Decline,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboConsentDecisionResultStatus {
+    /// `approved`
+    Approved,
+    /// `declined`
+    Declined,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboConsentDetailStatus {
+    /// `pending`
+    Pending,
+    /// `approved`
+    Approved,
+    /// `declined`
+    Declined,
+    /// `exchanged`
+    Exchanged,
+    /// `expired`
+    Expired,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboConsentNodeAdditionalWarnings {
+    /// `uses_credits`
+    UsesCredits,
+    /// `incurs_cost`
+    IncursCost,
+    /// `stores_data`
+    StoresData,
+    /// `shares_data`
+    SharesData,
+    /// `deletes_data`
+    DeletesData,
+    /// `external_service`
+    ExternalService,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboGrantRevokedStatus {
+    /// `revoked`
+    Revoked,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OboTokenPairTokenType {
+    /// `Bearer`
+    #[serde(rename = "Bearer")]
+    Bearer,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrganizationCapability {
     /// `organization.update`
     #[serde(rename = "organization.update")]
@@ -950,6 +1185,26 @@ pub enum SiliconFullEventType {
 /// Closed vocabulary from the contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum SiliconInvitationStatus {
+    /// `pending`
+    Pending,
+    /// `accepted`
+    Accepted,
+    /// `declined`
+    Declined,
+    /// `revoked`
+    Revoked,
+    /// `expired`
+    Expired,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SiliconStatus {
     /// `active`
     Active,
@@ -999,6 +1254,26 @@ pub enum SiliconWebhookSubscriptionTopic {
     MemberUpdates,
     /// `trust_updates`
     TrustUpdates,
+    /// A value this crate predates. Held verbatim rather than
+    /// failing the response it arrived in.
+    #[serde(untagged)]
+    Other(String),
+}
+
+/// Closed vocabulary from the contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SocialSignupStatusStatus {
+    /// `pending`
+    Pending,
+    /// `verified`
+    Verified,
+    /// `already_registered`
+    AlreadyRegistered,
+    /// `failed`
+    Failed,
+    /// `expired`
+    Expired,
     /// A value this crate predates. Held verbatim rather than
     /// failing the response it arrived in.
     #[serde(untagged)]
@@ -1483,18 +1758,18 @@ pub struct Application {
     pub updated_at: OffsetDateTime,
 }
 
-/// Current active membership bound to the authenticated token or verified
-/// proof, audience, organization, principal and testing plane. Use on first
-/// login and cache misses; webhook snapshots are asynchronous updates, not
-/// prerequisites for initial access. org_role requires roles.read and tags
-/// requires memberships.read. Null means undisclosed, not member or empty
-/// tags. OBO disclosure uses the intersection of the parent token scopes and
-/// recipient application's currently approved scopes. The binding authorizes
-/// no action outside the verified proof's endpoint/request. Do not reuse it
-/// for a different principal, membership, epoch, audience, organization,
-/// environment or effective scope set. Never fill undisclosed fields from a
-/// broader cached token. Introspect current bearer tokens again before
-/// relying on cached authority; a consumed OBO proof is single-use.
+/// Current active membership bound to the authenticated token or verified OBO
+/// access token, audience, organization, principal and testing plane. Use on
+/// first login and cache misses; webhook snapshots are asynchronous updates.
+/// For OBO, optional actor identity requires self.identity.read, org_role
+/// requires self.membership.read and tags requires self.tags.read. Null means
+/// undisclosed, not member or empty tags. OBO disclosures are limited by
+/// current user IAM consent and every participating application's approved
+/// scopes. The binding authorizes only the verified OBO endpoint; the
+/// receiver still checks payload and resource permissions. Never reuse it for
+/// a different principal, membership, epoch, audience, organization,
+/// environment or scope. Verify OBO authority on every request; verification
+/// does not consume its token.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationAuthorization {
     /// The contract's `actor_type`.
@@ -1633,6 +1908,22 @@ pub struct ApplicationBundlePatch {
     pub app_ids: Option<Vec<AppId>>,
 }
 
+/// Contract type `ApplicationConsentDownstream`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ApplicationConsentDownstream {
+    /// The contract's `via_app_id`.
+    pub via_app_id: AppId,
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `description`.
+    pub description: String,
+}
+
 /// Contract type `ApplicationConsentScope`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationConsentScope {
@@ -1645,6 +1936,10 @@ pub struct ApplicationConsentScope {
     /// The contract's `app_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id: Option<String>,
+    /// On consent for an OBO scope: every call the audience's declared chain
+    /// could make for the user under a separately approved OBO grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downstream: Option<Vec<ApplicationConsentDownstream>>,
 }
 
 /// Requires the authenticated Carbon to be a current active owner/admin of
@@ -1713,11 +2008,36 @@ pub struct ApplicationExternalScope {
     pub endpoint_id: String,
 }
 
+/// Contract type `ApplicationOboDownstream`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ApplicationOboDownstream {
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+}
+
 /// Callable endpoint definition configurable only by a current owner/admin of
 /// the Application's organization.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationOboEndpoint {
-    /// Provider-configured proof lifetime in seconds; fixed at issuance.
+    /// Globally unique `[app:obo:local]` identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obo_id: Option<String>,
+    /// The contract's `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The contract's `description`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The contract's `note_to_user`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_to_user: Option<String>,
+    /// The contract's `additional_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_warnings: Option<Vec<ApplicationOboEndpointAdditionalWarnings>>,
+    /// Provider-configured OBO access-token lifetime in seconds; fixed at
+    /// issuance and bounded by the approved graph and provider lifetimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<i64>,
     /// Whether calling this endpoint requires approval from the audience
@@ -1728,10 +2048,22 @@ pub struct ApplicationOboEndpoint {
     pub endpoint_id: String,
     /// Stable absolute audience-application endpoint path.
     pub path: String,
-    /// Each top-level key is required at exchange. A descriptor may declare
-    /// type as string, number, integer, boolean, object, array, or null;
-    /// size, nesting, and node count are bounded.
+    /// The receiving application validates these required metadata keys on
+    /// each actual request. A descriptor may declare type as string, number,
+    /// integer, boolean, object, array, or null; size, nesting, and node
+    /// count are bounded.
     pub metadata: serde_json::Value,
+    /// Direct endpoint dependencies the receiving app may call for the same
+    /// user. IAM displays the recursively resolved graph during separate OBO
+    /// consent. Delegation requires the edge in the approved graph and
+    /// current declarations, and the calling receiver's effective external
+    /// scope. Empty grants no delegation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downstream: Option<Vec<ApplicationOboDownstream>>,
+    /// Legacy proof-consumption window retained for configuration
+    /// compatibility; does not grant or extend reusable-token delegation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downstream_ttl_seconds: Option<i64>,
 }
 
 /// Contract type `ApplicationPage`.
@@ -2026,6 +2358,11 @@ pub struct ApplicationTestingEnvironmentPage {
 /// Contract type `ApplicationTokenRequest`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationTokenRequest {
+    /// Optional organization for testing actor-ID exchange; required when the
+    /// actor belongs to multiple organizations. Not accepted with issued SLTs
+    /// or refresh tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
     /// The contract's `app_id`.
     pub app_id: AppId,
     /// IAM-issued one-time code, or an existing Carbon/Silicon ID in a
@@ -2178,6 +2515,216 @@ pub struct ApprovalRequestPage {
     pub page: PageInfo,
 }
 
+/// Contract type `AtaDependency`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaDependency {
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+}
+
+/// Contract type `AtaDiscoveredEndpoint`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaDiscoveredEndpoint {
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `name`.
+    pub name: String,
+    /// Unique absolute path. No query, fragment, escapes or traversal
+    /// segments.
+    pub path: String,
+    /// The contract's `critical`.
+    pub critical: bool,
+    /// The contract's `description`.
+    pub description: String,
+    /// The contract's `metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// The contract's `note_to_user`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_to_user: Option<String>,
+    /// The contract's `additional_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_warnings: Option<Vec<AtaDiscoveredEndpointAdditionalWarnings>>,
+    /// The contract's `downstream`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downstream: Option<Vec<AtaDependency>>,
+    /// The contract's `enabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Globally unique `[app_id:ata:local_id]`
+    pub ata_id: String,
+    /// The contract's `version`.
+    pub version: i64,
+}
+
+/// Contract type `AtaEndpoint`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaEndpoint {
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `name`.
+    pub name: String,
+    /// Unique absolute path. No query, fragment, escapes or traversal
+    /// segments.
+    pub path: String,
+    /// The contract's `critical`.
+    pub critical: bool,
+    /// The contract's `description`.
+    pub description: String,
+    /// The contract's `metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// The contract's `note_to_user`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_to_user: Option<String>,
+    /// The contract's `additional_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_warnings: Option<Vec<AtaEndpointAdditionalWarnings>>,
+    /// The contract's `downstream`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downstream: Option<Vec<AtaDependency>>,
+    /// The contract's `enabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Contract type `AtaRefreshRequest`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaRefreshRequest {
+    /// The contract's `refresh_token`.
+    pub refresh_token: String,
+}
+
+/// Contract type `AtaTokenResponse`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaTokenResponse {
+    /// The contract's `token_id`.
+    pub token_id: Uuid,
+    /// The contract's `verification_id`.
+    pub verification_id: Uuid,
+    /// The contract's `token_type`.
+    pub token_type: String,
+    /// The contract's `access_token`.
+    pub access_token: String,
+    /// The contract's `refresh_token`.
+    pub refresh_token: String,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+    /// The contract's `expires_in`.
+    pub expires_in: i64,
+    /// The contract's `refresh_expires_at`.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub refresh_expires_at: Option<OffsetDateTime>,
+}
+
+/// Contract type `AtaVerification`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaVerification {
+    /// The contract's `id`.
+    pub id: Uuid,
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_ids`.
+    pub app_ids: Vec<AppId>,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<AtaDependency>,
+    /// The contract's `graph`.
+    pub graph: Vec<serde_json::Value>,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+    /// The contract's `access_token_validity`.
+    pub access_token_validity: i64,
+    /// The contract's `signing_principal`.
+    pub signing_principal: serde_json::Value,
+    /// The contract's `created_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// The contract's `revoked_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub revoked_at: OffsetDateTime,
+    /// The contract's `active`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+}
+
+/// Contract type `AtaVerificationCreate`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaVerificationCreate {
+    /// The contract's `operation_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<Uuid>,
+    /// The contract's `app_ids`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_ids: Option<Vec<AppId>>,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<AtaDependency>,
+    /// Seconds until the verification expires. Null or omitted means never.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_after: Option<i64>,
+    /// The contract's `access_token_validity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_validity: Option<i64>,
+    /// Preview hash. Required on create to approve exactly the reviewed
+    /// dependency chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_version: Option<String>,
+}
+
+/// Verification metadata plus one-time refresh credential. Retry the same
+/// operation ID and Idempotency-Key only to recover its exact response.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AtaVerificationCreated {
+    /// The contract's `refresh_token`.
+    pub refresh_token: String,
+}
+impl std::fmt::Debug for AtaVerificationCreated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("AtaVerificationCreated(<redacted>)")
+    }
+}
+
+/// Contract type `AtaVerificationPreview`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaVerificationPreview {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_ids`.
+    pub app_ids: Vec<AppId>,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<AtaDependency>,
+    /// The contract's `graph`.
+    pub graph: Vec<serde_json::Value>,
+    /// The contract's `graph_version`.
+    pub graph_version: String,
+    /// The contract's `requires_expansion`.
+    pub requires_expansion: bool,
+}
+
+/// Contract type `AtaVerificationRequest`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaVerificationRequest {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_proof_token`.
+    pub app_proof_token: String,
+    /// Exact registered recipient request path.
+    pub endpoint: String,
+}
+
+/// Contract type `AtaVerificationResult`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AtaVerificationResult {
+    /// The contract's `verified`.
+    pub verified: bool,
+    /// Expiry as UTC YYYYMMDDHHMMSS; absent for invalid proofs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_till: Option<i64>,
+}
+
 /// Contract type `AuthSession`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuthSession {
@@ -2230,8 +2777,8 @@ pub struct BatchLoginRequest {
 pub struct BatchLoginSelection {
     /// Version of the consent view the user reviewed.
     pub scope_version: i64,
-    /// Explicitly approved full effective scope set; external entries use
-    /// obo:{app_id}:{endpoint_id}.
+    /// Explicitly approved effective IAM scope set. OBO endpoint scopes are
+    /// excluded and require separate endpoint consent.
     pub approved_scopes: Vec<String>,
     /// The contract's `app_id`.
     pub app_id: AppId,
@@ -2362,7 +2909,7 @@ pub struct CarbonSelf {
     /// The contract's `email`.
     pub email: String,
     /// The contract's `phone_number`.
-    pub phone_number: String,
+    pub phone_number: Option<String>,
     /// The contract's `status`.
     pub status: CarbonSelfStatus,
     /// The contract's `version`.
@@ -2376,9 +2923,11 @@ pub struct CarbonSelf {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CarbonSignupComplete {
     /// The contract's `carbon_id`.
-    pub carbon_id: CarbonId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carbon_id: Option<CarbonId>,
     /// The contract's `display_name`.
-    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Defaults to UTC when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<TimeZoneId>,
@@ -2480,6 +3029,49 @@ pub struct DirectoryRole {
     pub job_description: String,
 }
 
+/// Contract type `DirectoryVisibilityCandidate`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DirectoryVisibilityCandidate {
+    /// The contract's `membership_id`.
+    pub membership_id: String,
+    /// The contract's `public_id`.
+    pub public_id: String,
+    /// The contract's `display_name`.
+    pub display_name: String,
+    /// The contract's `type`.
+    #[serde(rename = "type")]
+    pub type_field: DirectoryVisibilityCandidateType,
+}
+
+/// Organization policies support all, self, or selected. Member overrides
+/// additionally support inherit. Selected IDs must be active members in the
+/// same organization; other modes require an empty list. Every viewer always
+/// sees itself. These rules filter directory disclosure and do not grant
+/// operational capabilities.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DirectoryVisibilityInput {
+    /// The contract's `mode`.
+    pub mode: DirectoryVisibilityInputMode,
+    /// The contract's `visible_membership_ids`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_membership_ids: Option<Vec<String>>,
+}
+
+/// Contract type `DirectoryVisibilityPolicy`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DirectoryVisibilityPolicy {
+    /// The contract's `mode`.
+    pub mode: DirectoryVisibilityPolicyMode,
+    /// The contract's `visible_membership_ids`.
+    pub visible_membership_ids: Vec<String>,
+    /// The contract's `version`.
+    pub version: i64,
+    /// The contract's `effective_mode`.
+    pub effective_mode: DirectoryVisibilityPolicyEffectiveMode,
+    /// The contract's `effective_visible_membership_ids`.
+    pub effective_visible_membership_ids: Vec<String>,
+}
+
 /// Contract type `EmailInput`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EmailInput {
@@ -2548,6 +3140,9 @@ pub struct HoneycombBundleConfiguration {
 /// Contract type `HoneycombConfiguration`.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct HoneycombConfiguration {
+    /// The contract's `ata_endpoints`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ata_endpoints: Option<Vec<AtaEndpoint>>,
     /// The contract's `operation_id`.
     pub operation_id: Uuid,
     /// The contract's `expected_iam_revision`.
@@ -3267,9 +3862,8 @@ pub struct LoginOrganization {
 /// Contract type `LoginOrganizations`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LoginOrganizations {
-    /// Whether this Carbon may continue without selecting organizations using
-    /// an approved organizations.create or organizations.join permission.
-    /// Empty selection adds no organization grants.
+    /// Always false. Application login requires one organization; direct IAM
+    /// signup and account login handle first-organization creation.
     pub allow_empty_organization_selection: bool,
     /// The contract's `scope_version`.
     pub scope_version: i64,
@@ -3452,33 +4046,37 @@ pub struct OAuthTokenResponse {
     pub org_id: Option<String>,
 }
 
-/// Contract type `OboAccessResult`.
+/// Contract type `OboAccessToken`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboAccessResult {
-    /// The contract's `valid`.
-    pub valid: serde_json::Value,
-    /// The contract's `proof_id`.
-    pub proof_id: Uuid,
-    /// The contract's `issuer_app_id`.
-    pub issuer_app_id: AppId,
-    /// The contract's `audience`.
-    pub audience: AppId,
-    /// The contract's `actor`.
-    pub actor: ActorRef,
-    /// The contract's `authorization`.
-    pub authorization: ApplicationAuthorization,
-    /// The contract's `org_id`.
-    pub org_id: OrgId,
-    /// The contract's `endpoint`.
-    pub endpoint: OboEndpointReference,
-    /// The contract's `metadata`.
-    pub metadata: serde_json::Value,
+pub struct OboAccessToken {
+    /// The contract's `grant_id`.
+    pub grant_id: Uuid,
+    /// The contract's `access_token`.
+    pub access_token: String,
+    /// The contract's `token_type`.
+    pub token_type: OboAccessTokenTokenType,
+    /// The contract's `expires_in`.
+    pub expires_in: i64,
     /// The contract's `expires_at`.
     #[serde(with = "time::serde::rfc3339")]
     pub expires_at: OffsetDateTime,
-    /// The contract's `consumed_at`.
-    #[serde(with = "time::serde::rfc3339")]
-    pub consumed_at: OffsetDateTime,
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+    /// Account explicitly selected for this provider in the approved graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<ActorRef>,
+    /// The contract's `scope`.
+    pub scope: String,
+    /// The contract's `testing_context`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub testing_context: Option<OboTestingContext>,
+    /// The contract's `token_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<Uuid>,
 }
 
 /// Contract type `OboApplicationReference`.
@@ -3488,6 +4086,169 @@ pub struct OboApplicationReference {
     pub app_id: AppId,
     /// The contract's `org_id`.
     pub org_id: OrgId,
+}
+
+/// Contract type `OboAuthorizationEndpoint`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboAuthorizationEndpoint {
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+}
+
+/// Contract type `OboAuthorizationRequest`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboAuthorizationRequest {
+    /// Exact app-authenticated callback; only the same application can redeem
+    /// the returned code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    /// Application callback correlation value; required with redirect_uri.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// The contract's `subject_token`.
+    pub subject_token: String,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<OboAuthorizationEndpoint>,
+}
+
+/// Contract type `OboAuthorizedEndpoint`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboAuthorizedEndpoint {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `path`.
+    pub path: String,
+}
+
+/// Contract type `OboConsentDecision`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboConsentDecision {
+    /// One authenticated account and organization per provider; omitted
+    /// providers use the root account and organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contexts: Option<Vec<OboProviderContext>>,
+    /// The contract's `decision`.
+    pub decision: OboConsentDecisionDecision,
+    /// The contract's `version`.
+    pub version: i64,
+}
+
+/// Contract type `OboConsentDecisionResult`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboConsentDecisionResult {
+    /// Exact app-authenticated callback; only the same application can redeem
+    /// the returned code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    /// The contract's `request_id`.
+    pub request_id: Uuid,
+    /// The contract's `status`.
+    pub status: OboConsentDecisionResultStatus,
+    /// The contract's `authorization_code`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_code: Option<String>,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+
+/// Contract type `OboConsentDetail`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboConsentDetail {
+    /// Exact app-authenticated callback; only the same application can redeem
+    /// the returned code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    /// Application callback correlation value; required with redirect_uri.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// The contract's `providers`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<OboConsentProvider>>,
+    /// The contract's `management_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub management_url: Option<String>,
+    /// The contract's `id`.
+    pub id: Uuid,
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_name`.
+    pub app_name: Option<String>,
+    /// The contract's `actor`.
+    pub actor: ActorRef,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+    /// The contract's `status`.
+    pub status: OboConsentDetailStatus,
+    /// The contract's `version`.
+    pub version: i64,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<OboConsentNode>,
+    /// The contract's `authorization_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_url: Option<String>,
+}
+
+/// Contract type `OboConsentNode`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboConsentNode {
+    /// Globally unique `[app:obo:local]` identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obo_id: Option<String>,
+    /// The contract's `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The contract's `note_to_user`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_to_user: Option<String>,
+    /// The contract's `additional_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_warnings: Option<Vec<OboConsentNodeAdditionalWarnings>>,
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `app_name`.
+    pub app_name: Option<String>,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `description`.
+    pub description: String,
+    /// The contract's `critical`.
+    pub critical: bool,
+    /// The contract's `downstream`.
+    pub downstream: Vec<OboConsentNode>,
+}
+
+/// Contract type `OboConsentProvider`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboConsentProvider {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_name`.
+    pub app_name: String,
+    /// The contract's `actor`.
+    pub actor: ActorRef,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+}
+
+/// Contract type `OboDelegationRequest`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboDelegationRequest {
+    /// The contract's `access_token`.
+    pub access_token: String,
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
 }
 
 /// Contract type `OboEndpointCatalog`.
@@ -3508,51 +4269,66 @@ pub struct OboEndpointReference {
     pub path: String,
 }
 
-/// Delegates as the same user to any declared and consented audience; org_id
-/// selects a user-authorized organization when more than one is available.
+/// Contract type `OboGrant`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboExchangeRequest {
+pub struct OboGrant {
+    /// The contract's `id`.
+    pub id: Uuid,
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `app_name`.
+    pub app_name: Option<String>,
     /// The contract's `org_id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub org_id: Option<OrgId>,
-    /// Actor-bound application access token issued to the calling app.
-    pub subject_token: String,
+    pub org_id: OrgId,
     /// The contract's `audience`.
     pub audience: AppId,
     /// The contract's `endpoint_id`.
     pub endpoint_id: String,
-    /// Exact metadata bound into the proof. It must contain every registered
-    /// key, no unregistered keys, and values matching every declared type.
-    pub metadata: serde_json::Value,
-    /// The contract's `request`.
-    pub request: OboExchangeRequestBinding,
-}
-
-/// Contract type `OboExchangeRequestBinding`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboExchangeRequestBinding {
-    /// The contract's `method`.
-    pub method: OboRequestMethod,
-    /// The contract's `body_sha256`.
-    pub body_sha256: OboBodySha256,
-}
-
-/// The idempotency replay envelope for this secret response expires no later
-/// than expires_at.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboProofResponse {
-    /// The contract's `testing_context`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub testing_context: Option<OboTestingContext>,
-    /// The contract's `access_proof`.
-    pub access_proof: String,
-    /// The contract's `proof_id`.
-    pub proof_id: Uuid,
-    /// The contract's `expires_in`.
-    pub expires_in: i64,
+    /// The contract's `status`.
+    pub status: String,
+    /// The contract's `created_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
     /// The contract's `expires_at`.
     #[serde(with = "time::serde::rfc3339")]
     pub expires_at: OffsetDateTime,
+    /// The contract's `endpoints`.
+    pub endpoints: Vec<OboConsentNode>,
+}
+
+/// Contract type `OboGrantRevoked`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboGrantRevoked {
+    /// The contract's `id`.
+    pub id: Uuid,
+    /// The contract's `status`.
+    pub status: OboGrantRevokedStatus,
+}
+
+/// Contract type `OboGrants`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboGrants {
+    /// The contract's `items`.
+    pub items: Vec<OboGrant>,
+    /// The contract's `page`.
+    pub page: PageInfo,
+}
+
+/// Contract type `OboProviderContext`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct OboProviderContext {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// Direct authenticated IAM account token; consumed only as approval
+    /// proof and never saved in the grant.
+    pub account_token: String,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+}
+impl std::fmt::Debug for OboProviderContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("OboProviderContext(<redacted>)")
+    }
 }
 
 /// Contract type `OboTestingContext`.
@@ -3567,25 +4343,138 @@ pub struct OboTestingContext {
     pub iam_test_key: String,
 }
 
-/// Exact actual-request binding; successful verification is strictly
-/// single-use and not idempotently replayable.
+/// Contract type `OboTokenChainLink`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboVerifyRequest {
-    /// The contract's `access_proof`.
-    pub access_proof: String,
-    /// The contract's `request`.
-    pub request: OboVerifyRequestBinding,
+pub struct OboTokenChainLink {
+    /// The contract's `app_id`.
+    pub app_id: AppId,
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
 }
 
-/// Contract type `OboVerifyRequestBinding`.
+/// Contract type `OboTokenPair`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OboVerifyRequestBinding {
-    /// The contract's `method`.
-    pub method: OboRequestMethod,
-    /// Exact registered path of the downstream request.
+pub struct OboTokenPair {
+    /// The contract's `grant_id`.
+    pub grant_id: Uuid,
+    /// The contract's `access_token`.
+    pub access_token: String,
+    /// The contract's `token_type`.
+    pub token_type: OboTokenPairTokenType,
+    /// The contract's `expires_in`.
+    pub expires_in: i64,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+    /// The contract's `audience`.
+    pub audience: AppId,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+    /// Account explicitly selected for this provider in the approved graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<ActorRef>,
+    /// The contract's `scope`.
+    pub scope: String,
+    /// The contract's `testing_context`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub testing_context: Option<OboTestingContext>,
+    /// The contract's `token_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<Uuid>,
+    /// The contract's `refresh_token`.
+    pub refresh_token: String,
+    /// The contract's `refresh_expires_at`.
+    #[serde(
+        with = "time::serde::rfc3339::option",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub refresh_expires_at: Option<OffsetDateTime>,
+}
+
+/// Redeem a code, rotate a refresh token, or recover an existing durable
+/// grant with a current application login. Recovery never widens authority
+/// and cannot bypass another selected account's security reset.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboTokenRequest {
+    /// Existing durable grant to recover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<Uuid>,
+    /// Current application login for the original account; recovery never
+    /// widens authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_token: Option<String>,
+    /// The contract's `authorization_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_id: Option<Uuid>,
+    /// The contract's `authorization_code`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_code: Option<String>,
+    /// The contract's `refresh_token`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+}
+
+/// Contract type `OboTokenRequestBinding`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboTokenRequestBinding {
+    /// Actual canonical HTTP method. The receiver maps its own handler to the
+    /// named endpoint; the catalog currently specifies endpoint paths, not
+    /// allowed-method lists. Accepted methods: GET, POST, PUT, PATCH, DELETE,
+    /// HEAD, OPTIONS.
+    pub method: String,
+    /// Actual registered endpoint path.
     pub path: String,
-    /// The contract's `body_sha256`.
-    pub body_sha256: OboBodySha256,
+}
+
+/// Contract type `OboTokenResponse`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboTokenResponse {
+    /// The contract's `items`.
+    pub items: Vec<OboTokenPair>,
+}
+
+/// Contract type `OboTokenVerification`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboTokenVerification {
+    /// The contract's `active`.
+    pub active: bool,
+    /// The contract's `token_id`.
+    pub token_id: Uuid,
+    /// The contract's `grant_id`.
+    pub grant_id: Uuid,
+    /// The contract's `actor`.
+    pub actor: ActorRef,
+    /// The contract's `org_id`.
+    pub org_id: OrgId,
+    /// The contract's `issuer_app_id`.
+    pub issuer_app_id: AppId,
+    /// The contract's `originating_app_id`.
+    pub originating_app_id: AppId,
+    /// The contract's `endpoint`.
+    pub endpoint: OboAuthorizedEndpoint,
+    /// The contract's `chain`.
+    pub chain: Vec<OboTokenChainLink>,
+    /// The contract's `authorization`.
+    pub authorization: ApplicationAuthorization,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+
+/// Contract type `OboTokenVerificationRequest`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OboTokenVerificationRequest {
+    /// The contract's `access_token`.
+    pub access_token: String,
+    /// The contract's `endpoint_id`.
+    pub endpoint_id: String,
+    /// The contract's `request`.
+    pub request: OboTokenRequestBinding,
 }
 
 /// Contract type `Organization`.
@@ -3817,15 +4706,14 @@ pub struct ShortLivedToken {
 pub struct ShortLivedTokenRequest {
     /// Version of the consent view the user reviewed.
     pub scope_version: i64,
-    /// Explicitly approved full effective scope set; external entries use
-    /// obo:{app_id}:{endpoint_id}.
+    /// Explicitly approved effective IAM scope set. OBO endpoint scopes are
+    /// excluded and require separate endpoint consent.
     pub approved_scopes: Vec<String>,
     /// The contract's `app_id`.
     pub app_id: AppId,
-    /// User-selected active organizations. Adds to this application's
-    /// existing grants on the same parent IAM session; never includes future
-    /// memberships automatically. Only a direct IAM bearer may submit this
-    /// selection.
+    /// Exactly one active organization. The application access and refresh
+    /// tokens are bound to this account and organization. Only a direct IAM
+    /// bearer may submit this selection.
     pub org_ids: Vec<OrgId>,
     /// The contract's `redirect_uri`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3876,7 +4764,7 @@ pub struct Silicon {
 pub struct SiliconAuthenticationRequest {
     /// The contract's `silicon_id`.
     pub silicon_id: SiliconGlobalId,
-    /// The contract's `silicon_token`.
+    /// Case-sensitive 12 to 24 character password or legacy stk- credential.
     pub silicon_token: String,
 }
 
@@ -3909,11 +4797,104 @@ pub struct SiliconCreate {
 pub struct SiliconCreated {
     /// The contract's `silicon`.
     pub silicon: Silicon,
-    /// The contract's `silicon_token`.
+    /// Case-sensitive 12 to 24 character password or legacy stk- credential.
     pub silicon_token: String,
     /// The contract's `secret_replay_expires_at`.
     #[serde(with = "time::serde::rfc3339")]
     pub secret_replay_expires_at: OffsetDateTime,
+}
+
+/// Contract type `SiliconCustody`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconCustody {
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `display_name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// The contract's `can_create_organizations`.
+    pub can_create_organizations: bool,
+    /// The contract's `version`.
+    pub version: i64,
+}
+
+/// Contract type `SiliconCustodyDecision`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconCustodyDecision {
+    /// The contract's `approve`.
+    pub approve: bool,
+    /// The contract's `can_create_organizations`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_create_organizations: Option<bool>,
+}
+
+/// Contract type `SiliconCustodySettings`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconCustodySettings {
+    /// The contract's `can_create_organizations`.
+    pub can_create_organizations: bool,
+}
+
+/// Contract type `SiliconIdentityProfile`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconIdentityProfile {
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `display_name`.
+    pub display_name: String,
+    /// The contract's `timezone`.
+    pub timezone: String,
+    /// The contract's `profile_photo`.
+    pub profile_photo: String,
+    /// The contract's `status`.
+    pub status: String,
+    /// The contract's `version`.
+    pub version: i64,
+    /// The contract's `can_create_organizations`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_create_organizations: Option<bool>,
+}
+
+/// Contract type `SiliconInvitation`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconInvitation {
+    /// The contract's `id`.
+    pub id: Uuid,
+    /// The contract's `org_id`.
+    pub org_id: String,
+    /// The contract's `organization_name`.
+    pub organization_name: String,
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `display_name`.
+    pub display_name: String,
+    /// The contract's `invited_by`.
+    pub invited_by: String,
+    /// The contract's `status`.
+    pub status: SiliconInvitationStatus,
+    /// The contract's `created_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+    /// The contract's `decided_at`.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub decided_at: Option<OffsetDateTime>,
+    /// The contract's `membership_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_id: Option<String>,
+}
+
+/// Contract type `SiliconInvitationCandidate`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconInvitationCandidate {
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `display_name`.
+    pub display_name: String,
+    /// The contract's `source_org_ids`.
+    pub source_org_ids: Vec<String>,
 }
 
 /// Contract type `SiliconPage`.
@@ -3956,6 +4937,95 @@ pub struct SiliconPatch {
     pub reports_to_membership_id: Option<Option<String>>,
 }
 
+/// Contract type `SiliconSignupCreated`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SiliconSignupCreated {
+    /// The contract's `request_id`.
+    pub request_id: Uuid,
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `status`.
+    pub status: String,
+    /// The contract's `poll_token`.
+    pub poll_token: String,
+    /// The contract's `generated_silicon_token`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_silicon_token: Option<String>,
+    /// The contract's `webhook_signing_secret`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_signing_secret: Option<String>,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+impl std::fmt::Debug for SiliconSignupCreated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SiliconSignupCreated(<redacted>)")
+    }
+}
+
+/// Contract type `SiliconSignupRequest`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SiliconSignupRequest {
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `silicon_token`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silicon_token: Option<String>,
+    /// The contract's `custodian_email`.
+    pub custodian_email: String,
+    /// The contract's `display_name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// The contract's `timezone`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    /// The contract's `webhook_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+}
+impl std::fmt::Debug for SiliconSignupRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SiliconSignupRequest(<redacted>)")
+    }
+}
+
+/// Contract type `SiliconSignupStatus`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiliconSignupStatus {
+    /// The contract's `request_id`.
+    pub request_id: Uuid,
+    /// The contract's `silicon_id`.
+    pub silicon_id: String,
+    /// The contract's `display_name`.
+    pub display_name: String,
+    /// The contract's `timezone`.
+    pub timezone: String,
+    /// pending, approved, rejected or expired
+    pub status: String,
+    /// The contract's `can_create_organizations`.
+    pub can_create_organizations: bool,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+
+/// Contract type `SiliconStepUpInput`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SiliconStepUpInput {
+    /// The contract's `silicon_token`.
+    pub silicon_token: String,
+    /// The contract's `action`.
+    pub action: StepUpAction,
+    /// The contract's `resource_id`.
+    pub resource_id: String,
+}
+impl std::fmt::Debug for SiliconStepUpInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SiliconStepUpInput(<redacted>)")
+    }
+}
+
 /// Contract type `SiliconTokenRotated`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SiliconTokenRotated {
@@ -3963,7 +5033,7 @@ pub struct SiliconTokenRotated {
     pub silicon_id: SiliconGlobalId,
     /// The contract's `credential_version`.
     pub credential_version: i64,
-    /// The contract's `silicon_token`.
+    /// Case-sensitive 12 to 24 character password or legacy stk- credential.
     pub silicon_token: String,
     /// The contract's `secret_replay_expires_at`.
     #[serde(with = "time::serde::rfc3339")]
@@ -4112,6 +5182,55 @@ pub struct SiliconWebhookTagFilter {
     /// The contract's `additional_tag_ids`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub additional_tag_ids: Option<Vec<Uuid>>,
+}
+
+/// Contract type `SocialSignupStart`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SocialSignupStart {
+    /// The contract's `request_id`.
+    pub request_id: Uuid,
+    /// The contract's `authorization_url`.
+    pub authorization_url: String,
+    /// The contract's `poll_token`.
+    pub poll_token: String,
+    /// The contract's `expires_at`.
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+impl std::fmt::Debug for SocialSignupStart {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SocialSignupStart(<redacted>)")
+    }
+}
+
+/// Contract type `SocialSignupStatus`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SocialSignupStatus {
+    /// The contract's `status`.
+    pub status: SocialSignupStatusStatus,
+    /// The contract's `signup_session_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signup_session_id: Option<Uuid>,
+    /// The contract's `email`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// The contract's `display_name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Contract type `SocialSignupStatusInput`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SocialSignupStatusInput {
+    /// The contract's `request_id`.
+    pub request_id: Uuid,
+    /// The contract's `poll_token`.
+    pub poll_token: String,
+}
+impl std::fmt::Debug for SocialSignupStatusInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SocialSignupStatusInput(<redacted>)")
+    }
 }
 
 /// Contract type `SsoConfiguration`.

@@ -42,6 +42,123 @@ macro_rules! application_mutation {
     };
 }
 impl ManagementClient {
+    /// Lists ATA verifications without returning their credentials.
+    /// # Errors
+    /// Returns current application-manager authority and transport errors.
+    pub async fn ata_verifications(
+        &self,
+        app: &str,
+        actor: &SecretString,
+    ) -> Result<serde_json::Value> {
+        self.ata_request(
+            Method::GET,
+            &["honeycomb", "applications", app, "ata-verifications"],
+            actor,
+            None,
+            None,
+        )
+        .await
+    }
+    /// Reviews all ATA dependencies before credential creation.
+    /// # Errors
+    /// Returns invalid graph, application authority and transport errors.
+    pub async fn preview_ata_verification(
+        &self,
+        app: &str,
+        actor: &SecretString,
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        self.ata_request(
+            Method::POST,
+            &[
+                "honeycomb",
+                "applications",
+                app,
+                "ata-verifications",
+                "preview",
+            ],
+            actor,
+            Some(input),
+            None,
+        )
+        .await
+    }
+    /// Creates a reviewed verification and reveals its refresh token once.
+    /// Retain the same operation body and mutation key for a lost-response retry.
+    /// # Errors
+    /// Returns stale graph, authority, idempotency and validation errors.
+    pub async fn create_ata_verification(
+        &self,
+        app: &str,
+        actor: &SecretString,
+        input: &serde_json::Value,
+        mutation: &Mutation,
+    ) -> Result<serde_json::Value> {
+        self.ata_request(
+            Method::POST,
+            &["honeycomb", "applications", app, "ata-verifications"],
+            actor,
+            Some(input),
+            Some(mutation),
+        )
+        .await
+    }
+    /// Revokes a verification and every credential derived from it.
+    /// # Errors
+    /// Returns authority, not-found and idempotency errors.
+    pub async fn revoke_ata_verification(
+        &self,
+        app: &str,
+        id: Uuid,
+        actor: &SecretString,
+        operation_id: Uuid,
+        mutation: &Mutation,
+    ) -> Result<serde_json::Value> {
+        self.ata_request(
+            Method::POST,
+            &[
+                "honeycomb",
+                "applications",
+                app,
+                "ata-verifications",
+                &id.to_string(),
+                "revoke",
+            ],
+            actor,
+            Some(&serde_json::json!({"operation_id":operation_id})),
+            Some(mutation),
+        )
+        .await
+    }
+    async fn ata_request(
+        &self,
+        method: Method,
+        path: &[&str],
+        actor: &SecretString,
+        body: Option<&serde_json::Value>,
+        mutation: Option<&Mutation>,
+    ) -> Result<serde_json::Value> {
+        if !actor.expose_secret().starts_with("oat_") {
+            return Err(Error::Invalid(
+                "the actor must be an IAM token issued to Honeycomb".into(),
+            ));
+        }
+        let mut header = reqwest::header::HeaderValue::from_str(actor.expose_secret())
+            .map_err(|_| Error::Invalid("invalid actor token".into()))?;
+        header.set_sensitive(true);
+        let mut request = self
+            .0
+            .route(method, path)?
+            .header("x-honeycomb-actor-token", header);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        if let Some(mutation) = mutation {
+            request = mutation.apply(request);
+        }
+        self.0.send_json(request).await
+    }
+
     /// Constructs a production control-plane client with a random `hck_` credential.
     /// No testing header or automatic updater is installed.
     /// # Errors
