@@ -829,7 +829,42 @@ impl Auth {
                 .map_err(storage)?;
             tokens
         };
-        let actor = tokens.actor.as_ref().ok_or_else(unavailable)?;
+        let actor_missing = tokens.actor.is_none();
+        let actor = match tokens.actor {
+            Some(actor) => actor,
+            None => {
+                let identity = self
+                    .client(test.as_ref())?
+                    .oauth()
+                    .introspect(
+                        &models::TokenIntrospectionRequest {
+                            token: tokens.access_token.clone(),
+                            token_type_hint: None,
+                        },
+                        None,
+                    )
+                    .await
+                    .map_err(iam_error)?;
+                if !identity.active {
+                    return Err(expired());
+                }
+                models::ActorRef {
+                    public_id: identity
+                        .public_id
+                        .filter(|id| !id.is_empty())
+                        .ok_or_else(expired)?,
+                    type_field: match identity.actor_type {
+                        Some(models::TokenIntrospectionActorType::Carbon) => {
+                            models::ActorRefType::Carbon
+                        }
+                        Some(models::TokenIntrospectionActorType::Silicon) => {
+                            models::ActorRefType::Silicon
+                        }
+                        _ => return Err(forbidden()),
+                    },
+                }
+            }
+        };
         let kind = serde_json::to_value(&actor.type_field)
             .map_err(storage)?
             .as_str()
@@ -852,8 +887,9 @@ impl Auth {
             refresh_started: None,
             revoke_key: secret(),
         };
-        // Browser kind selection is verified against IAM before any local session exists.
-        if expected_kind.is_some() {
+        // Verify browser kind selection and introspection-derived identity, including
+        // application, organization and testing bindings, before a local session exists.
+        if expected_kind.is_some() || actor_missing {
             self.inspect(&session).await?;
         }
         let token = format!("ting_{}", secret());
@@ -1773,6 +1809,98 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn login_without_exchange_actor_uses_verified_introspection() {
+        for testing in [false, true] {
+            for (kind, id) in [("carbon", "c:fixture"), ("silicon", "si:fixture")] {
+                let f = fixture(testing).await;
+                let mut headers = HeaderMap::new();
+                if let Some(test) = &f.proof.test {
+                    headers.insert("iam_test_app_secret", test.secret.parse().unwrap());
+                    headers.insert("x-testing-environment-key", test.key.parse().unwrap());
+                }
+                {
+                    let mut identity = f.iam.reply.lock().unwrap();
+                    identity["public_id"] = json!(id);
+                    identity["actor_type"] = json!(kind);
+                    identity["authorization"]["public_id"] = json!(id);
+                    identity["authorization"]["actor_type"] = json!(kind);
+                }
+                let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
+                tokens.as_object_mut().unwrap().remove("actor");
+                f.iam.token_replies.lock().unwrap().push_back(tokens);
+                let key = uuid::Uuid::new_v4().to_string();
+                let (_, response) = f
+                    .app
+                    .auth
+                    .login_as("actorless-slt", &key, &headers, Some(kind))
+                    .await
+                    .unwrap();
+                assert_eq!(response["id"], id);
+                assert_eq!(response["kind"], kind);
+                assert_eq!(
+                    f.app
+                        .auth
+                        .login_as("actorless-slt", &key, &headers, Some(kind))
+                        .await
+                        .unwrap()
+                        .1,
+                    response
+                );
+                assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn actorless_login_rejects_invalid_identity_before_session_creation() {
+        for (path, value, expected_kind) in [
+            ("/active", json!(false), None),
+            ("/public_id", Value::Null, None),
+            ("/actor_type", json!("application"), None),
+            ("/client_id", json!("another-app"), None),
+            ("/authorization/public_id", json!("si:someone-else"), None),
+            ("/authorization/org_id", json!(""), None),
+            (
+                "/authorization/testing_environment_id",
+                json!(uuid::Uuid::new_v4()),
+                None,
+            ),
+            ("/actor_type", json!("silicon"), Some("carbon")),
+        ] {
+            let f = fixture(false).await;
+            *f.iam.reply.lock().unwrap().pointer_mut(path).unwrap() = value;
+            let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
+            tokens.as_object_mut().unwrap().remove("actor");
+            f.iam.token_replies.lock().unwrap().push_back(tokens);
+            assert!(
+                f.app
+                    .auth
+                    .login_as(
+                        "actorless-rejected-slt",
+                        &uuid::Uuid::new_v4().to_string(),
+                        &HeaderMap::new(),
+                        expected_kind,
+                    )
+                    .await
+                    .is_err(),
+                "accepted invalid identity at {path}"
+            );
+            let sessions: i64 = f
+                .app
+                .auth
+                .db
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                sessions, 1,
+                "created session for invalid identity at {path}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn browser_kind_selection_rejects_a_different_actor_before_session_creation() {
         let f = fixture(false).await;

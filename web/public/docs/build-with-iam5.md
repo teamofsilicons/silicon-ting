@@ -2,7 +2,7 @@
 
 A notification is useful when it reaches the right account once, survives an interruption, and makes its status clear. Build Ting integration around durable acceptance and explicit recipient authorization rather than treating a successful HTTP call as proof that a person read the message.
 
-**Available now:** Ting 0.2.0 and its IAM 5 reusable OBO endpoints; Honeycomb catalog access requires separate approval after login. **Being prepared separately:** Carbon/Silicon login popup choices and automatic catalog-approval callback. The published CLI/manual-code workflow remains the current fallback.
+Ting 0.2.0 uses IAM 5 reusable OBO endpoints and separate Honeycomb catalog approval after login. The website offers Carbon/Silicon login choices and automatic catalog-approval callbacks in a popup, with a full-page fallback. The CLI supports manual-code approval.
 
 ## Make the account choice explicit
 

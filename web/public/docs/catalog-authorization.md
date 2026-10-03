@@ -1,15 +1,16 @@
 # Honeycomb catalog access
 
-> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
+> **Integration baseline — October 3, 2026:** Ting 0.2.0 uses IAM 5 reusable OBO credentials. The website supports Carbon/Silicon login and catalog-approval popups, with a full-page fallback. The CLI retains its manual-code approval flow. Saved multi-workspace switching remains a separate follow-up.
 
 Ting asks separately before reading the applications owned by your organization
 from Honeycomb. Signing into Ting does not approve this feature. The required
 endpoint is `honeycomb.apps.list`; IAM shows its current endpoint details and any
 dependencies before you decide.
 
-In the Applications page, choose **Review access in IAM**, approve the request,
-then paste the single-use code into Ting. Completing approval reloads the catalog;
-it does not create or change an application. For this management view, select the
+In the Applications page, choose **Review Honeycomb access** and approve the
+request in IAM. The popup returns automatically after Ting securely stores the
+approval; blocked popups continue in the current page. Completing approval
+reloads the catalog; it does not create or change an application. For this management view, select the
 same account and organization in Honeycomb as your current Ting workspace.
 
 The CLI exposes the same flow:
