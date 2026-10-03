@@ -685,6 +685,18 @@ impl Auth {
         })
     }
     pub async fn login(&self, slt: &str, key: &str, headers: &HeaderMap) -> Result<(u16, Value)> {
+        self.login_as(slt, key, headers, None).await
+    }
+    pub async fn login_as(
+        &self,
+        slt: &str,
+        key: &str,
+        headers: &HeaderMap,
+        expected_kind: Option<&str>,
+    ) -> Result<(u16, Value)> {
+        if expected_kind.is_some_and(|kind| !matches!(kind, "carbon" | "silicon")) {
+            return Err(forbidden());
+        }
         mutation(key)?;
         if slt.is_empty() || slt.len() > 8192 {
             return Err(Error::invalid(
@@ -750,6 +762,9 @@ impl Auth {
             }
             if let Some(response) = response {
                 let response: Value = self.open(&operation, &response)?;
+                if expected_kind.is_some_and(|kind| response["kind"].as_str() != Some(kind)) {
+                    return Err(forbidden());
+                }
                 self.login_result(&response, &context).await?;
                 return Ok((200, response));
             }
@@ -821,6 +836,9 @@ impl Auth {
             .filter(|k| matches!(*k, "carbon" | "silicon"))
             .ok_or_else(unavailable)?
             .to_owned();
+        if expected_kind.is_some_and(|expected| expected != kind) {
+            return Err(forbidden());
+        }
         let session = Session {
             context,
             id: actor.public_id.clone(),
@@ -834,6 +852,10 @@ impl Auth {
             refresh_started: None,
             revoke_key: secret(),
         };
+        // Browser kind selection is verified against IAM before any local session exists.
+        if expected_kind.is_some() {
+            self.inspect(&session).await?;
+        }
         let token = format!("ting_{}", secret());
         let id = hash(token.as_bytes());
         let response =
@@ -1751,6 +1773,86 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn browser_kind_selection_rejects_a_different_actor_before_session_creation() {
+        let f = fixture(false).await;
+        let key = uuid::Uuid::new_v4().to_string();
+        let before: i64 = f
+            .app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        let error = f
+            .app
+            .auth
+            .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 403);
+        let after: i64 = f
+            .app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, before);
+        let (_, response) = f
+            .app
+            .auth
+            .login_as("popup-slt", &key, &HeaderMap::new(), Some("silicon"))
+            .await
+            .unwrap();
+        assert_eq!(response["kind"], "silicon");
+        assert_eq!(
+            f.app
+                .auth
+                .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
+                .await
+                .unwrap_err()
+                .status,
+            403
+        );
+        let start = crate::browser_login(
+            &f.app,
+            &json!({"identity_kind":"silicon","popup_nonce":"a".repeat(64)}),
+        )
+        .unwrap();
+        let destination = url::Url::parse(start.headers()["Location"].to_str().unwrap()).unwrap();
+        assert!(
+            destination
+                .query_pairs()
+                .any(|(key, value)| key == "identity_kind" && value == "silicon")
+        );
+        assert!(
+            destination
+                .query_pairs()
+                .any(|(key, value)| key == "display" && value == "popup")
+        );
+        let callback = url::Url::parse(
+            &destination
+                .query_pairs()
+                .find(|(key, _)| key == "redirect_uri")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        let state = callback
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .to_string();
+        let attempt: crate::BrowserLoginAttempt =
+            serde_json::from_str(&f.app.store.take_login_attempt(&state).unwrap()).unwrap();
+        assert_eq!(attempt.identity_kind.as_deref(), Some("silicon"));
+        assert_eq!(attempt.popup_nonce, Some("a".repeat(64)));
+    }
+
     #[tokio::test]
     async fn canonical_actors_require_matching_iam_kind_org_and_world() {
         for testing in [false, true] {

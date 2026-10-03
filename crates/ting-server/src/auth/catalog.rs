@@ -10,6 +10,12 @@ struct Pending {
     authorization: Option<models::OboConsentDetail>,
     completed: bool,
     code_hash: Option<String>,
+    #[serde(default)]
+    popup_nonce: Option<String>,
+    #[serde(default)]
+    callback_code: Option<String>,
+    #[serde(default)]
+    declined: bool,
 }
 pub(super) fn required() -> Error {
     Error::new(
@@ -121,17 +127,57 @@ impl Auth {
         )
     }
     pub async fn catalog_start(&self, p: &Principal, org: &str, key: &str) -> Result<Value> {
+        self.catalog_start_internal(p, org, key, None).await
+    }
+    pub async fn catalog_start_browser(
+        &self,
+        p: &Principal,
+        org: &str,
+        key: &str,
+        callback: &str,
+        nonce: &str,
+    ) -> Result<Value> {
+        self.catalog_start_internal(p, org, key, Some((callback, nonce)))
+            .await
+    }
+    async fn catalog_start_internal(
+        &self,
+        p: &Principal,
+        org: &str,
+        key: &str,
+        callback: Option<(&str, &str)>,
+    ) -> Result<Value> {
         mutation(key)?;
         let (session, authority) = self.authority(p, org).await?;
         let binding = binding(&session, &authority.org_id);
         let id = hash(format!("{binding}/{key}").as_bytes());
         let lock = self.lock(&format!("catalog-request/{id}"));
         let _guard = lock.lock().await;
+        let correlation = secret();
+        let redirect_uri = callback
+            .map(|(base, _)| {
+                let mut url = url::Url::parse(base).map_err(|_| unavailable())?;
+                url.query_pairs_mut()
+                    .append_pair("org_id", org)
+                    .append_pair("request_id", &id);
+                Ok::<_, Error>(url.to_string())
+            })
+            .transpose()?;
         let mut pending = match self.catalog_record::<Pending>("pending", &id)? {
-            Some(pending) => pending,
+            Some(pending) => {
+                if pending.popup_nonce.is_some() != callback.is_some() {
+                    return Err(Error::new(
+                        409,
+                        "idempotency_conflict",
+                        "This approval key belongs to another delivery mode.",
+                        "Use the original request or a new key.",
+                    ));
+                }
+                pending
+            }
             None => Pending {
                 binding,
-                state: secret(),
+                state: correlation.clone(),
                 request: Some(models::OboAuthorizationRequest {
                     subject_token: session.access.clone(),
                     org_id: authority.org_id.clone(),
@@ -139,14 +185,28 @@ impl Auth {
                         audience: "honeycomb".into(),
                         endpoint_id: ENDPOINT.into(),
                     }],
-                    redirect_uri: None,
-                    state: None,
+                    state: redirect_uri.as_ref().map(|_| correlation),
+                    redirect_uri,
                 }),
                 authorization: None,
                 completed: false,
                 code_hash: None,
+                popup_nonce: callback.map(|(_, nonce)| nonce.to_owned()),
+                callback_code: None,
+                declined: false,
             },
         };
+        if pending.declined {
+            return Err(Error::new(
+                409,
+                "catalog_approval_declined",
+                "The previous approval was declined.",
+                "Start a new approval when you are ready.",
+            ));
+        }
+        if let Some((_, nonce)) = callback {
+            pending.popup_nonce = Some(nonce.to_owned());
+        }
         if pending.authorization.is_none() {
             self.save_catalog("pending", &id, &pending, &session.context)?;
             let result = self
@@ -174,7 +234,60 @@ impl Auth {
             pending.request = None;
             self.save_catalog("pending", &id, &pending, &session.context)?;
         }
-        Self::pending_response(&id, &pending)
+        self.save_catalog("pending", &id, &pending, &session.context)?;
+        let retry = pending
+            .callback_code
+            .clone()
+            .filter(|_| !pending.completed && callback.is_some());
+        let result = Self::pending_response(&id, &pending)?;
+        drop(_guard);
+        if let Some(code) = retry {
+            return self
+                .catalog_complete(p, org, &id, &code, &pending.state)
+                .await;
+        }
+        Ok(result)
+    }
+    pub async fn catalog_browser_callback(
+        &self,
+        p: &Principal,
+        org: &str,
+        id: &str,
+        code: Option<&str>,
+        state: &str,
+    ) -> Result<(String, bool)> {
+        let (session, authority) = self.authority(p, org).await?;
+        let lock = self.lock(&format!("catalog-request/{id}"));
+        let guard = lock.lock().await;
+        let mut pending = self
+            .catalog_record::<Pending>("pending", id)?
+            .ok_or_else(Error::not_found)?;
+        if pending.binding != binding(&session, &authority.org_id) || pending.state != state {
+            return Err(Error::not_found());
+        }
+        let nonce = pending.popup_nonce.clone().ok_or_else(Error::not_found)?;
+        if let Some(code) = code {
+            if !code.starts_with("obc_") || code.len() > 16384 {
+                return Err(Error::invalid("Invalid approval code."));
+            }
+            if pending
+                .callback_code
+                .as_deref()
+                .is_some_and(|previous| previous != code)
+            {
+                return Err(forbidden());
+            }
+            pending.callback_code = Some(code.to_owned());
+        } else {
+            pending.declined = true;
+        }
+        self.save_catalog("pending", id, &pending, &session.context)?;
+        drop(guard);
+        let success = match code {
+            Some(code) => self.catalog_complete(p, org, id, code, state).await.is_ok(),
+            None => false,
+        };
+        Ok((nonce, success))
     }
     pub async fn catalog_status(&self, p: &Principal, org: &str, id: &str) -> Result<Value> {
         let (session, authority) = self.authority(p, org).await?;
@@ -324,6 +437,63 @@ mod tests {
     use super::*;
     use crate::auth::tests::fixture;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn browser_callback_binds_state_actor_org_and_recovers_transient_exchange() {
+        let f = fixture(false).await;
+        let auth = &f.app.auth;
+        let p = &f.principal;
+        let request = auth
+            .catalog_start_browser(
+                p,
+                "tos",
+                "browser-catalog-flow-key",
+                "https://ting.example/v1/session/catalog/callback",
+                &"a".repeat(64),
+            )
+            .await
+            .unwrap();
+        let id = request["authorization_id"].as_str().unwrap();
+        let state = request["state"].as_str().unwrap();
+        assert!(
+            auth.catalog_browser_callback(p, "tos", id, Some("obc_browser"), "wrong-state")
+                .await
+                .is_err()
+        );
+        assert!(
+            auth.catalog_browser_callback(p, "elsewhere", id, Some("obc_browser"), state)
+                .await
+                .is_err()
+        );
+        assert!(
+            auth.catalog_start(p, "tos", "browser-catalog-flow-key")
+                .await
+                .is_err()
+        );
+        f.iam.catalog_token_status.store(503, Ordering::SeqCst);
+        let (nonce, success) = auth
+            .catalog_browser_callback(p, "tos", id, Some("obc_browser"), state)
+            .await
+            .unwrap();
+        assert_eq!(nonce, "a".repeat(64));
+        assert!(!success);
+        f.iam.catalog_token_status.store(200, Ordering::SeqCst);
+        let recovered = auth
+            .catalog_start_browser(
+                p,
+                "tos",
+                "browser-catalog-flow-key",
+                "https://ting.example/v1/session/catalog/callback",
+                &"b".repeat(64),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered["status"], "completed");
+        let exchanges = f.iam.proof_requests.lock().unwrap().clone();
+        assert_eq!(exchanges.len(), 2);
+        assert_eq!(exchanges[0]["key"], exchanges[1]["key"]);
+        assert!(auth.check_session(p).is_ok());
+    }
 
     #[tokio::test]
     async fn invalid_codes_keep_login_and_refresh_retries_keep_their_identity() {

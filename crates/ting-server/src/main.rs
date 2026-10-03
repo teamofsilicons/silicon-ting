@@ -501,16 +501,81 @@ async fn http(
                 .await?,
         ));
     }
+    if path == "session/catalog/callback" && method == Method::GET {
+        v::fields(
+            &f,
+            &[
+                "org_id",
+                "request_id",
+                "authorization_id",
+                "state",
+                "code",
+                "error",
+            ],
+            &["org_id", "request_id", "state"],
+        )?;
+        let org = v::string(&f, "org_id", 128)?;
+        let request = v::string(&f, "request_id", 128)?;
+        let state = v::string(&f, "state", 128)?;
+        let (nonce, success) = app
+            .auth
+            .catalog_browser_callback(
+                &p,
+                org,
+                request,
+                f.get("code")
+                    .and_then(Value::as_str)
+                    .filter(|_| f.get("error").is_none()),
+                state,
+            )
+            .await?;
+        return popup_login_response(&app, &nonce, success);
+    }
     if parts.len() < 3 || parts[0] != "orgs" {
         return Err(Error::not_found());
     }
     let org = app.auth.org(&p, parts[1]).await?;
     match (method.as_str(), parts[2..].as_ref()) {
         ("POST", ["catalog-authorizations"]) => {
-            v::fields(&b, &["idempotency_key"], &["idempotency_key"])?;
+            v::fields(
+                &b,
+                &["idempotency_key", "popup_nonce"],
+                &["idempotency_key"],
+            )?;
             let key = b["idempotency_key"]
                 .as_str()
                 .ok_or_else(|| Error::invalid("idempotency_key must be a string"))?;
+            if let Some(nonce) = b.get("popup_nonce") {
+                let nonce = nonce
+                    .as_str()
+                    .filter(|n| {
+                        n.len() == 64
+                            && n.bytes()
+                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    })
+                    .ok_or_else(|| Error::invalid("Invalid popup nonce."))?;
+                let callback = format!("{}/v1/session/catalog/callback", app.config.public_origin);
+                let value = app
+                    .auth
+                    .catalog_start_browser(&p, &org, key, &callback, nonce)
+                    .await?;
+                let redirect = if value["status"] == "completed" {
+                    popup_login_response(&app, nonce, true)?.headers()["Location"]
+                        .to_str()
+                        .map_err(|_| Error::unavailable("Invalid completion URL."))?
+                        .to_owned()
+                } else {
+                    let mut url = url::Url::parse(
+                        value["consent_url"]
+                            .as_str()
+                            .ok_or_else(|| Error::unavailable("Missing consent address."))?,
+                    )
+                    .map_err(|_| Error::unavailable("Invalid consent address."))?;
+                    url.query_pairs_mut().append_pair("display", "popup");
+                    url.to_string()
+                };
+                return Ok(response(200, json!({"redirect_url":redirect})));
+            }
             return Ok(response(200, app.auth.catalog_start(&p, &org, key).await?));
         }
         ("GET", ["catalog-authorizations", id]) => {
@@ -855,8 +920,27 @@ fn proof_app(p: &auth::Proof, b: &Value) -> Result<()> {
     }
     Ok(())
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BrowserLoginAttempt {
+    next: String,
+    identity_kind: Option<String>,
+    popup_nonce: Option<String>,
+}
 fn browser_login(app: &App, f: &Value) -> Result<Response> {
-    v::fields(f, &["next"], &[])?;
+    v::fields(f, &["next", "identity_kind", "popup_nonce"], &[])?;
+    let kind = f.get("identity_kind").and_then(Value::as_str);
+    let popup_nonce = f.get("popup_nonce").and_then(Value::as_str);
+    if kind.is_some_and(|k| !matches!(k, "carbon" | "silicon"))
+        || popup_nonce.is_some_and(|n| {
+            kind.is_none()
+                || n.len() != 64
+                || !n
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    {
+        return Err(Error::invalid("Choose Carbon or Silicon to sign in."));
+    }
     let next = f.get("next").and_then(Value::as_str).unwrap_or("/");
     if !next.starts_with('/')
         || next.starts_with("//")
@@ -865,20 +949,34 @@ fn browser_login(app: &App, f: &Value) -> Result<Response> {
     {
         return Err(Error::invalid("next must be a local absolute path."));
     }
-    let state = app.store.login_attempt(next)?;
+    let attempt = BrowserLoginAttempt {
+        next: next.to_owned(),
+        identity_kind: kind.map(str::to_owned),
+        popup_nonce: popup_nonce.map(str::to_owned),
+    };
+    let state = app.store.login_attempt(
+        &serde_json::to_string(&attempt)
+            .map_err(|_| Error::unavailable("Cannot save sign-in attempt."))?,
+    )?;
     let mut callback =
         url::Url::parse(&format!("{}/v1/session/callback", app.config.public_origin))
             .map_err(|_| Error::unavailable("Invalid callback configuration."))?;
     callback.query_pairs_mut().append_pair("state", &state);
     let mut target = url::Url::parse(
         &env::var("TING_IAM_CONSENT_URL")
-            .unwrap_or_else(|_| "https://iam.teamofsilicons.com/login".into()),
+            .unwrap_or_else(|_| "https://auth.iam.teamofsilicons.com/login".into()),
     )
     .map_err(|_| Error::unavailable("Invalid IAM consent configuration."))?;
     target
         .query_pairs_mut()
         .append_pair("app_id", &app.config.iam_app_id)
         .append_pair("redirect_uri", callback.as_str());
+    if let Some(kind) = kind {
+        target.query_pairs_mut().append_pair("identity_kind", kind);
+    }
+    if popup_nonce.is_some() {
+        target.query_pairs_mut().append_pair("display", "popup");
+    }
     let mut r = StatusCode::FOUND.into_response();
     r.headers_mut().insert(
         "Location",
@@ -905,19 +1003,48 @@ async fn browser_callback(app: &App, h: &HeaderMap, f: &Value) -> Result<Respons
             "Start a new login from Ting.",
         ));
     }
-    let next = app.store.take_login_attempt(state)?;
-    let (_, session) = app
+    let saved = app.store.take_login_attempt(state)?;
+    let attempt: BrowserLoginAttempt = if saved.starts_with('/') {
+        BrowserLoginAttempt {
+            next: saved,
+            identity_kind: None,
+            popup_nonce: None,
+        }
+    } else {
+        serde_json::from_str(&saved).map_err(|_| Error::invalid("Invalid sign-in attempt."))?
+    };
+    let exchanged = app
         .auth
-        .login(v::string(f, "slt", 16384)?, state, &HeaderMap::new())
-        .await?;
+        .login_as(
+            v::string(f, "slt", 16384)?,
+            state,
+            &HeaderMap::new(),
+            attempt.identity_kind.as_deref(),
+        )
+        .await;
+    let (_, session) = match exchanged {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(nonce) = attempt.popup_nonce.as_deref() {
+                return popup_login_response(app, nonce, false);
+            }
+            return Err(error);
+        }
+    };
     let token = session["session_token"]
         .as_str()
         .ok_or_else(|| Error::unavailable("IAM session exchange returned no session."))?;
-    let mut r = StatusCode::SEE_OTHER.into_response();
-    r.headers_mut().insert(
-        "Location",
-        HeaderValue::from_str(&next).map_err(|_| Error::invalid("Invalid redirect path."))?,
-    );
+    let mut r = if let Some(nonce) = attempt.popup_nonce.as_deref() {
+        popup_login_response(app, nonce, true)?
+    } else {
+        let mut response = StatusCode::SEE_OTHER.into_response();
+        response.headers_mut().insert(
+            "Location",
+            HeaderValue::from_str(&attempt.next)
+                .map_err(|_| Error::invalid("Invalid redirect path."))?,
+        );
+        response
+    };
     r.headers_mut().append(
         "Set-Cookie",
         HeaderValue::from_str(&format!(
@@ -932,6 +1059,28 @@ async fn browser_callback(app: &App, h: &HeaderMap, f: &Value) -> Result<Respons
         ),
     );
     Ok(r)
+}
+fn popup_login_response(app: &App, nonce: &str, success: bool) -> Result<Response> {
+    let mut target = url::Url::parse(&app.config.frontend_origin)
+        .map_err(|_| Error::unavailable("Invalid frontend configuration."))?;
+    target
+        .query_pairs_mut()
+        .append_pair("iam_popup", "complete")
+        .append_pair("nonce", nonce)
+        .append_pair("result", if success { "ok" } else { "error" });
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    response.headers_mut().insert(
+        "Location",
+        HeaderValue::from_str(target.as_str())
+            .map_err(|_| Error::unavailable("Invalid frontend callback."))?,
+    );
+    response
+        .headers_mut()
+        .insert("Cache-Control", HeaderValue::from_static("no-store"));
+    response
+        .headers_mut()
+        .insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
+    Ok(response)
 }
 async fn upgrade(
     State(app): State<Shared>,
