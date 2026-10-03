@@ -74,3 +74,5 @@ Vercel hosts the built frontend. Caddy serves `ting.teamofsilicons.com`, proxies
 SQLite uses WAL and `synchronous=FULL`. There is one server writer; move to PostgreSQL before adding replicas. Online encrypted snapshots run hourly and expire from S3 after seven days. Restoring a snapshot applies current notification retention before accepting traffic. Application secrets and encrypted upstream IAM tokens stay on the backend.
 
 Space Station has separate backend, CLI/daemon, browser analytics and browser event tables. Automatic diagnostics omit notification bodies, tokens and webhook secrets. Profile telemetry can be disabled; explicitly submitted bug reports require an actual durable Space Station acknowledgment.
+
+Read the [application integration guide](docs/BUILD_WITH_IAM5.md) for account selection, feature approval and delivery recovery.
