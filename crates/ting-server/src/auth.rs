@@ -685,6 +685,18 @@ impl Auth {
         })
     }
     pub async fn login(&self, slt: &str, key: &str, headers: &HeaderMap) -> Result<(u16, Value)> {
+        self.login_as(slt, key, headers, None).await
+    }
+    pub async fn login_as(
+        &self,
+        slt: &str,
+        key: &str,
+        headers: &HeaderMap,
+        expected_kind: Option<&str>,
+    ) -> Result<(u16, Value)> {
+        if expected_kind.is_some_and(|kind| !matches!(kind, "carbon" | "silicon")) {
+            return Err(forbidden());
+        }
         mutation(key)?;
         if slt.is_empty() || slt.len() > 8192 {
             return Err(Error::invalid(
@@ -750,6 +762,9 @@ impl Auth {
             }
             if let Some(response) = response {
                 let response: Value = self.open(&operation, &response)?;
+                if expected_kind.is_some_and(|kind| response["kind"].as_str() != Some(kind)) {
+                    return Err(forbidden());
+                }
                 self.login_result(&response, &context).await?;
                 return Ok((200, response));
             }
@@ -814,13 +829,51 @@ impl Auth {
                 .map_err(storage)?;
             tokens
         };
-        let actor = tokens.actor.as_ref().ok_or_else(unavailable)?;
+        let actor_missing = tokens.actor.is_none();
+        let actor = match tokens.actor {
+            Some(actor) => actor,
+            None => {
+                let identity = self
+                    .client(test.as_ref())?
+                    .oauth()
+                    .introspect(
+                        &models::TokenIntrospectionRequest {
+                            token: tokens.access_token.clone(),
+                            token_type_hint: None,
+                        },
+                        None,
+                    )
+                    .await
+                    .map_err(iam_error)?;
+                if !identity.active {
+                    return Err(expired());
+                }
+                models::ActorRef {
+                    public_id: identity
+                        .public_id
+                        .filter(|id| !id.is_empty())
+                        .ok_or_else(expired)?,
+                    type_field: match identity.actor_type {
+                        Some(models::TokenIntrospectionActorType::Carbon) => {
+                            models::ActorRefType::Carbon
+                        }
+                        Some(models::TokenIntrospectionActorType::Silicon) => {
+                            models::ActorRefType::Silicon
+                        }
+                        _ => return Err(forbidden()),
+                    },
+                }
+            }
+        };
         let kind = serde_json::to_value(&actor.type_field)
             .map_err(storage)?
             .as_str()
             .filter(|k| matches!(*k, "carbon" | "silicon"))
             .ok_or_else(unavailable)?
             .to_owned();
+        if expected_kind.is_some_and(|expected| expected != kind) {
+            return Err(forbidden());
+        }
         let session = Session {
             context,
             id: actor.public_id.clone(),
@@ -834,6 +887,11 @@ impl Auth {
             refresh_started: None,
             revoke_key: secret(),
         };
+        // Verify browser kind selection and introspection-derived identity, including
+        // application, organization and testing bindings, before a local session exists.
+        if expected_kind.is_some() || actor_missing {
+            self.inspect(&session).await?;
+        }
         let token = format!("ting_{}", secret());
         let id = hash(token.as_bytes());
         let response =
@@ -1573,7 +1631,7 @@ pub(crate) mod tests {
                 }
                 "/api/v1/obo-access/authorizations" => {
                     let reply = iam.reply.lock().unwrap().clone();
-                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://iam.example/obo/consent?request=catalog"})
+                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://auth.iam.teamofsilicons.com/obo/consent?request=00000000-0000-4000-8000-000000000010"})
                 }
                 "/api/v1/obo-access/tokens" => {
                     let key = request.headers()["idempotency-key"]
@@ -1751,6 +1809,238 @@ pub(crate) mod tests {
             _directory: directory,
         }
     }
+    #[tokio::test]
+    async fn login_without_exchange_actor_uses_verified_introspection() {
+        for testing in [false, true] {
+            for (kind, id) in [("carbon", "c:fixture"), ("silicon", "si:fixture")] {
+                let f = fixture(testing).await;
+                let mut headers = HeaderMap::new();
+                if let Some(test) = &f.proof.test {
+                    headers.insert("iam_test_app_secret", test.secret.parse().unwrap());
+                    headers.insert("x-testing-environment-key", test.key.parse().unwrap());
+                }
+                {
+                    let mut identity = f.iam.reply.lock().unwrap();
+                    identity["public_id"] = json!(id);
+                    identity["actor_type"] = json!(kind);
+                    identity["authorization"]["public_id"] = json!(id);
+                    identity["authorization"]["actor_type"] = json!(kind);
+                }
+                let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
+                tokens.as_object_mut().unwrap().remove("actor");
+                f.iam.token_replies.lock().unwrap().push_back(tokens);
+                let key = uuid::Uuid::new_v4().to_string();
+                let (_, response) = f
+                    .app
+                    .auth
+                    .login_as("actorless-slt", &key, &headers, Some(kind))
+                    .await
+                    .unwrap();
+                assert_eq!(response["id"], id);
+                assert_eq!(response["kind"], kind);
+                assert_eq!(
+                    f.app
+                        .auth
+                        .login_as("actorless-slt", &key, &headers, Some(kind))
+                        .await
+                        .unwrap()
+                        .1,
+                    response
+                );
+                assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn actorless_login_rejects_invalid_identity_before_session_creation() {
+        for (path, value, expected_kind) in [
+            ("/active", json!(false), None),
+            ("/public_id", Value::Null, None),
+            ("/actor_type", json!("application"), None),
+            ("/client_id", json!("another-app"), None),
+            ("/authorization/public_id", json!("si:someone-else"), None),
+            ("/authorization/org_id", json!(""), None),
+            (
+                "/authorization/testing_environment_id",
+                json!(uuid::Uuid::new_v4()),
+                None,
+            ),
+            ("/actor_type", json!("silicon"), Some("carbon")),
+        ] {
+            let f = fixture(false).await;
+            *f.iam.reply.lock().unwrap().pointer_mut(path).unwrap() = value;
+            let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
+            tokens.as_object_mut().unwrap().remove("actor");
+            f.iam.token_replies.lock().unwrap().push_back(tokens);
+            assert!(
+                f.app
+                    .auth
+                    .login_as(
+                        "actorless-rejected-slt",
+                        &uuid::Uuid::new_v4().to_string(),
+                        &HeaderMap::new(),
+                        expected_kind,
+                    )
+                    .await
+                    .is_err(),
+                "accepted invalid identity at {path}"
+            );
+            let sessions: i64 = f
+                .app
+                .auth
+                .db
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                sessions, 1,
+                "created session for invalid identity at {path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn browser_kind_selection_rejects_a_different_actor_before_session_creation() {
+        let f = fixture(false).await;
+        let key = uuid::Uuid::new_v4().to_string();
+        let before: i64 = f
+            .app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        let error = f
+            .app
+            .auth
+            .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, 403);
+        let after: i64 = f
+            .app
+            .auth
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, before);
+        let (_, response) = f
+            .app
+            .auth
+            .login_as("popup-slt", &key, &HeaderMap::new(), Some("silicon"))
+            .await
+            .unwrap();
+        assert_eq!(response["kind"], "silicon");
+        assert_eq!(
+            f.app
+                .auth
+                .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
+                .await
+                .unwrap_err()
+                .status,
+            403
+        );
+        let start = crate::browser_login(
+            &f.app,
+            &json!({"identity_kind":"silicon","popup_nonce":"a".repeat(64)}),
+        )
+        .unwrap();
+        let destination = url::Url::parse(start.headers()["Location"].to_str().unwrap()).unwrap();
+        assert!(
+            destination
+                .query_pairs()
+                .any(|(key, value)| key == "identity_kind" && value == "silicon")
+        );
+        assert!(
+            destination
+                .query_pairs()
+                .any(|(key, value)| key == "display" && value == "popup")
+        );
+        let callback = url::Url::parse(
+            &destination
+                .query_pairs()
+                .find(|(key, _)| key == "redirect_uri")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        let state = callback
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .to_string();
+        let attempt: crate::BrowserLoginAttempt =
+            serde_json::from_str(&f.app.store.read_login_attempt(&state).unwrap()).unwrap();
+        assert_eq!(attempt.identity_kind.as_deref(), Some("silicon"));
+        assert_eq!(attempt.popup_nonce, Some("a".repeat(64)));
+    }
+
+    #[tokio::test]
+    async fn browser_callback_recovers_the_same_login_after_an_uncertain_exchange() {
+        let f = fixture(false).await;
+        let attempt = crate::BrowserLoginAttempt {
+            next: "/".into(),
+            identity_kind: Some("silicon".into()),
+            popup_nonce: Some("a".repeat(64)),
+        };
+        let state = f
+            .app
+            .store
+            .login_attempt(&serde_json::to_string(&attempt).unwrap())
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", format!("ting_login={state}").parse().unwrap());
+        let callback = json!({"state":state,"slt":"browser-original"});
+        f.iam.status.store(503, Ordering::SeqCst);
+        let temporary = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(temporary.status(), 503);
+        assert!(!f.app.store.read_login_attempt(&state).unwrap().is_empty());
+        f.iam.status.store(200, Ordering::SeqCst);
+        let recovered = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(recovered.status(), 303);
+        assert!(
+            recovered.headers()["location"]
+                .to_str()
+                .unwrap()
+                .contains("result=ok")
+        );
+        let calls = f.iam.token_requests.lock().unwrap().clone();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], calls[1]);
+        // Lost browser responses replay only the original session, never a changed SLT.
+        let replay = crate::browser_callback(&f.app, &headers, &callback)
+            .await
+            .unwrap();
+        assert_eq!(
+            replay.headers()["set-cookie"],
+            recovered.headers()["set-cookie"]
+        );
+        let changed = crate::browser_callback(
+            &f.app,
+            &headers,
+            &json!({"state":state,"slt":"browser-changed"}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            changed.headers()["location"]
+                .to_str()
+                .unwrap()
+                .contains("result=error")
+        );
+        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 2);
+    }
+
     #[tokio::test]
     async fn canonical_actors_require_matching_iam_kind_org_and_world() {
         for testing in [false, true] {

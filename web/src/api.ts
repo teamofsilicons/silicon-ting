@@ -1,5 +1,5 @@
 export type List<T> = { items: T[]; next_cursor?: string };
-export type Identity = { id: string; kind: 'carbon' | 'silicon'; authenticated: boolean };
+export type Identity = { id: string; kind: 'carbon' | 'silicon'; authenticated: boolean; environment?: { kind: 'production' | 'testing'; id?: string; generation?: number } };
 export type Org = { id: string; name: string };
 export type TingApp = { app_id: string; name: string; can_manage_tings: boolean };
 export type TingType = { type: string; description: string; defaults: { carbon: boolean; silicon: boolean } };

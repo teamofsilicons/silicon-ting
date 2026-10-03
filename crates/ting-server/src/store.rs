@@ -1126,7 +1126,7 @@ impl Store {
         )?;
         Ok(state)
     }
-    pub fn take_login_attempt(&self, state: &str) -> Result<String> {
+    pub fn read_login_attempt(&self, state: &str) -> Result<String> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
         let next: Option<String> = tx
@@ -1136,9 +1136,10 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()?;
-        tx.execute("DELETE FROM login_attempts WHERE id=?", [state])?;
+        // Keep the bounded attempt so a lost callback response can recover the
+        // original encrypted login receipt. Auth binds the state to one SLT hash.
         tx.commit()?;
-        next.ok_or_else(|| v_err("This browser login attempt is expired or already used."))
+        next.ok_or_else(|| v_err("This browser login attempt has expired."))
     }
 }
 fn v_err(s: &str) -> Error {

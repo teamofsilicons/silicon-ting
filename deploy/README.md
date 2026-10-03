@@ -28,3 +28,24 @@ Set `TING_BROWSER_ORIGINS` in the runtime secret to the comma-separated exact or
 The same allowlist governs HTTP, WebSocket upgrades and cookie-authenticated mutations. Permitted HTTP responses, including errors, carry credentialed CORS and `Vary: Origin`; unknown origins receive 403. Browsers must use `credentials: "include"` for HTTP and open the socket on the host that issued the Ting cookie. Each user still signs into Ting separately; DM login alone does not create a Ting session. The login return path remains local.
 
 See [DM integration prerequisites and verification](dm-integration.md) for scope approval, environment setup and the live delivery gates.
+
+## IAM 5 browser rollout
+
+Set `TING_IAM_CONSENT_URL=https://auth.iam.teamofsilicons.com/login` in the
+production runtime secret before installing the popup backend. Login and catalog
+consent must use the same IAM origin; returned consent URLs are validated against
+this configuration. Keep the existing encryption key and take a fresh consistent
+backup before deployment.
+
+Deploy the backend before promoting its frontend so Carbon/Silicon login buttons
+and automatic catalog callbacks have matching routes. After promotion, run:
+
+```sh
+python3 scripts/public-smoke.py --browser-origin https://ting.teamofsilicons.com
+python3 scripts/iam5-browser-smoke.py
+```
+
+The browser smoke checks redirects, cookies and callback rejection boundaries
+without signing anyone in. Separately verify IAM's login page is available and
+complete a real login and catalog approval; a healthy Ting API alone cannot prove
+that upstream browser consent is usable.

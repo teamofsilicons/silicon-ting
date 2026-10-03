@@ -1,6 +1,6 @@
 # Ting API — v1 implementation contract
 
-> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
+> **Integration baseline — October 3, 2026:** Ting 0.2.0 uses IAM 5 reusable OBO credentials. The website supports Carbon/Silicon login and catalog-approval popups, with a full-page fallback. The CLI retains its manual-code approval flow. Saved multi-workspace switching remains a separate follow-up.
 
 
 This is the contract to build. Examples use sample IDs and timestamps. [cli.md](cli.md) defines the matching commands; [understanding.md](understanding.md) and [iam.md](iam.md) contain the original notes. The decisions here include the later product changes.

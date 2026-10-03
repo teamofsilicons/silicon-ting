@@ -1,6 +1,6 @@
 # Ting CLI
 
-> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
+> **Integration baseline — October 3, 2026:** Ting 0.2.0 uses IAM 5 reusable OBO credentials. The website supports Carbon/Silicon login and catalog-approval popups, with a full-page fallback. The CLI retains its manual-code approval flow. Saved multi-workspace switching remains a separate follow-up.
 
 
 The v1 implementation contract, based on [understanding.md](understanding.md), [iam.md](iam.md), and the latest product decisions. These commands are not implemented yet. Examples show JSON output; without `--json`, print the same information in readable text. The CLI and daemon use the stateless Rust client library.
@@ -122,7 +122,7 @@ ting --org bricks send --type 'dm.msg.received' \
   --write-request send.json
 ```
 
-Obtain an IAM proof bound to the prepared `bricks` request, then execute it with `ting --org bricks send --request-file send.json --proof-token-stdin`.
+Obtain an IAM OBO access token for the prepared endpoint and selected `bricks` context, then execute it with `ting --org bricks send --request-file send.json --proof-token-stdin`.
 
 ## Permission to receive from an app
 
