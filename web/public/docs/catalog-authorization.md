@@ -1,6 +1,6 @@
 # Honeycomb catalog access
 
-> **Integration preview for Ting 0.2.0 / IAM 5.0.0.** Documentation is published before the coordinated runtime rollout. The new catalog authorization routes require the matching deployed Ting and Honeycomb services.
+> **Live integration baseline — October 3, 2026:** Ting 0.2.0 and IAM 5.0.0 are deployed. Browser popup and expanded saved-workspace interface changes are a separate follow-up; use the API/CLI contracts below now, and check the application before relying on those interface additions.
 
 Ting asks separately before reading the applications owned by your organization
 from Honeycomb. Signing into Ting does not approve this feature. The required
