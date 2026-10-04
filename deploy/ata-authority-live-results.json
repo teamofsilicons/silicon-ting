@@ -1,0 +1,102 @@
+{
+  "started_at": "2026-10-04T13:09:32.460849+00:00",
+  "scope": "Production self-app ATA authority boundary check; not end-to-end delivery",
+  "origin_app": "ting",
+  "recipient_app": "ting",
+  "approved_endpoints": [
+    {
+      "audience": "ting",
+      "endpoint_id": "sent.query"
+    },
+    {
+      "audience": "ting",
+      "endpoint_id": "sent.read"
+    },
+    {
+      "audience": "ting",
+      "endpoint_id": "subscriptions.query"
+    },
+    {
+      "audience": "ting",
+      "endpoint_id": "subscriptions.revoke"
+    },
+    {
+      "audience": "ting",
+      "endpoint_id": "tings.send"
+    }
+  ],
+  "production_recipient_sessions_created": 0,
+  "subscriptions_created": 0,
+  "notifications_created": 0,
+  "checks": {
+    "refresh": {
+      "status": 200,
+      "verification_matches": true,
+      "expires_in": 60
+    },
+    "verified_origin_endpoint": {
+      "status": 200,
+      "verified": true,
+      "valid_till": 20261004131039
+    },
+    "wrong_origin": {
+      "status": 200,
+      "verified": false
+    },
+    "unapproved_enrollment": {
+      "status": 200,
+      "verified": false
+    },
+    "sent_empty_query": {
+      "status": 200,
+      "items": 0
+    },
+    "subscription_empty_query": {
+      "status": 200,
+      "items": 0
+    },
+    "ting_wrong_origin": {
+      "status": 401,
+      "error": "invalid_ata_token"
+    },
+    "http_unregistered_send": {
+      "status": 404,
+      "error": "not_found"
+    },
+    "websocket_transport": {
+      "exit_code": 0,
+      "reply_received": true
+    },
+    "websocket_unregistered_send": {
+      "op": "error",
+      "error": "not_found"
+    }
+  },
+  "cleanup": {
+    "revoked": true,
+    "iam_verified_after_revoke": false,
+    "seconds_since_mint": 10.9,
+    "ting_status_after_revoke": 401,
+    "ting_error_after_revoke": "invalid_ata_token",
+    "confirmed_by_management_list": true,
+    "revoked_at": "2026-10-04T13:09:49.256809+00:00"
+  },
+  "verification_id": "de5a0489-db2e-4380-8f3f-5ea46bf3dae8",
+  "verification_lifetime_seconds": 3600,
+  "access_lifetime_seconds": 60,
+  "passed_before_revocation": true,
+  "passed": true,
+  "prior_attempt": {
+    "verification_id": "65e261d4-d733-4959-a428-cefcdf8cfd05",
+    "reason": "WebSocket harness initially treated an error while closing after the reply as request failure; fixed close handling and reran successfully.",
+    "cleanup": {
+      "revoked": true,
+      "iam_verified_after_revoke": false,
+      "seconds_since_mint": 12.52,
+      "ting_status_after_revoke": 401,
+      "ting_error_after_revoke": "invalid_ata_token",
+      "confirmed_by_management_list": true,
+      "revoked_at": "2026-10-04T13:08:40.305757+00:00"
+    }
+  }
+}

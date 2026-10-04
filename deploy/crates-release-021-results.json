@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-10-04T13:02:05.867182+00:00",
+  "crates": [
+    {
+      "crate": "silicon-ting-client",
+      "version": "0.2.1",
+      "url": "https://crates.io/crates/silicon-ting-client/0.2.1",
+      "published_at": "2026-10-04T13:01:29.319119Z",
+      "yanked": false,
+      "checksum": "c85740d76a1d2180b3127769a6e81e13ad9c0939e960222f1a9f30cd1e325b64",
+      "downloaded_archive_verified": true,
+      "source_commit": "a93d60fde238213570debfb885b220efaed9f6a0",
+      "dirty": false
+    },
+    {
+      "crate": "silicon-ting-cli",
+      "version": "0.2.1",
+      "url": "https://crates.io/crates/silicon-ting-cli/0.2.1",
+      "published_at": "2026-10-04T13:01:45.295131Z",
+      "yanked": false,
+      "checksum": "535e1dea9574012f0a33ad96375eb440e06f1ba2643548344caa7865fbfde2d4",
+      "downloaded_archive_verified": true,
+      "source_commit": "a93d60fde238213570debfb885b220efaed9f6a0",
+      "dirty": false
+    }
+  ]
+}

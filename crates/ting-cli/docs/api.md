@@ -52,7 +52,7 @@ Three credentials have different jobs:
 
 An OBO credential is IAM's reusable `oba_` access token from separately approved endpoint consent. It identifies the issuing app, selected actor, audience and org. ATA uses reusable `ata_` access tokens under application verification, with no user identity. Ting verifies the appropriate credential with the official IAM client for the actual endpoint on every operation. It never falls back from failed ATA verification to OBO or manufactures a user identity. Legacy single-use proofs, ordinary app secrets and login tokens do not authorize these calls.
 
-Except for public information, login initiation/session exchange and preflight, routes require their listed credential. A valid token still needs current org membership, app permission and resource ownership. Missing/invalid/expired credentials return `401`; a valid identity without permission returns `403`. Resources owned by another recipient return `404` without exposing their contents.
+Except for public information, login initiation/session exchange and preflight, routes require their listed credential. Sessions and OBO calls still need their current account and organization authority. ATA calls use stored app-to-recipient subscriptions and app-owned resource checks in the selected canonical organization; they do not represent a user or require user membership. Missing/invalid/expired credentials return `401`; a valid identity without permission returns `403`. Resources owned by another recipient return `404` without exposing their contents.
 
 ### Session endpoints
 

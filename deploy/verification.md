@@ -1,8 +1,23 @@
 # Deployment verification
 
-Updated 2026-10-03 UTC. Ting **0.2.0** is deployed at [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com). The [IAM 5 browser rollout record](iam5-browser-rollout-results.json) identifies the exact sources and verification scope.
+Updated 2026-10-04 UTC. Ting **0.2.1** is deployed at [Ting](https://ting.teamofsilicons.com) and [the backend](https://backend.ting.teamofsilicons.com).
 
-## Current 0.2.0 IAM 5 browser rollout
+## Current 0.2.1 ATA app operations
+
+[PR #6](https://github.com/teamofsilicons/silicon-ting/pull/6) makes the intended enrollment/send split explicit: apps register each recipient using user-approved OBO, save the canonical `org_id` from that response, then send as themselves with ATA. No recipient session or continuing user OBO credential is needed for subsequent ATA sends. ATA also authorizes app-owned sent queries/read updates and subscription queries/revocation. Registration and scoped receiver bootstrap remain OBO-only; existing OBO app integrations remain compatible.
+
+| Check | Evidence and scope |
+| --- | --- |
+| Source validation | [94 workspace unit tests and one doctest](release-validation-021.json), strict Clippy, formatting, CLI smoke, eight web tests/build, five packaging tests and one installer test passed. New backend tests exercise no grant → ATA denial → OBO enrollment → revoked OBO → successful ATA send, current authority on replay, consent revocation, wrong app/org/recipient, testing-generation fences and real HTTP/WebSocket consistency. Independent security review found no actionable issues. |
+| Backend | [Tested ARM64 source `a93d60fde238213570debfb885b220efaed9f6a0`](backend-021-deployment-results.json) was checksum-verified and installed through SSM after a successful consistent backup. Public health reports 0.2.1; runtime credentials and configuration are preserved. |
+| Native and crates | [All six native targets and no-systemd acceptance](native-honeycomb-release-021-results.json) passed. GitHub archives and public Honeycomb production 0.2.1 match their checksums. [Client and CLI crates](crates-release-021-results.json) are published, non-yanked and verified against the clean source commit. |
+| Endpoint catalog | [Honeycomb revision 9 is effective; IAM revision 78](ata-catalog-rollout-results.json) exposes `tings.send`, `sent.query`, `sent.read`, `subscriptions.query` and `subscriptions.revoke` as ATA. The seven existing OBO endpoints, application scopes and webhook configuration were preserved. |
+| Live ATA authority | [A temporary Ting-to-Ting application verification](ata-authority-live-results.json) authorized empty app-owned sent/subscription queries. IAM rejected a wrong origin and the OBO-only enrollment endpoint. Ting rejected the wrong app and reached type validation on HTTP and WebSocket sends using a random unregistered type. Revocation rejected the same access token before its 60-second expiry. Both temporary grants were revoked. This verifies production app authority, not recipient delivery. |
+| Public boundaries | [75 live checks](ata-public-boundaries-results.json) passed across the backend and website API proxy, including four browser origins and 24 ATA rejection checks. No production recipient sessions, subscriptions or notifications were created. |
+
+Current documented IAM/Honeycomb APIs cannot issue ATA grants inside an isolated testing environment. The complete OBO-enrollment-to-ATA-delivery flow is therefore covered by local integration tests; live verification is limited to real application authority and rejection boundaries. Ting never falls back to production authority for a test request.
+
+## Historical 0.2.0 IAM 5 browser rollout
 
 [PR #4](https://github.com/teamofsilicons/silicon-ting/pull/4) adds separate Carbon/Silicon login choices and automatic Honeycomb catalog-approval callbacks. Blocked popups continue in the same tab and return to the original page; approval retries retain their operation identity. Exchanges without an actor use authenticated introspection before local session creation. The CLI manual-code contract remains available.
 
