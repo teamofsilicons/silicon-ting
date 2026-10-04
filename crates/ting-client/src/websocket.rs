@@ -1,7 +1,7 @@
 //! Native WebSocket publishing and receiving. Credentials are never persisted or put in URLs.
 //!
-//! Keep the original [`Prepared`] body/key after an uncertain send, obtain a fresh
-//! actor-bound proof, and retry explicitly. Reconnect with [`reconnect_delay`],
+//! Keep the original [`Prepared`] body/key after an uncertain send, use a valid
+//! ATA app token (or compatible OBO token), and retry explicitly. Reconnect with [`reconnect_delay`],
 //! resetting the failure count after one healthy minute. Restore still-authorized
 //! subscriptions using their original hook IDs; refetch after an inbox watch starts
 //! or reconnects because hints can be lost and silent arrivals produce no hint.
@@ -152,7 +152,8 @@ impl WebSocket {
     }
 
     /// Send the original UTF-8 body string once. A transport error/cancellation may
-    /// follow server acceptance; retain these bytes/key and use a valid OBO access token.
+    /// follow server acceptance; retain these bytes/key and use a valid ATA app token.
+    /// No Ting user session or recipient OBO token is required for an ATA send.
     pub async fn send(
         &mut self,
         prepared: &Prepared,
@@ -425,7 +426,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
 
-    const BODY: &str = "{ \"org_id\":\"tos\", \"type\":\"dm.sync.changed\", \"for\":\"si:one\", \"key\":\"si_1/event-1\", \"data\":{\"text\":\"नमस्ते\\nhi\"} }";
+    const BODY: &str = "{ \"org_id\":\"7359ca28-7878-41e4-82c9-f28c073c622b\", \"type\":\"dm.sync.changed\", \"for\":\"si:one\", \"key\":\"si_1/event-1\", \"data\":{\"text\":\"नमस्ते\\nhi\"} }";
 
     async fn fixture() -> (TcpListener, Client) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -513,23 +514,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sends_exact_prepared_bytes_and_correlates_errors_and_success() {
+    async fn app_tokens_send_exact_bytes_without_a_user_session_and_correlate_results() {
         let (listener, client) = fixture().await;
         let server = tokio::spawn(async move {
             let mut socket = accept(&listener).await;
-            for proof in ["rejected-proof", "fresh-proof"] {
+            for proof in ["rejected-app-token", "fresh-app-token"] {
                 let request = receive(&mut socket).await;
                 assert_eq!(
                     request["body"].as_str().unwrap().as_bytes(),
                     BODY.as_bytes()
                 );
                 assert_eq!(request["proof_token"], proof);
+                assert!(request.get("session_token").is_none());
                 assert_eq!(
                     request["headers"],
                     json!({"IAM_TEST_APP_SECRET":"ting-audience-secret","X-Testing-Environment-Key":"environment-key"})
                 );
                 assert!(!request["request_id"].as_str().unwrap().is_empty());
-                if proof == "rejected-proof" {
+                if proof == "rejected-app-token" {
                     respond(&mut socket, json!({"op":"error","request_id":request["request_id"],"error":{"code":"proof_expired","message":"Expired proof","hint":"Obtain another proof","retryable":false}})).await;
                 } else {
                     respond(&mut socket, json!({"op":"accepted","request_id":request["request_id"],"id":"msg_1","key":"si_1/event-1"})).await;
@@ -547,14 +549,17 @@ mod tests {
         };
         assert_eq!(
             socket
-                .send(&prepared, "rejected-proof", &test)
+                .send(&prepared, "rejected-app-token", &test)
                 .await
                 .unwrap_err()
                 .code,
             "proof_expired"
         );
         assert_eq!(
-            socket.send(&prepared, "fresh-proof", &test).await.unwrap()["key"],
+            socket
+                .send(&prepared, "fresh-app-token", &test)
+                .await
+                .unwrap()["key"],
             "si_1/event-1"
         );
         server.await.unwrap();
@@ -729,7 +734,11 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, "connection_failed");
-        assert!(error.hint.contains("valid OBO access token"));
+        assert!(
+            error
+                .hint
+                .contains("valid token authorized for this operation")
+        );
         let mut socket = WebSocket::connect(&client).await.unwrap();
         assert_eq!(
             socket

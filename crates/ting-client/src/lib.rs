@@ -56,7 +56,7 @@ impl Error {
         Self::new(
             "connection_failed",
             "The request failed or timed out; its outcome may be uncertain.",
-            "Check connectivity. Use a valid OBO access token before retrying an app request; preserve its key and exact bytes.",
+            "Check connectivity. Use a valid token authorized for this operation before retrying an app request; preserve its key and exact bytes.",
             true,
         )
     }
@@ -447,7 +447,7 @@ impl Prepared {
             ),
             ProofOperation::Register => (&["org_id", "app_id"], &["for"]),
             ProofOperation::Subscriptions => (&["org_id", "app_id"], &["for", "limit", "cursor"]),
-            ProofOperation::Revoke => (&["org_id", "id"], &[]),
+            ProofOperation::Revoke => (&["org_id", "id"], &["app_id"]),
             ProofOperation::SentList => (
                 &["org_id", "app_id"],
                 &["for", "type", "read", "limit", "cursor"],
@@ -554,6 +554,9 @@ impl Prepared {
     pub fn sha256(&self) -> String {
         format!("{:x}", Sha256::digest(&self.body))
     }
+    /// Submit the original bytes using the operation's credential. App sends and
+    /// sent history accept ATA tokens; recipient registration requires OBO.
+    /// No Ting user session is needed, and retries retain the original body/key.
     pub async fn execute(&self, client: &Client, proof: &str, test: &TestHeaders) -> Result<Value> {
         client
             .request(
@@ -1001,6 +1004,18 @@ mod tests {
             ).into_bytes();
             let send = Prepared::new(ProofOperation::Send, bytes.clone(), Some("tos")).unwrap();
             assert_eq!(send.body, bytes);
+        }
+    }
+    #[test]
+    fn revoke_accepts_explicit_app_authority_without_rewriting_legacy_requests() {
+        for raw in [
+            r#"{ "org_id":"7359ca28-7878-41e4-82c9-f28c073c622b", "app_id":"dm", "id":"sub_1" }"#,
+            r#"{ "org_id":"tos", "id":"sub_1" }"#,
+        ] {
+            let prepared =
+                Prepared::new(ProofOperation::Revoke, raw.as_bytes().to_vec(), None).unwrap();
+            assert_eq!(prepared.body, raw.as_bytes());
+            assert_eq!(prepared.operation.path(), "/v1/subscriptions/revoke");
         }
     }
     #[test]

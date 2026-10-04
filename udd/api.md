@@ -1,6 +1,6 @@
 # Ting API — v1 implementation contract
 
-> **Integration baseline — October 3, 2026:** Ting 0.2.0 uses IAM 5 reusable OBO credentials. The website supports Carbon/Silicon login and catalog-approval popups, with a full-page fallback. The CLI retains its manual-code approval flow. Saved multi-workspace switching remains a separate follow-up.
+> **Integration baseline — October 4, 2026:** Ting 0.2.1 uses IAM 5 OBO for recipient registration and ATA for subsequent app operations. Existing OBO app calls remain compatible. Carbon/Silicon login, catalog-approval popups and CLI manual-code approval remain available.
 
 
 This is the contract to build. Examples use sample IDs and timestamps. [cli.md](cli.md) defines the matching commands; [understanding.md](understanding.md) and [iam.md](iam.md) contain the original notes. The decisions here include the later product changes.
@@ -38,18 +38,19 @@ Resource IDs are opaque strings. Actor IDs are complete IAM identities: `c:alice
 
 List responses are `{ "items": [...] }`. Include `next_cursor` only when another page exists; never return it as `null`. Tings sort by `(created_at, id)` descending for listing, independently of delivery order. Other lists sort by their stable ID/name ascending. Cursors are opaque, expire after 24 hours, and bind the authenticated data context, org, filters and last position. A changed context/filter or invalid/expired cursor returns `400 invalid_cursor`. The first page fixes an upper creation boundary; later changes to read state or permissions are evaluated when each page is fetched.
 
-Request and batch limits bound individual operations. Retained history spans one calendar month for read or silent tings, and three months for unread non-silent tings. There is no per-day send quota in v1. Temporary overload may return `429` with `Retry-After` or `503`; neither response means a ting was accepted. A lost response is uncertain: retry with the same ting key and a valid OBO access token.
+Request and batch limits bound individual operations. Retained history spans one calendar month for read or silent tings, and three months for unread non-silent tings. There is no per-day send quota in v1. Temporary overload may return `429` with `Retry-After` or `503`; neither response means a ting was accepted. A lost response is uncertain: retry with the same ting key and a valid endpoint access token.
 
 ## Authentication and login
 
-Two credentials have different jobs:
+Three credentials have different jobs:
 
 | Credential | Used for |
 | --- | --- |
 | Ting session | A carbon/silicon's own orgs, inbox, preferences, hooks and settings; app management only with current Honeycomb permission. HTTP: `Authorization: Bearer <session_token>`. |
-| IAM OBO access token | Every app send, subscription registration, app-side subscription/status query, and sent read-state update. HTTP: `Authorization: Bearer <oba_access_token>`. A Ting session never replaces this proof. |
+| IAM OBO access token | Register the represented recipient with `subscriptions.register`; also accepted on existing app operations for compatibility. HTTP: `Authorization: Bearer <oba_access_token>`. |
+| IAM ATA access token | Send as the app, query/revoke its subscriptions, query its sent tings and update their read state. HTTP: `Authorization: Bearer <ata_access_token>`. No user session or represented actor is needed. |
 
-A delegated credential is IAM's reusable `oba_` access token from separately approved OBO endpoint consent. It identifies the issuing app, selected actor, audience and org. Verify it with the official IAM client for the actual endpoint on every operation. Legacy single-use proofs, ordinary app secrets and login tokens do not authorize these calls.
+An OBO credential is IAM's reusable `oba_` access token from separately approved endpoint consent. It identifies the issuing app, selected actor, audience and org. ATA uses reusable `ata_` access tokens under application verification, with no user identity. Ting verifies the appropriate credential with the official IAM client for the actual endpoint on every operation. It never falls back from failed ATA verification to OBO or manufactures a user identity. Legacy single-use proofs, ordinary app secrets and login tokens do not authorize these calls.
 
 Except for public information, login initiation/session exchange and preflight, routes require their listed credential. A valid token still needs current org membership, app permission and resource ownership. Missing/invalid/expired credentials return `401`; a valid identity without permission returns `403`. Resources owned by another recipient return `404` without exposing their contents.
 
@@ -142,7 +143,7 @@ consent or IAM authority loss prevents the next renewal, and existing authority
 expires within 30 seconds. Clean, rotation, disablement and local capability
 revocation fail closed without production fallback.
 
-Each create/recovery/renewal call verifies a valid OBO access token with IAM. Repeating the exact request
+Each create/recovery/renewal call verifies a valid endpoint access token with IAM. Repeating the exact request
 bytes and `key` returns the original capability and original expiry. Changed bytes
 under that key return `409 idempotency_conflict`; replay never extends or
 resurrects authority. The recovered historical capability may already be expired, replaced or revoked. To renew, use a **new key**, valid OBO access token and the original
@@ -160,7 +161,7 @@ receiver cannot be renewed; a new receiver is a new explicit operation.
 The scoped socket returns the usual `ready` frame. Within five seconds send
 `{"op":"watch","request_id":"watch-1","receiver_token":"<capability>"}`;
 its correlated response is `watching_inbox`. Only scoped `inbox_changed` hints and
-protocol ping/pong follow. Renew using a valid OBO access token and reconnect with the new
+protocol ping/pong follow. Renew using a valid endpoint access token and reconnect with the new
 capability before expiry. Query the scoped inbox after connecting/reconnecting,
 and hydrate references under the source application's current authorization.
 Ordinary silent arrivals do not trigger hints; explicitly enabled required events
@@ -170,25 +171,27 @@ can. No credentials belong in a URL. The Rust client provides
 
 ### Independently authorized app calls
 
-IAM grants reusable authority for registered endpoints. Ting calls `POST /api/v1/obo-access/token-verifications` on every operation, including replays, binding the endpoint, method and path. App endpoints use fixed paths and put `org_id` in the JSON body:
+Apps use OBO once to register each consenting recipient, then use ATA for their own sends and status operations. App endpoints use fixed paths and put the recipient organization in the JSON body:
 
-| IAM endpoint ID | Registered path | Method |
-| --- | --- | --- |
-| `tings.send` | `/v1/tings` | `POST` |
-| `subscriptions.register` | `/v1/subscriptions` | `POST` |
-| `subscriptions.query` | `/v1/subscriptions/query` | `POST` |
-| `subscriptions.revoke` | `/v1/subscriptions/revoke` | `POST` |
-| `sent.query` | `/v1/sent/query` | `POST` |
-| `sent.read` | `/v1/sent/read` | `POST` |
-| `receivers.bootstrap` | `/v1/receivers/bootstrap` | `POST` (testing only) |
+| IAM endpoint ID | Registered path | Method | Authority |
+| --- | --- | --- | --- |
+| `tings.send` | `/v1/tings` | `POST` | ATA; existing OBO supported |
+| `subscriptions.register` | `/v1/subscriptions` | `POST` | OBO only |
+| `subscriptions.query` | `/v1/subscriptions/query` | `POST` | ATA; existing OBO supported |
+| `subscriptions.revoke` | `/v1/subscriptions/revoke` | `POST` | ATA; existing OBO supported |
+| `sent.query` | `/v1/sent/query` | `POST` | ATA; existing OBO supported |
+| `sent.read` | `/v1/sent/read` | `POST` | ATA; existing OBO supported |
+| `receivers.bootstrap` | `/v1/receivers/bootstrap` | `POST` | OBO only; testing only |
 
-Publish these in Ting's IAM OBO catalog, with empty metadata schemas and explicit `critical: true`. Calling apps declare the matching external scopes, obtain required provider review, and request separate user approval after login. Exchange that approval code for dedicated `oba_` access and `obr_` refresh tokens through the IAM SDK. Store and rotate those credentials separately from login credentials. Recipient registration derives consent and identity from the verified proof actor. Later app sends still require their approved endpoint token and an active stored recipient grant.
+Publish the five app-authority operations in Ting's ATA catalog and preserve the OBO catalog for registration, receiver bootstrap and compatibility. OBO callers obtain reviewed endpoint consent and separate recipient approval, then exchange its code for dedicated `oba_` access and `obr_` refresh credentials. Registration derives the recipient from the verified OBO actor and returns the canonical recipient `org_id`. Store that ID with the subscription.
 
-Verify audience `ting`, issuing app, selected actor and org, endpoint, request method/path, environment and current IAM authorization. Ting continues to validate all request fields and resource ACLs. Do not infer permission from an unverified token payload. The issuing app must match `app_id` or the type's app prefix. Proof actor and target recipient may differ on sends; the stored app-to-recipient grant authorizes the target. On subscription registration they must match. Sent queries and read-state updates authorize the issuing app's own tings; their proof actor need not match each ting's recipient.
+ATA callers obtain a centralized application verification for the required Ting endpoints and keep the `ata_` access / `atr_` refresh family on their backend. Ting calls the official SDK's `ata().verify(origin_app_id, access_token, registered_path)`, authenticated with Ting's own app credentials. IAM must confirm verification and an unexpired UTC `valid_till`. The app is taken from the type prefix for sends, and `app_id` for queries, read updates and revocation; IAM verifies that claim against the access token. ATA bodies require the exact canonical lowercase hyphenated organization UUID returned by registration. ATA itself grants no organization membership or user authority: Ting's stored subscription and app-owned resource checks determine access in that recipient organization and verified data context.
 
-The access token remains reusable until expiry or revocation, and verification never consumes it. Legacy single-use proofs are rejected. If verification cannot be confirmed, return `503 obo_verification_uncertain` without executing the operation. Retry the unchanged operation with the same Ting key and a valid access token. Refresh the dedicated family when needed; revoked grants require explicit authorization again. Authentication still runs on idempotent replays.
+OBO compatibility calls still verify audience `ting`, issuing app, selected actor and org, endpoint, request method/path, environment and current IAM authorization through `POST /api/v1/obo-access/token-verifications`. On registration, the optional `for` assertion must match the verified actor. On sends, the actor may differ from the recipient because the stored subscription authorizes the destination. Existing OBO organization-handle inputs remain supported.
 
-The Rust client exposes prepare → authorize endpoint → execute. Preparation returns exact bytes, method, path and a local SHA-256 fingerprint for reproducibility; this hash is not part of IAM token verification. Preserve the operation bytes/key across uncertain retries. Historical `proof_token` wire fields and `--proof-token-*` / `--obo-*` CLI inputs now carry `oba_` tokens; they do not accept legacy proofs.
+Verification runs on every operation and idempotent replay. Access tokens are reusable until expiry or revocation; verification does not consume them. Invalid or expired ATA returns `401 invalid_ata_token`. If verification cannot be confirmed, Ting returns `503 ata_verification_uncertain` or `503 obo_verification_uncertain` without executing the operation. Retry unchanged bytes with the same Ting key and a valid endpoint access token. Refresh the corresponding family when necessary; revoked grants require authorization again.
+
+The Rust client exposes prepare → authorize endpoint → execute. Preparation returns exact bytes, method, path and a local SHA-256 fingerprint for reproducibility; the hash is not part of IAM verification. Historical `proof_token` wire fields and `--proof-token-*` CLI inputs carry either credential. App operations also accept `--ata-file` / `--ata-stdin`; registration retains `--obo-file` / `--obo-stdin` and rejects ATA.
 
 ## Test requests
 
@@ -205,7 +208,7 @@ Both headers are required together on initial test login and proof-bound app cal
 
 Ask IAM to validate that secret and environment key, using its testing-context API. Use the verified environment UUID to partition Ting sessions, types, grants, tings, keys, preferences, hooks and local state. One deployment/database can serve them all; a test actor never accesses production records. A supplied secret is a verification override, not proof of identity or an auth bypass.
 
-A Ting session remembers its verified test context server-side, so later session requests may omit both headers. If supplied again, both must match that session's verified environment and current credentials. Invalid or retired test credentials never fall back to production. Every send still requires its IAM OBO access token.
+A Ting session remembers its verified test context server-side, so later session requests may omit both headers. If supplied again, both must match that session's verified environment and current credentials. Invalid or retired test credentials never fall back to production. Every send still requires its valid ATA or supported OBO access token, verified in that same context. Ting does not create upstream testing ATA grants or fall back to production when the upstream test plane cannot issue them.
 
 WebSocket `send` and `subscribe` may carry the same header pair in `headers`. Context belongs to that request or subscription, never the whole shared socket. Other authenticated identities remain unaffected. Never echo, log, or forward either secret to a local webhook.
 
@@ -235,11 +238,11 @@ A subscription is one app's permission to notify one recipient in one org and da
 
 | Method and path | Authentication and input | Success |
 | --- | --- | --- |
-| `POST /v1/subscriptions` | IAM OBO App Proof. Body: `org_id`, `app_id`, optional `for` assertion. | `201` subscription below; an already active grant returns `200`. |
+| `POST /v1/subscriptions` | IAM OBO access token only. Body: `org_id`, `app_id`, optional `for` assertion. | `201` subscription below; an already active grant returns `200`. |
 | `GET /v1/orgs/{org}/subscriptions` | Ting session; current recipient only. Optional `app_id`, `for`, pagination. | `200 {"items":[<subscription>]}` |
-| `POST /v1/subscriptions/query` | App Proof. `org_id`, `app_id`; optional `for`, `limit`, `cursor`. | `200 {"items":[<subscription>]}` for the issuing app only. |
+| `POST /v1/subscriptions/query` | ATA or OBO access token. `org_id`, `app_id`; optional `for`, `limit`, `cursor`. | `200 {"items":[<subscription>]}` for the issuing app only. |
 | `DELETE /v1/orgs/{org}/subscriptions/{id}` | Ting session; owning recipient only. | `200 {"id":"sub_123","active":false}` |
-| `POST /v1/subscriptions/revoke` | App Proof. `org_id`, `id`; subscription must belong to the issuer. | Same result as DELETE. |
+| `POST /v1/subscriptions/revoke` | ATA or OBO access token. `org_id`, `id`; `app_id` required for ATA and optional for OBO. The subscription must belong to the issuer. | Same result as DELETE. |
 
 ```json
 {
@@ -250,7 +253,7 @@ A subscription is one app's permission to notify one recipient in one org and da
 }
 ```
 
-Registration uses the proof's issuer as the app and its represented actor as the recipient. An optional `for` must match. No second proof or body `obo_token` is needed. Store the verified grant, not the proof itself. A newly verified registration can reactivate a revoked grant using the same subscription ID.
+The registration response additionally includes `org_id`, the canonical recipient organization UUID. Save it for later ATA calls. Registration uses the proof's issuer as the app and its represented actor as the recipient. An optional `for` must match. No second proof or body `obo_token` is needed. Store the verified grant, not the proof itself. A newly verified registration can reactivate a revoked grant using the same subscription ID.
 
 The grant covers current and future types. Recipients may opt out by app, service or type. Revocation blocks new sends and delivery of pending tings under that grant; it preserves stored history. Reactivation resumes eligible pending deliveries. Repeated revocation is harmless. Neither revocation nor muting can retract work already accepted by a webhook.
 
@@ -258,11 +261,11 @@ The grant covers current and future types. Recipients may opt out by app, servic
 
 ### `POST /v1/tings`
 
-Requires an IAM OBO access token. The validated operation body is:
+Use an IAM ATA access token for `tings.send`. Existing OBO endpoint tokens remain supported. The ATA operation body is:
 
 ```json
 {
-  "org_id": "bricks",
+  "org_id": "11111111-1111-4111-8111-111111111111",
   "type": "dm.msg.received",
   "data": {"message_id": "dm_456", "text": "Hello"},
   "metadata": {},
@@ -271,7 +274,7 @@ Requires an IAM OBO access token. The validated operation body is:
 }
 ```
 
-Here `dm` owns the type, and `bricks` is the recipient’s organization. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
+Here `dm` owns the type, and `org_id` is the recipient organization UUID saved from OBO registration. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
 
 All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Optional `delivery: "required"` selects the separately authorized automation path below; omit it for ordinary notification delivery. Reject other delivery values and caller-assigned `id`, `created_at`, `silent` or `read`.
 
@@ -297,7 +300,7 @@ The key scope is `(verified environment, org, issuing app, key)`. Retain its req
 
 Keep the key record, ting and initial delivery state in one durable database transaction. Redis may cache results, but cache eviction/restarts must not shorten the guarantee. Concurrent requests with the same key cannot create two tings. If the transaction cannot be committed, do not report acceptance. After 14 days, key reuse may create a new ting with a new ID; the old ting remains stored until its applicable one- or three-month retention cutoff.
 
-A retry still needs a fresh valid App Proof and current access to its original result. Return an existing identical accepted result before applying a now-revoked recipient grant; it creates no new send or delivery. With no existing result, an inactive grant blocks acceptance.
+A retry still needs a currently valid app access token and current access to its original result. Return an existing identical accepted result before applying a now-revoked recipient grant; it creates no new send or delivery. With no existing result, an inactive grant blocks acceptance.
 
 Delivery replay uses permanent ting IDs, not the expiring producer key. Consumers deduplicate repeated work by ting ID within their receiving context. Keep accepted-ID records for as long as a replay could occur, or make the work safe to repeat.
 
@@ -305,9 +308,9 @@ Delivery replay uses permanent ting IDs, not the expiring producer key. Consumer
 
 | Method and path | Input | Success |
 | --- | --- | --- |
-| `POST /v1/sent/query` | App Proof. `org_id`, `app_id`; optional `for`, `type`, `read`, `limit`, `cursor`. | `200 {"items":[<ting>]}` for that issuer. |
-| `POST /v1/sent/query` | App Proof. `org_id`, `app_id`, `id`; optional `deliveries_cursor`, no list filters. | `200` full ting with `deliveries`. |
-| `POST /v1/sent/read` | App Proof. Required `org_id`, `app_id`, `message_ids`, `read`, `key`; see below. | `200 {"message_ids":["msg_123"],"read":false}` |
+| `POST /v1/sent/query` | ATA or OBO access token. `org_id`, `app_id`; optional `for`, `type`, `read`, `limit`, `cursor`. | `200 {"items":[<ting>]}` for that issuer. |
+| `POST /v1/sent/query` | ATA or OBO access token. `org_id`, `app_id`, `id`; optional `deliveries_cursor`, no list filters. | `200` full ting with `deliveries`. |
+| `POST /v1/sent/read` | ATA or OBO access token. Required `org_id`, `app_id`, `message_ids`, `read`, `key`; see below. | `200 {"message_ids":["msg_123"],"read":false}` |
 | `GET /v1/orgs/{org}/inbox` | Ting session; current recipient only. Optional `app_id`, `type`, `read`, `silent`, pagination. Omit `silent` to include both kinds. | `200 {"items":[<ting>]}` |
 | `GET /v1/orgs/{org}/inbox/{id}` | Ting session; owning recipient. | `200` full ting. |
 | `POST /v1/orgs/{org}/inbox/read` | Ting session; `{ "message_ids": ["msg_123"] }`. | `200 {"message_ids":["msg_123"],"read":true}` |
@@ -346,11 +349,11 @@ For `/inbox/read`, validate every submitted ID against the current recipient and
 
 ### Apps marking their sent tings read or unread
 
-Use `POST /v1/sent/read` with a valid IAM OBO access token for `sent.read`, bound to this exact body:
+Use `POST /v1/sent/read` with an IAM ATA access token for `sent.read` (or an existing OBO endpoint token) and this body:
 
 ```json
 {
-  "org_id": "bricks",
+  "org_id": "11111111-1111-4111-8111-111111111111",
   "app_id": "dm",
   "message_ids": ["msg_123", "msg_124"],
   "read": false,
@@ -360,9 +363,9 @@ Use `POST /v1/sent/read` with a valid IAM OBO access token for `sent.read`, boun
 
 All fields are required. `read` must be a JSON boolean; `true` marks read and `false` marks unread. `message_ids` contains 1–100 IDs, with duplicates collapsed. `key` follows the common 1–200 UTF-8 byte rule. A Ting session or receiver capability cannot replace the app proof. No recipient Ting session or connected receiver is needed.
 
-The proof issuer must match `app_id`; a mismatch returns `403 permission_denied`. Validate the entire batch before changing any record: every ting must belong to that issuing app in the proof's organization and verified environment and still be retained. A missing, expired, wrong-app, wrong-org or wrong-environment ID returns `404 not_found` with no partial update. Like sent queries, the represented actor may differ from the tings' recipients.
+The proof issuer must match `app_id`; a mismatch returns `403 permission_denied`. Validate the entire batch before changing any record: every ting must belong to that issuing app in the selected canonical organization and verified environment and still be retained. A missing, expired, wrong-app, wrong-org or wrong-environment ID returns `404 not_found` with no partial update. ATA has no represented actor. For OBO compatibility calls, the represented actor may differ from the recipients.
 
-Success returns `200 {"message_ids":["msg_123","msg_124"],"read":false}` with duplicate IDs removed. Atomically retain the operation's request fingerprint and original response for 14 days from first acceptance, scoped to `(verified environment, org, issuing app, sent.read, key)`, separately from send keys. Every retry needs a valid OBO access token. The same key and unchanged request returns the original response without applying the state change again, even if another action has changed the tings since; changed content returns `409 idempotency_conflict`. Use a new key for each new intended update. The response describes the accepted operation, not necessarily the current read state after a replay.
+Success returns `200 {"message_ids":["msg_123","msg_124"],"read":false}` with duplicate IDs removed. Atomically retain the operation's request fingerprint and original response for 14 days from first acceptance, scoped to `(verified environment, org, issuing app, sent.read, key)`, separately from send keys. Every retry needs a valid endpoint access token. The same key and unchanged request returns the original response without applying the state change again, even if another action has changed the tings since; changed content returns `409 idempotency_conflict`. Use a new key for each new intended update. The response describes the accepted operation, not necessarily the current read state after a replay.
 
 App updates change overall read state only. They neither complete nor reset webhook delivery/read ACKs, and marking unread does not resend a completed hook's copy. A new valid read ACK for an unfinished copy or a later recipient view can set overall read true again. Repeating a completed hook's read ACK is a no-op and cannot undo an app's unread update. New hooks still backfill eligible retained overall-unread history. Actual state changes send the normal `inbox_changed` hint to affected recipients' browser watches.
 
@@ -462,7 +465,7 @@ Flow: save the intended local URL, secret and creation key → open socket → `
 
 ## WebSocket API
 
-The Rust client provides `ting_client::websocket::{WebSocket, Event, reconnect_delay}`. Connect with `WebSocket::connect(&client).await?` and publish a prepared send once with `socket.send(&prepared, &obo_access_token, &test_headers).await?`. It validates the original `Prepared.body` bytes, preserves their exact UTF-8 string, correlates request IDs, answers ping and enforces timeouts. Cancellation or an uncertain transport failure closes the in-flight connection; reconnect explicitly, obtain a valid endpoint access token, and retain the original event body/key.
+The Rust client provides `ting_client::websocket::{WebSocket, Event, reconnect_delay}`. Connect with `WebSocket::connect(&client).await?` and publish a prepared send once with `socket.send(&prepared, &ata_access_token, &test_headers).await?`. It validates the original `Prepared.body` bytes, preserves their exact UTF-8 string, correlates request IDs, answers ping and enforces timeouts. Cancellation or an uncertain transport failure closes the in-flight connection; reconnect explicitly, obtain a valid endpoint access token, and retain the original event body/key.
 
 Receivers call `subscribe(org, session, hook_ids, test_headers)` or `watch_inbox(org, session)` and consume `next_event()`. `Event` distinguishes full `Tings` batches, `InboxChanged` hints and `Paused` controls. `receiver_id()` is the temporary connection ID for hook registration. `ack` and `unsubscribe` are explicit; the client does not acknowledge batches, reenroll recipients or refresh authority. Its bounded event queue closes the socket on overflow so consumers must recover through stable hooks or HTTP reconciliation. Use `reconnect_delay(failure_index)` starting at zero and reset after one healthy minute. `is_connected()` reports transport state only. This native Rust API does not change the browser's cookie-based wire protocol.
 
@@ -486,7 +489,7 @@ Client requests include a nonempty `request_id` of at most 100 bytes; replies re
 | `ack` | `org_id`, `webhook_id`, `message_ids`, `kind`: `delivery` or `read`. | `{"op":"acked","request_id":"req_4","message_ids":["msg_123","msg_124"],"webhook_id":"hook_123","kind":"delivery"}` |
 | `watch_inbox` | `org_id`; browser uses its session cookie, other clients supply `session_token`. Replaces this socket's previous inbox watch. | `{"op":"watching_inbox","request_id":"req_5","org_id":"tos"}` |
 
-For `send`, parse the `body` string without changing its original UTF-8 bytes. Verify the OBO access token for the logical `POST /v1/tings` endpoint, then validate those request bytes and the existing resource ACLs. Use the same validation and database transaction as HTTP. This keeps proof-bound sends usable over the prewarmed socket; no extra connection is opened.
+For `send`, parse the `body` string without changing its original UTF-8 bytes. Verify the ATA or supported OBO access token for the logical `POST /v1/tings` endpoint, then validate those request bytes and the existing resource ACLs. Use the same validation and database transaction as HTTP. This keeps proof-bound sends usable over the prewarmed socket; no extra connection is opened.
 
 Example subscription:
 
@@ -656,20 +659,20 @@ HTTP errors use the status below and one JSON body:
 }
 ```
 
-`code`, `message`, `hint` and `retryable` are always present. Optional `details` carries machine-readable context such as `webhook_id` when registration succeeded but local setup failed, or `supported_protocols` for a version mismatch. A retry uses the same operation key and a currently valid OBO access token. HTTP responses include a non-secret `Ting-Request-Id` for support. Errors must not expose credentials or another recipient's data.
+`code`, `message`, `hint` and `retryable` are always present. Optional `details` carries machine-readable context such as `webhook_id` when registration succeeded but local setup failed, or `supported_protocols` for a version mismatch. A retry uses the same operation key and a currently valid token authorized for that endpoint. HTTP responses include a non-secret `Ting-Request-Id` for support. Errors must not expose credentials or another recipient's data.
 
 WebSocket request errors use `{"op":"error","request_id":"req_1","error":{...}}`. Malformed frames without a usable request ID use `request_id: null`. Frame errors do not close other identities' valid subscriptions; oversized/non-JSON transport messages may close the connection with the standard WebSocket error code. Subscription pauses use the separate `paused` control frame above.
 
 | HTTP | Codes / action |
 | --- | --- |
 | `400` | `invalid_input`, `invalid_cursor`, `invalid_ack`, `test_context_required`, `unsupported_protocol`. Correct the request. |
-| `401` | `authentication_required`, `session_expired`, `invalid_proof`, `invalid_obo_token`. Refresh the dedicated credential, or request separate approval again when revoked. |
+| `401` | `authentication_required`, `session_expired`, `invalid_proof`, `invalid_obo_token`, `invalid_ata_token`. Refresh the dedicated credential, or request separate approval again when revoked. |
 | `403` | `permission_denied`, `recipient_not_registered`, `test_context_mismatch`. No side effect. |
 | `404` | `not_found`. Missing or inaccessible resource. |
 | `409` | `idempotency_conflict`, `type_exists`, `hook_in_use`, `receiver_gone`. Resolve the stated conflict. |
 | `413` | `payload_too_large`. The operation was not accepted. |
 | `429` | `temporarily_rate_limited`. Include `Retry-After` in seconds. |
-| `503` | `dependency_unavailable`, `storage_unavailable`, `obo_verification_uncertain`, `report_storage_unconfirmed`. Do not report success; follow the operation's retry rule. |
+| `503` | `dependency_unavailable`, `storage_unavailable`, `obo_verification_uncertain`, `ata_verification_uncertain`, `report_storage_unconfirmed`. Do not report success; follow the operation's retry rule. |
 
 ## Implementation and release checks
 
@@ -679,13 +682,13 @@ The latency target is p95 below 100 ms from a proof-ready app's WebSocket send t
 
 Additive response fields are compatible within v1. Removed fields, changed meanings or incompatible request shapes require a new major API/protocol version and a documented migration. Published CLI/client/server versions must have a tested compatibility matrix before Honeycomb rolls out an update.
 
-Use the official IAM client for SLT exchange, refresh, introspection, OBO verification and test-context verification. The concrete contracts above were checked against installed IAM documentation (`iam docs client/login`, `iam docs api/obo`, `iam docs api/testing-environments`). Honeycomb supplies app visibility/management permission. When a dependency is unavailable, deny the dependent operation with a recoverable error; never assume authority. Configure Space Station's backend, CLI/daemon, browser analytics and browser events tables separately. Its current raw ingest ACK is required for explicit bug reports.
+Use the official IAM client for SLT exchange, refresh, introspection, OBO and ATA verification, and test-context verification. The concrete contracts above were checked against installed IAM documentation (`iam docs client/login`, `iam docs api/obo`, `iam docs api/testing-environments`). Honeycomb supplies app visibility/management permission. When a dependency is unavailable, deny the dependent operation with a recoverable error; never assume authority. Configure Space Station's backend, CLI/daemon, browser analytics and browser events tables separately. Its current raw ingest ACK is required for explicit bug reports.
 
-Release configuration must supply the real API/frontend origins, IAM app registration and approved scopes/OBO catalog, backend-held app credentials, Honeycomb integration, Space Station tables/keys, database and encryption keys, repository/docs URLs and published Rust package. Serve the browser and API on the same site, using custom domains or a same-origin proxy, so the SameSite=Lax session cookie works; CORS does not make cross-site cookies available. The installer and Honeycomb package must start the one system daemon and publish supported platform instructions. These are deployment bindings; no placeholder may silently point at a live service.
+Release configuration must supply the real API/frontend origins, IAM app registration and approved scopes and OBO/ATA catalogs, backend-held app credentials, Honeycomb integration, Space Station tables/keys, database and encryption keys, repository/docs URLs and published Rust package. Serve the browser and API on the same site, using custom domains or a same-origin proxy, so the SameSite=Lax session cookie works; CORS does not make cross-site cookies available. The installer and Honeycomb package must start the one system daemon and publish supported platform instructions. These are deployment bindings; no placeholder may silently point at a live service.
 
 Before release, demonstrate:
 
-1. Every send rejects missing, wrong-audience, expired, consumed or request-mismatched proofs over both transports; test credentials cannot access production records.
+1. Every send rejects missing, unsupported, wrong-app, wrong-endpoint, expired or revoked credentials over both transports; test credentials cannot access production records. ATA never authorizes recipient registration or receiver bootstrap, and sends require a stored recipient subscription.
 2. Concurrent same-key sends and a crash during commit produce one accepted ting within 14 days; expiry permits a new ID without deleting the old ting.
 3. Disconnects before either ACK, lost ACK replies, daemon restart, worker stall, disk loss and the 12-hour cutoff all preserve unfinished copies. One failed hook cannot block another.
 4. A new hook gets unread history; an old hook also gets its own copies read elsewhere. No gap occurs during registration or concurrent sends.

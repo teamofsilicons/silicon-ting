@@ -1,4 +1,5 @@
 //! Upstream authority is always checked live; only encrypted credentials are stored locally.
+mod ata;
 mod catalog;
 
 use crate::{
@@ -42,7 +43,24 @@ pub struct Proof {
     pub expires_at: i64,
     pub(crate) test: Option<TestContext>,
 }
+// App-owned operations need application authority, never a manufactured user.
+pub struct AppAuthority {
+    pub context: String,
+    pub org_id: String,
+    pub app_id: String,
+    pub expires_at: i64,
+    test: Option<TestContext>,
+}
 impl Proof {
+    pub fn application(&self) -> AppAuthority {
+        AppAuthority {
+            context: self.context.clone(),
+            org_id: self.org_id.clone(),
+            app_id: self.app_id.clone(),
+            expires_at: self.expires_at,
+            test: self.test.clone(),
+        }
+    }
     pub fn receiver_context(&self) -> Option<(i64, String)> {
         let test = self.test.as_ref()?;
         Some((test.generation?, hash(test.key.as_bytes())))
@@ -418,9 +436,13 @@ impl Auth {
         self.current_session(principal).map(|_| ())
     }
     pub fn check_proof(&self, proof: &Proof) -> Result<()> {
-        if v::actor_kind(&proof.actor_id) != Some(proof.actor_kind.as_str())
-            || !v::app_id(&proof.app_id)
-        {
+        if v::actor_kind(&proof.actor_id) != Some(proof.actor_kind.as_str()) {
+            return Err(forbidden());
+        }
+        self.check_app(&proof.application())
+    }
+    pub fn check_app(&self, proof: &AppAuthority) -> Result<()> {
+        if !v::app_id(&proof.app_id) || proof.expires_at <= now() {
             return Err(forbidden());
         }
         match &proof.test {
@@ -1455,6 +1477,10 @@ pub(crate) mod tests {
 
     pub(crate) struct MockIam {
         pub reply: Mutex<Value>,
+        pub ata_reply: Mutex<Value>,
+        pub ata_requests: Mutex<Vec<Value>>,
+        pub ata_status: AtomicU16,
+        pub obo_status: AtomicU16,
         pub token_replies: Mutex<std::collections::VecDeque<Value>>,
         pub token_requests: Mutex<Vec<(String, HashMap<String, String>)>>,
         pub revoke_requests: Mutex<Vec<(String, Vec<u8>)>>,
@@ -1500,7 +1526,7 @@ pub(crate) mod tests {
                 .into()
         }
         pub fn send(&self, key: &str) -> String {
-            self.app.store.send(&self.proof, &json!({"org_id":self.proof.org_id,"type":"example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
+            self.app.store.send(&self.proof.application(), &json!({"org_id":self.proof.org_id,"type":"example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
         }
         pub fn receipt(&self, hook: &str, id: &str) -> (i64, i64) {
             Connection::open(&self.app.config.database_path)
@@ -1534,6 +1560,12 @@ pub(crate) mod tests {
                 "audience":"ting","public_id":"si:fixture","actor_type":"silicon","scopes":[],
                 "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
             ),
+            ata_reply: Mutex::new(
+                json!({"verified":true,"valid_till":(chrono::Utc::now()+chrono::Duration::minutes(5)).format("%Y%m%d%H%M%S").to_string().parse::<i64>().unwrap()}),
+            ),
+            ata_requests: Mutex::new(vec![]),
+            ata_status: AtomicU16::new(200),
+            obo_status: AtomicU16::new(200),
             status: AtomicU16::new(200),
             catalog_token_status: AtomicU16::new(200),
             token_replies: Mutex::new(std::collections::VecDeque::new()),
@@ -1566,6 +1598,40 @@ pub(crate) mod tests {
             }
             let body = match path.as_str() {
                 "/api/v1/oauth/introspect" => iam.reply.lock().unwrap().clone(),
+                "/api/v1/ata-access/verify" => {
+                    assert_eq!(
+                        request.headers()["authorization"],
+                        "Basic dGluZzpmaXh0dXJlLXNlY3JldA=="
+                    );
+                    let testing = request.headers().contains_key("x-testing-environment-key");
+                    let raw = axum::body::to_bytes(request.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    let body: Value = serde_json::from_slice(&raw).unwrap();
+                    iam.ata_requests.lock().unwrap().push(body.clone());
+                    let status = iam.ata_status.load(Ordering::SeqCst);
+                    if status != 200 {
+                        return (axum::http::StatusCode::from_u16(status).unwrap(), Json(json!({"error":{"code":"ata_fixture_error","message":"Mock ATA verification failed."}}))).into_response();
+                    }
+                    if body["app_id"] != "example"
+                        || body["app_proof_token"]
+                            != format!("ata_{}", if testing { "t" } else { "p" }.repeat(43))
+                        || !matches!(
+                            body["endpoint"].as_str(),
+                            Some(
+                                "/v1/tings"
+                                    | "/v1/sent/query"
+                                    | "/v1/sent/read"
+                                    | "/v1/subscriptions/query"
+                                    | "/v1/subscriptions/revoke"
+                            )
+                        )
+                    {
+                        json!({"verified":false})
+                    } else {
+                        iam.ata_reply.lock().unwrap().clone()
+                    }
+                }
                 "/api/v1/app-auth/tokens" => {
                     let key = request.headers()["idempotency-key"]
                         .to_str()
@@ -1599,6 +1665,10 @@ pub(crate) mod tests {
                     json!({})
                 }
                 "/api/v1/obo-access/token-verifications" => {
+                    let status = iam.obo_status.load(Ordering::SeqCst);
+                    if status != 200 {
+                        return (axum::http::StatusCode::from_u16(status).unwrap(), Json(json!({"error":{"code":"invalid_grant","message":"Mock OBO authority revoked."}}))).into_response();
+                    }
                     let raw = axum::body::to_bytes(request.into_body(), 1024 * 1024)
                         .await
                         .unwrap();

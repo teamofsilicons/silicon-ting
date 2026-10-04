@@ -1,5 +1,5 @@
 use crate::{
-    auth::{Principal, Proof},
+    auth::{AppAuthority, Principal, Proof},
     error::{Error, Result},
     validation as v,
 };
@@ -226,7 +226,7 @@ impl Store {
         };
         Ok((
             status,
-            json!({"id":sid,"app_id":p.app_id,"for":p.actor_id,"active":true,"required_delivery":Self::required_delivery_enabled(&db,&p.context,&p.org_id,&p.app_id,&p.actor_id)?}),
+            json!({"id":sid,"org_id":p.org_id,"app_id":p.app_id,"for":p.actor_id,"active":true,"required_delivery":Self::required_delivery_enabled(&db,&p.context,&p.org_id,&p.app_id,&p.actor_id)?}),
         ))
     }
     pub fn grants(
@@ -301,7 +301,7 @@ impl Store {
             owner,
         ))
     }
-    pub fn send(&self, p: &Proof, b: &Value) -> Result<(u16, Value)> {
+    pub fn send(&self, p: &AppAuthority, b: &Value) -> Result<(u16, Value)> {
         v::fields(
             b,
             &[
@@ -486,7 +486,7 @@ impl Store {
             db.prepare("SELECT hook,delivery,read FROM deliveries WHERE message=? ORDER BY hook")?;
         Ok(q.query_map([mid],|r|Ok(json!({"webhook_id":r.get::<_,String>(0)?,"delivery_acked":r.get::<_,bool>(1)?,"read_acked":r.get::<_,bool>(2)?})))?.collect::<std::result::Result<_,_>>()?)
     }
-    pub fn sent_read(&self, p: &Proof, b: &Value) -> Result<(Value, Vec<(String, bool)>)> {
+    pub fn sent_read(&self, p: &AppAuthority, b: &Value) -> Result<(Value, Vec<(String, bool)>)> {
         let fields = &["org_id", "app_id", "message_ids", "read", "key"];
         v::fields(b, fields, fields)?;
         if v::string(b, "app_id", 255)? != p.app_id {
@@ -1208,11 +1208,11 @@ mod tests {
     #[test]
     fn sent_read_is_scoped_atomic_and_retries_preserve_newer_state() {
         let (s, p, proof) = fixture();
-        let first = s.send(&proof, &body("first")).unwrap().1["id"]
+        let first = s.send(&proof.application(), &body("first")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
-        let second = s.send(&proof, &body("second")).unwrap().1["id"]
+        let second = s.send(&proof.application(), &body("second")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1239,7 +1239,12 @@ mod tests {
                     [&second],
                 )
                 .unwrap();
-            assert_eq!(s.sent_read(&proof, &request).unwrap_err().status, 404);
+            assert_eq!(
+                s.sent_read(&proof.application(), &request)
+                    .unwrap_err()
+                    .status,
+                404
+            );
             assert!(!state(&first));
             let original = match column {
                 "app" => &proof.app_id,
@@ -1256,7 +1261,12 @@ mod tests {
         }
         let mut invalid = request.clone();
         invalid["message_ids"] = json!([first, "missing"]);
-        assert_eq!(s.sent_read(&proof, &invalid).unwrap_err().status, 404);
+        assert_eq!(
+            s.sent_read(&proof.application(), &invalid)
+                .unwrap_err()
+                .status,
+            404
+        );
         assert!(!state(&first));
         for (field, value, status) in [
             ("app_id", json!("other"), 403),
@@ -1266,9 +1276,14 @@ mod tests {
         ] {
             let mut invalid = request.clone();
             invalid[field] = value;
-            assert_eq!(s.sent_read(&proof, &invalid).unwrap_err().status, status);
+            assert_eq!(
+                s.sent_read(&proof.application(), &invalid)
+                    .unwrap_err()
+                    .status,
+                status
+            );
         }
-        let (receipt, owners) = s.sent_read(&proof, &request).unwrap();
+        let (receipt, owners) = s.sent_read(&proof.application(), &request).unwrap();
         assert_eq!(receipt, json!({"message_ids":[first,second],"read":true}));
         assert_eq!(
             owners,
@@ -1278,13 +1293,16 @@ mod tests {
         let mut unread = request.clone();
         unread["read"] = false.into();
         assert_eq!(
-            s.sent_read(&proof, &unread).unwrap_err().body["error"]["code"],
+            s.sent_read(&proof.application(), &unread).unwrap_err().body["error"]["code"],
             "idempotency_conflict"
         );
         unread["key"] = "mark-unread".into();
-        s.sent_read(&proof, &unread).unwrap();
+        s.sent_read(&proof.application(), &unread).unwrap();
         assert!(!state(&first) && !state(&second));
-        assert_eq!(s.sent_read(&proof, &request).unwrap(), (receipt, vec![]));
+        assert_eq!(
+            s.sent_read(&proof.application(), &request).unwrap(),
+            (receipt, vec![])
+        );
         assert!(!state(&first) && !state(&second));
         let db = s.lock().unwrap();
         // Replay records must remain valid when the server opens this database again.
@@ -1303,12 +1321,12 @@ mod tests {
         let (s, p, proof) = fixture();
         let a = hook(&s, &p, "a");
         let b = hook(&s, &p, "b");
-        let mid = s.send(&proof, &body("first")).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &body("first")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
         let change = |read: bool, key: &str| {
-            s.sent_read(&proof, &json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":read,"key":key})).unwrap()
+            s.sent_read(&proof.application(), &json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":read,"key":key})).unwrap()
         };
         change(true, "app-read");
         let completed = s.deliveries(&mid).unwrap();
@@ -1356,7 +1374,7 @@ mod tests {
             ("silent", false, true, 2),
             ("unread", false, false, 4),
         ] {
-            let mid = s.send(&proof, &body(key)).unwrap().1["id"]
+            let mid = s.send(&proof.application(), &body(key)).unwrap().1["id"]
                 .as_str()
                 .unwrap()
                 .to_owned();
@@ -1370,9 +1388,17 @@ mod tests {
                 )
                 .unwrap();
             let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":false,"key":key});
-            assert_eq!(s.sent_read(&proof, &request).unwrap_err().status, 404);
+            assert_eq!(
+                s.sent_read(&proof.application(), &request)
+                    .unwrap_err()
+                    .status,
+                404
+            );
         }
-        let mid = s.send(&proof, &body("retained-unread")).unwrap().1["id"]
+        let mid = s
+            .send(&proof.application(), &body("retained-unread"))
+            .unwrap()
+            .1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1381,7 +1407,7 @@ mod tests {
             .execute("UPDATE tings SET created=? WHERE id=?", params![old, mid])
             .unwrap();
         let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":true,"key":"expire"});
-        let (receipt, owners) = s.sent_read(&proof, &request).unwrap();
+        let (receipt, owners) = s.sent_read(&proof.application(), &request).unwrap();
         assert_eq!(owners, vec![(p.id.clone(), true)]);
         assert!(s.offer("r", &h).unwrap().is_none());
         let created: String = s
@@ -1393,9 +1419,17 @@ mod tests {
         let mut unread = request.clone();
         unread["read"] = false.into();
         unread["key"] = "resurrect".into();
-        assert_eq!(s.sent_read(&proof, &unread).unwrap_err().status, 404);
+        assert_eq!(
+            s.sent_read(&proof.application(), &unread)
+                .unwrap_err()
+                .status,
+            404
+        );
         s.prune().unwrap();
-        assert_eq!(s.sent_read(&proof, &request).unwrap(), (receipt, vec![]));
+        assert_eq!(
+            s.sent_read(&proof.application(), &request).unwrap(),
+            (receipt, vec![])
+        );
         assert!(s.ting(&p.context, &proof.org_id, &mid, None, None).is_err());
     }
     #[test]
@@ -1423,7 +1457,7 @@ mod tests {
         let mut request = body("shared-key");
         request["org_id"] = other.org_id.clone().into();
         assert_eq!(
-            s.send(&other, &request).unwrap_err().body["error"]["code"],
+            s.send(&other.application(), &request).unwrap_err().body["error"]["code"],
             "recipient_not_registered"
         );
         s.subscribe_app(
@@ -1450,13 +1484,16 @@ mod tests {
             false,
         )
         .unwrap();
-        let silent = s.send(&proof, &body("shared-key")).unwrap().1;
+        let silent = s.send(&proof.application(), &body("shared-key")).unwrap().1;
         assert_eq!(silent["silent"], true);
-        let sent = s.send(&other, &request).unwrap();
+        let sent = s.send(&other.application(), &request).unwrap();
         assert_eq!(sent.0, 202);
         assert_eq!(sent.1["silent"], false);
         assert_ne!(sent.1["id"], silent["id"]);
-        assert_eq!(s.send(&other, &request).unwrap(), (200, sent.1.clone()));
+        assert_eq!(
+            s.send(&other.application(), &request).unwrap(),
+            (200, sent.1.clone())
+        );
         let mid = sent.1["id"].as_str().unwrap().to_owned();
         assert!(
             s.ting(&p.context, &proof.org_id, &mid, Some(&p.id), None)
@@ -1506,7 +1543,7 @@ mod tests {
         request["key"] = "required".into();
         request["delivery"] = "required".into();
         assert_eq!(
-            s.send(&other, &request).unwrap_err().body["error"]["code"],
+            s.send(&other.application(), &request).unwrap_err().body["error"]["code"],
             "required_delivery_not_enabled"
         );
 
@@ -1519,10 +1556,20 @@ mod tests {
             &json!({"org_id":isolated.org_id,"app_id":isolated.app_id}),
         )
         .unwrap();
-        assert_eq!(s.send(&isolated, &request).unwrap_err().status, 404);
+        assert_eq!(
+            s.send(&isolated.application(), &request)
+                .unwrap_err()
+                .status,
+            404
+        );
         isolated.context = p.context.clone();
         isolated.app_id = "elsewhere>app".into();
-        assert_eq!(s.send(&isolated, &request).unwrap_err().status, 403);
+        assert_eq!(
+            s.send(&isolated.application(), &request)
+                .unwrap_err()
+                .status,
+            403
+        );
     }
     #[test]
     fn bounded_pages_survive_read_changes_and_retention() {
@@ -1531,7 +1578,9 @@ mod tests {
         let mut ids = vec![];
         for n in 0..5 {
             ids.push(
-                s.send(&proof, &body(&format!("page-{n}"))).unwrap().1["id"]
+                s.send(&proof.application(), &body(&format!("page-{n}")))
+                    .unwrap()
+                    .1["id"]
                     .as_str()
                     .unwrap()
                     .to_owned(),
@@ -1600,11 +1649,11 @@ mod tests {
     fn read_and_silent_expire_after_one_month_unread_after_three() {
         let (s, p, proof) = fixture();
         let h = hook(&s, &p, "r");
-        let unread = s.send(&proof, &body("unread-old")).unwrap().1["id"]
+        let unread = s.send(&proof.application(), &body("unread-old")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
-        let read = s.send(&proof, &body("read-old")).unwrap().1["id"]
+        let read = s.send(&proof.application(), &body("read-old")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1620,7 +1669,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let silent = s.send(&proof, &body("silent-old")).unwrap().1["id"]
+        let silent = s.send(&proof.application(), &body("silent-old")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1670,7 +1719,7 @@ mod tests {
         let (s, p, proof) = fixture();
         let a = hook(&s, &p, "a");
         let b = hook(&s, &p, "b");
-        let mid = s.send(&proof, &body("old-copy")).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &body("old-copy")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1727,7 +1776,7 @@ mod tests {
                     expires_at: now() + 300,
                     test: None,
                 };
-                s.send(&proof, &body("concurrent")).unwrap()
+                s.send(&proof.application(), &body("concurrent")).unwrap()
             }));
         }
         let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
@@ -1738,20 +1787,26 @@ mod tests {
             db.execute("UPDATE keys SET expires=?", [now() - 1])
                 .unwrap();
         }
-        let next = s.send(&proof, &body("concurrent")).unwrap();
+        let next = s.send(&proof.application(), &body("concurrent")).unwrap();
         assert_eq!(next.0, 202);
         assert_ne!(next.1["id"], results[0].1["id"]);
     }
     #[test]
     fn idempotency_and_recovery() {
         let (s, p, proof) = fixture();
-        let first = s.send(&proof, &body("one")).unwrap();
+        let first = s.send(&proof.application(), &body("one")).unwrap();
         assert_eq!(first.0, 202);
         let mut retry = body("one");
         retry.as_object_mut().unwrap().remove("metadata");
-        assert_eq!(s.send(&proof, &retry).unwrap(), (200, first.1.clone()));
+        assert_eq!(
+            s.send(&proof.application(), &retry).unwrap(),
+            (200, first.1.clone())
+        );
         retry["data"] = json!({"changed":true});
-        assert_eq!(s.send(&proof, &retry).unwrap_err().status, 409);
+        assert_eq!(
+            s.send(&proof.application(), &retry).unwrap_err().status,
+            409
+        );
         let grant = s
             .grants(&p.context, &proof.org_id, Some(&p.id), None)
             .unwrap()[0]["id"]
@@ -1760,20 +1815,25 @@ mod tests {
             .to_owned();
         s.revoke(&p.context, &proof.org_id, &grant, Some(&p.id), None)
             .unwrap();
-        assert_eq!(s.send(&proof, &body("one")).unwrap().0, 200);
-        assert_eq!(s.send(&proof, &body("new")).unwrap_err().status, 403);
+        assert_eq!(s.send(&proof.application(), &body("one")).unwrap().0, 200);
+        assert_eq!(
+            s.send(&proof.application(), &body("new"))
+                .unwrap_err()
+                .status,
+            403
+        );
         let test_proof = Proof {
             context: "test-environment".into(),
             ..proof
         };
-        assert!(s.send(&test_proof, &body("one")).is_err());
+        assert!(s.send(&test_proof.application(), &body("one")).is_err());
     }
     #[test]
     fn independent_copies_late_acks_and_takeover() {
         let (s, p, proof) = fixture();
         let a = hook(&s, &p, "recv_a");
         let b = hook(&s, &p, "recv_b");
-        let mid = s.send(&proof, &body("one")).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -1846,12 +1906,12 @@ mod tests {
             false,
         )
         .unwrap();
-        let silent = s.send(&proof, &body("muted")).unwrap();
+        let silent = s.send(&proof.application(), &body("muted")).unwrap();
         assert_eq!(silent.1["silent"], true);
         s.preference(&p, "org-uuid", &json!({"app_id":proof.app_id}), true)
             .unwrap();
         assert!(s.offer("r", &h).unwrap().is_none());
-        let a = s.send(&proof, &body("audible")).unwrap().1;
+        let a = s.send(&proof.application(), &body("audible")).unwrap().1;
         let batch = s.offer("r", &h).unwrap().unwrap();
         assert_eq!(batch["tings"][0]["created_at"], a["created_at"]);
         s.preference(
@@ -1892,12 +1952,12 @@ mod tests {
             let mut request = body("required");
             request["delivery"] = "required".into();
             assert_eq!(
-                s.send(&proof, &request).unwrap_err().body["error"]["code"],
+                s.send(&proof.application(), &request).unwrap_err().body["error"]["code"],
                 "required_delivery_not_enabled"
             );
             s.preference(&p, &proof.org_id, &preference, false).unwrap();
             let before = s.preferences(&p, &proof.org_id, &json!({})).unwrap();
-            let ordinary = s.send(&proof, &body("ordinary")).unwrap().1;
+            let ordinary = s.send(&proof.application(), &body("ordinary")).unwrap().1;
             assert_eq!(ordinary["silent"], true);
             assert_eq!(
                 s.required_delivery(&p, &proof.org_id, sid, None).unwrap()["enabled"],
@@ -1938,7 +1998,7 @@ mod tests {
                 s.preferences(&p, &proof.org_id, &json!({})).unwrap(),
                 before
             );
-            let sent = s.send(&proof, &request).unwrap().1;
+            let sent = s.send(&proof.application(), &request).unwrap().1;
             assert_eq!(sent["silent"], true);
             assert_eq!(sent["delivery"], "required");
             let new_hook = hook(&s, &p, "new");
@@ -1979,7 +2039,7 @@ mod tests {
             .unwrap();
         let mut request = body("required");
         request["delivery"] = "required".into();
-        let accepted = s.send(&proof, &request).unwrap().1;
+        let accepted = s.send(&proof.application(), &request).unwrap().1;
         assert_eq!(accepted["silent"], false);
         assert!(s.offer("r", &h).unwrap().is_some());
         s.required_delivery(&p, &proof.org_id, sid, Some(false))
@@ -1997,11 +2057,22 @@ mod tests {
         assert!(s.offer("r", &h).unwrap().is_none());
         let new_hook = hook(&s, &p, "new");
         assert!(s.offer("new", &new_hook).unwrap().is_none());
-        assert_eq!(s.send(&proof, &request).unwrap(), (200, accepted.clone()));
-        assert_eq!(s.send(&proof, &body("required")).unwrap_err().status, 409);
+        assert_eq!(
+            s.send(&proof.application(), &request).unwrap(),
+            (200, accepted.clone())
+        );
+        assert_eq!(
+            s.send(&proof.application(), &body("required"))
+                .unwrap_err()
+                .status,
+            409
+        );
         request["key"] = "new-required".into();
-        assert_eq!(s.send(&proof, &request).unwrap_err().status, 403);
-        let ordinary = s.send(&proof, &body("ordinary")).unwrap().1;
+        assert_eq!(
+            s.send(&proof.application(), &request).unwrap_err().status,
+            403
+        );
+        let ordinary = s.send(&proof.application(), &body("ordinary")).unwrap().1;
         assert_eq!(
             s.offer("r", &h).unwrap().unwrap()["tings"][0]["id"],
             ordinary["id"]
@@ -2048,11 +2119,14 @@ mod tests {
             .1;
         assert_eq!(registration["required_delivery"], false);
         assert_eq!(
-            s.send(&proof, &request).unwrap_err().body["error"]["code"],
+            s.send(&proof.application(), &request).unwrap_err().body["error"]["code"],
             "required_delivery_not_enabled"
         );
         request["delivery"] = "invalid".into();
-        assert_eq!(s.send(&proof, &request).unwrap_err().status, 400);
+        assert_eq!(
+            s.send(&proof.application(), &request).unwrap_err().status,
+            400
+        );
     }
     #[test]
     fn required_delivery_keeps_silent_retention_and_unread_backlog_rules() {
@@ -2073,7 +2147,7 @@ mod tests {
         let h = hook(&s, &p, "r");
         let mut request = body("required");
         request["delivery"] = "required".into();
-        let mid = s.send(&proof, &request).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &request).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -2110,7 +2184,7 @@ mod tests {
     fn ack_and_read_are_atomic() {
         let (s, p, proof) = fixture();
         let h = hook(&s, &p, "r");
-        let mid = s.send(&proof, &body("one")).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -2144,7 +2218,7 @@ mod tests {
         let (s, p, proof) = fixture();
         let h = hook(&s, &p, "r");
         s.detach(&p, "org-uuid", &h).unwrap();
-        let mid = s.send(&proof, &body("one")).unwrap().1["id"]
+        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -2178,14 +2252,17 @@ mod tests {
             s.subscribe_app(&proof, &json!({"org_id":"org-uuid","app_id":proof.app_id}))
                 .unwrap();
             h = hook(&s, &p, "r");
-            response = s.send(&proof, &body("one")).unwrap().1;
+            response = s.send(&proof.application(), &body("one")).unwrap().1;
             mid = response["id"].as_str().unwrap().to_owned();
             s.offer("r", &h).unwrap();
             s.ack("r", "org-uuid", &h, std::slice::from_ref(&mid), "delivery")
                 .unwrap();
         }
         let s = Store::open(path.to_str().unwrap()).unwrap();
-        assert_eq!(s.send(&proof, &body("one")).unwrap(), (200, response));
+        assert_eq!(
+            s.send(&proof.application(), &body("one")).unwrap(),
+            (200, response)
+        );
         s.bind(&p, "org-uuid", "r2", std::slice::from_ref(&h), false, false)
             .unwrap();
         assert_eq!(s.offer("r2", &h).unwrap().unwrap()["tings"][0]["id"], mid);

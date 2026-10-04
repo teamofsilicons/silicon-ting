@@ -1,0 +1,58 @@
+{
+  "checked_at": "2026-10-04T12:54:25.653793+00:00",
+  "app_id": "ting",
+  "requested_revision": 9,
+  "effective_revision": 8,
+  "iam_revision": 70,
+  "state": "awaiting_validator",
+  "operation_id": "1a7d0e27-9613-4e08-9728-cb96fecf9448",
+  "publication_request_id": "a0bf1b39-2e3b-4020-a693-cd667ffd7738",
+  "review_plan_id": "ed50d585-efc6-4cdd-a1ec-16cef629feb3",
+  "reviewer_can_decide": true,
+  "reviewed": true,
+  "approval_deferred_until_backend_deployment": true,
+  "added_ata_endpoints": [
+    {
+      "endpoint_id": "sent.query",
+      "path": "/v1/sent/query"
+    },
+    {
+      "endpoint_id": "sent.read",
+      "path": "/v1/sent/read"
+    },
+    {
+      "endpoint_id": "subscriptions.query",
+      "path": "/v1/subscriptions/query"
+    },
+    {
+      "endpoint_id": "subscriptions.revoke",
+      "path": "/v1/subscriptions/revoke"
+    },
+    {
+      "endpoint_id": "tings.send",
+      "path": "/v1/tings"
+    }
+  ],
+  "preserved_obo_endpoint_count": 7,
+  "existing_app_scopes_and_webhook_preserved": true,
+  "runtime_test_environment": {
+    "environment_id": "5dc74d75-6802-4dbd-9289-691c4360c452",
+    "ata_discovery_status": 200,
+    "ata_endpoints": [],
+    "verification_creation_supported": false,
+    "reason": "Honeycomb ATA management rejects a testing context; IAM protected management rejects the testing-plane header and its ATA creation contract has no environment selector."
+  },
+  "planned_live_verification": {
+    "authority": "Temporary Ting-origin ATA verification for Ting recipient and precisely the five added endpoints",
+    "lifetime_seconds": 3600,
+    "access_token_lifetime_seconds": 60,
+    "operations": "IAM verification plus empty app-owned Ting queries; no notifications",
+    "cleanup": "Revoke the temporary verification, then confirm the same access token is rejected"
+  },
+  "sources": [
+    "https://docs.iam.teamofsilicons.com/client/ata/",
+    "https://docs.honeycomb.teamofsilicons.com/application-config/",
+    "https://github.com/teamofsilicons/silicon-iam/blob/d0c3206d068970978b5967b3a1cdb5705ea1f1d5/src/features/applications/honeycomb.rs",
+    "https://github.com/teamofsilicons/silicon-honeycomb/blob/a25d1afee3d35f7ec6e13895c05ad155e0b00389/crates/server/src/ata.rs"
+  ]
+}

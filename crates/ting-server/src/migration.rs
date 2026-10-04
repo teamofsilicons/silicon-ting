@@ -950,13 +950,13 @@ mod tests {
             };
             let request = json!({"org_id":"org-uuid","type":"example.msg.received","data":{},"for":"c:alice","key":"accepted-key"});
             assert_eq!(
-                store.send(&proof, &request).unwrap_err().body["error"]["code"],
+                store.send(&proof.application(), &request).unwrap_err().body["error"]["code"],
                 "idempotency_conflict"
             );
             let mut fresh = request.clone();
             fresh["key"] = "new-operation".into();
-            let first = store.send(&proof, &fresh).unwrap();
-            assert_eq!(store.send(&proof, &fresh).unwrap().1, first.1);
+            let first = store.send(&proof.application(), &fresh).unwrap();
+            assert_eq!(store.send(&proof.application(), &fresh).unwrap().1, first.1);
             let index = f.worlds.iter().position(|w| w == ctx).unwrap();
             store
                 .bind(

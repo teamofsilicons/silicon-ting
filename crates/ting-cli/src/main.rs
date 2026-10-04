@@ -59,7 +59,14 @@ fn proof(c: Command, obo: bool) -> Command {
             "proof-token-file",
         ]))
     } else {
-        c
+        c.mut_arg("proof-token-stdin", |a| {
+            a.visible_alias("ata-stdin")
+                .help("Read an ATA app token from stdin; legacy OBO is also accepted")
+        })
+        .mut_arg("proof-token-file", |a| {
+            a.visible_alias("ata-file")
+                .help("Read an ATA app token from a private file; legacy OBO is also accepted")
+        })
     }
 }
 fn prefs(c: Command) -> Command {
@@ -70,7 +77,7 @@ fn prefs(c: Command) -> Command {
 fn cli() -> Command {
     Command::new("ting").about("Durable notifications for carbons and silicons.").disable_version_flag(true)
  .arg(flag("json").global(true)).arg(a("org").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
- .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nThen obtain a separately approved IAM OBO access token and run: ting send --request-file send.json --proof-token-stdin\nAll commands support --help. Documentation: ting docs")
+ .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --org ORG_ID --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nRegister the recipient once with OBO, then send with an IAM ATA app token: ting send --request-file send.json --ata-stdin\nUse the canonical recipient org_id returned by subscription registration; sending does not require a Ting login.\nAll commands support --help. Documentation: ting docs")
  .subcommand(command("iam","Show Ting application information"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
  .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
@@ -78,9 +85,9 @@ fn cli() -> Command {
  .subcommand(group("org","Choose an IAM organisation").subcommand(page(command("list","List accessible organisations"))).subcommand(command("current","Show effective organisation and selection source")).subcommand(command("use","Validate and save an organisation").arg(arg("id").required(true))))
  .subcommand(group("apps","Inspect visible Honeycomb applications").subcommand(page(command("list","List visible applications"))).subcommand(group("authorize","Approve Honeycomb catalog access separately from login").subcommand(command("start","Review the returned consent URL in IAM").arg(a("key").help("Reuse this idempotency key when retrying a start"))).subcommand(command("status","Inspect one authorization").arg(arg("id").required(true))).subcommand(command("complete","Save explicit approval; tokens remain on the server").arg(arg("id").required(true)).arg(a("state").required(true)).arg(a("code-file").required(true).help("Private file containing the single-use IAM code")))))
  .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
- .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(command("revoke","Revoke a grant as recipient or proof-authorized app").arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
+ .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
  .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
- .subcommand(group("sent","Inspect and update application sent history using reusable OBO access tokens").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
+ .subcommand(group("sent","Inspect and update application sent history using an ATA app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
@@ -208,7 +215,7 @@ async fn execute_proof(
         let file_secret = s(m, if obo { "obo-file" } else { "proof-token-file" });
         if stdin == file_secret.is_some() {
             return Err(Error::input(
-                "Execution requires exactly one matching OBO access-token input.",
+                "Execution requires exactly one matching token input (--obo-* for registration; --ata-* or --proof-token-* for app operations).",
             ));
         }
         if obo && (b(m, "proof-token-stdin") || s(m, "proof-token-file").is_some()) {
@@ -997,6 +1004,67 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ata_aliases_preserve_legacy_flags_and_keep_registration_obo_only() {
+        for command in [
+            vec!["send"],
+            vec!["sent", "list"],
+            vec!["sent", "get"],
+            vec!["sent", "mark-read"],
+            vec!["subscriptions", "list"],
+            vec!["subscriptions", "revoke"],
+        ] {
+            let mut args = vec!["ting"];
+            args.extend(command);
+            args.extend(["--request-file", "request.json", "--ata-stdin"]);
+            let parsed = cli().try_get_matches_from(args.clone()).unwrap();
+            let mut operation = parsed.subcommand().unwrap().1;
+            if let Some((_, child)) = operation.subcommand() {
+                operation = child;
+            }
+            assert!(b(operation, "proof-token-stdin"));
+            args.extend(["--proof-token-file", "token.txt"]);
+            assert!(cli().try_get_matches_from(args).is_err());
+        }
+        assert!(
+            cli()
+                .try_get_matches_from([
+                    "ting",
+                    "subscriptions",
+                    "register",
+                    "--request-file",
+                    "request.json",
+                    "--ata-stdin"
+                ])
+                .is_err()
+        );
+        assert!(
+            cli()
+                .try_get_matches_from([
+                    "ting",
+                    "subscriptions",
+                    "register",
+                    "--request-file",
+                    "request.json",
+                    "--obo-stdin"
+                ])
+                .is_ok()
+        );
+        let parsed = cli()
+            .try_get_matches_from([
+                "ting",
+                "send",
+                "--request-file",
+                "request.json",
+                "--ata-file",
+                "token.txt",
+            ])
+            .unwrap();
+        assert_eq!(
+            s(parsed.subcommand().unwrap().1, "proof-token-file"),
+            Some("token.txt")
+        );
+    }
     #[test]
     fn command_contract() {
         cli().debug_assert();
