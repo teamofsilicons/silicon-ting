@@ -1,0 +1,199 @@
+{
+  "checked_at": "2026-10-04T13:15:22.463050+00:00",
+  "release": "0.2.1",
+  "source_commit": "c012e23038d37dbf87669e571af9f823882135bb",
+  "pull_request": "https://github.com/teamofsilicons/silicon-ting/pull/6",
+  "public_origin": "https://ting.teamofsilicons.com",
+  "deployment": {
+    "provider": "Vercel",
+    "project": "silicon-ting",
+    "verification_source": "GitHub commit status plus production content matching the merge commit",
+    "context": "Vercel",
+    "state": "success",
+    "description": "Deployment has completed",
+    "inspector_url": "https://vercel.com/shubham-guptas-projects-7ecb7811/silicon-ting/ApuyabStRH2cRc1prEyRbAn6HGsq",
+    "updated_at": "2026-10-04T13:13:39Z",
+    "github_commit_status_url": "https://api.github.com/repos/teamofsilicons/silicon-ting/commits/c012e23038d37dbf87669e571af9f823882135bb/status",
+    "production_content_verified": true
+  },
+  "public_resources_by_origin": {
+    "https://ting.teamofsilicons.com": {
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "e81204e61c111c03cae01e7c84ceb980973c0c65545423b45f2ae1c5856a3cb1",
+        "size": 65682,
+        "source_path": "udd/api.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "09279ba222f60252276adb4ece01fb730082e36516531a875282c8f38c93b7ea",
+        "size": 46788,
+        "source_path": "udd/cli.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "2466f45d61266f118c27f3298a024807e349c00b8e043c429cfb94b835d9c1a9",
+        "size": 8463,
+        "source_path": "udd/understanding.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/build-with-iam5.md": {
+        "status": 200,
+        "sha256": "44fa74eebf5d00779ba6e3912767d5a497b65c11323329b2af9e0936426c240f",
+        "size": 6485,
+        "source_path": "docs/BUILD_WITH_IAM5.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "e0779105515565844dcfeb6ac853fb1ab92cacaf6d3cfc0f590b7cbbff652bb5",
+        "size": 4781,
+        "source_path": "scripts/install.sh",
+        "matches_merged_source": true,
+        "source_mirror_matches": true,
+        "default_version": "0.2.1"
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "2e34bb6bef82e557bc21d0c6aa3100853d8bb950bed15cc53f9f53b23b576e6b",
+        "size": 3147,
+        "source_path": "scripts/install.ps1",
+        "matches_merged_source": true,
+        "source_mirror_matches": true,
+        "default_version": "0.2.1"
+      },
+      "/": {
+        "status": 200,
+        "sha256": "11c9aa65d082f73ab15e5181a62c60b528f4ae0c724dae1fefd3df8bdda5534d",
+        "size": 700
+      },
+      "/assets/index-B1H2bD4k.js": {
+        "status": 200,
+        "sha256": "6ef02a6ae5da895cc29b33f3c0763504a1b42078f952e6e05e31dbb7a6365e86",
+        "size": 74833,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      }
+    },
+    "https://silicon-ting.vercel.app": {
+      "/docs/api.md": {
+        "status": 200,
+        "sha256": "e81204e61c111c03cae01e7c84ceb980973c0c65545423b45f2ae1c5856a3cb1",
+        "size": 65682,
+        "source_path": "udd/api.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/cli.md": {
+        "status": 200,
+        "sha256": "09279ba222f60252276adb4ece01fb730082e36516531a875282c8f38c93b7ea",
+        "size": 46788,
+        "source_path": "udd/cli.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/understanding.md": {
+        "status": 200,
+        "sha256": "2466f45d61266f118c27f3298a024807e349c00b8e043c429cfb94b835d9c1a9",
+        "size": 8463,
+        "source_path": "udd/understanding.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/docs/build-with-iam5.md": {
+        "status": 200,
+        "sha256": "44fa74eebf5d00779ba6e3912767d5a497b65c11323329b2af9e0936426c240f",
+        "size": 6485,
+        "source_path": "docs/BUILD_WITH_IAM5.md",
+        "matches_merged_source": true,
+        "source_mirror_matches": true
+      },
+      "/install.sh": {
+        "status": 200,
+        "sha256": "e0779105515565844dcfeb6ac853fb1ab92cacaf6d3cfc0f590b7cbbff652bb5",
+        "size": 4781,
+        "source_path": "scripts/install.sh",
+        "matches_merged_source": true,
+        "source_mirror_matches": true,
+        "default_version": "0.2.1"
+      },
+      "/install.ps1": {
+        "status": 200,
+        "sha256": "2e34bb6bef82e557bc21d0c6aa3100853d8bb950bed15cc53f9f53b23b576e6b",
+        "size": 3147,
+        "source_path": "scripts/install.ps1",
+        "matches_merged_source": true,
+        "source_mirror_matches": true,
+        "default_version": "0.2.1"
+      },
+      "/": {
+        "status": 200,
+        "sha256": "11c9aa65d082f73ab15e5181a62c60b528f4ae0c724dae1fefd3df8bdda5534d",
+        "size": 700
+      },
+      "/assets/index-B1H2bD4k.js": {
+        "status": 200,
+        "sha256": "6ef02a6ae5da895cc29b33f3c0763504a1b42078f952e6e05e31dbb7a6365e86",
+        "size": 74833,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      }
+    }
+  },
+  "public_iam": {
+    "url": "https://ting.teamofsilicons.com/v1/iam",
+    "status": 200,
+    "content_type": "application/json",
+    "sha256": "9c147ab7c4f9a818ebcde0415b655da47457f161bd4a463826ff9f1ac3c1f6fa",
+    "response": {
+      "api_version": "v1",
+      "app_id": "ting",
+      "docs_url": "https://ting.teamofsilicons.com/docs",
+      "repository_url": "https://github.com/teamofsilicons/silicon-ting",
+      "rust_package": "silicon-ting-client"
+    },
+    "expected_configuration_matches": true
+  },
+  "production_telemetry": {
+    "verified": true,
+    "tables": [
+      "tingfrontendanalytics",
+      "tingfrontendevents"
+    ],
+    "public_origin_bundles_match": true,
+    "bundle_checks": [
+      {
+        "origin": "https://silicon-ting.vercel.app",
+        "path": "/assets/index-B1H2bD4k.js",
+        "status": 200,
+        "sha256": "6ef02a6ae5da895cc29b33f3c0763504a1b42078f952e6e05e31dbb7a6365e86",
+        "size": 74833,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      },
+      {
+        "origin": "https://ting.teamofsilicons.com",
+        "path": "/assets/index-B1H2bD4k.js",
+        "status": 200,
+        "sha256": "6ef02a6ae5da895cc29b33f3c0763504a1b42078f952e6e05e31dbb7a6365e86",
+        "size": 74833,
+        "telemetry_tables": [
+          "tingfrontendanalytics",
+          "tingfrontendevents"
+        ]
+      }
+    ]
+  }
+}
