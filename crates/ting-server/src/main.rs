@@ -793,10 +793,18 @@ pub async fn app_call(
     b: &Value,
 ) -> Result<(u16, Value)> {
     v::filters(b)?;
-    let p = app.auth.proof(headers, path, bytes).await?;
     v::string(b, "org_id", 255)?;
+    if path == "/v1/subscriptions" {
+        let proof = app.auth.proof(headers, path, bytes).await?;
+        let _gate = app.mutations.lock().await;
+        app.auth.check_proof(&proof)?;
+        let out = app.store.subscribe_app(&proof, b)?;
+        app.changed.notify_waiters();
+        return Ok(out);
+    }
+    let p = app.auth.app_authority(headers, path, bytes, b).await?;
     let _gate = app.mutations.lock().await;
-    app.auth.check_proof(&p)?;
+    app.auth.check_app(&p)?;
     match path {
         "/v1/tings" => {
             let result = app.store.send(&p, b)?;
@@ -807,11 +815,6 @@ pub async fn app_call(
             }
             app.changed.notify_waiters();
             Ok(result)
-        }
-        "/v1/subscriptions" => {
-            let out = app.store.subscribe_app(&p, b)?;
-            app.changed.notify_waiters();
-            Ok(out)
         }
         "/v1/subscriptions/query" => {
             v::fields(
@@ -834,7 +837,10 @@ pub async fn app_call(
             ))
         }
         "/v1/subscriptions/revoke" => {
-            v::fields(b, &["org_id", "id"], &["org_id", "id"])?;
+            v::fields(b, &["org_id", "app_id", "id"], &["org_id", "id"])?;
+            if b.get("app_id").is_some() {
+                proof_app(&p, b)?;
+            }
             let (out, recipient) = app.store.revoke(
                 &p.context,
                 &p.org_id,
@@ -910,7 +916,7 @@ pub async fn app_call(
         _ => Err(Error::not_found()),
     }
 }
-fn proof_app(p: &auth::Proof, b: &Value) -> Result<()> {
+fn proof_app(p: &auth::AppAuthority, b: &Value) -> Result<()> {
     if v::string(b, "app_id", 255)? != p.app_id {
         return Err(Error::new(
             403,

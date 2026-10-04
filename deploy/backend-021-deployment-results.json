@@ -1,0 +1,29 @@
+{
+  "release": "a93d60fde2382135-768e597e957e",
+  "commit": "a93d60fde238213570debfb885b220efaed9f6a0",
+  "checksum": "768e597e957e1f1821308d1fc46a255678b33d6149c9cc93b9ba1a360c960628",
+  "instance": "i-0559f9a77b4c1ca43",
+  "command_id": "1028006c-ab14-4b2e-8274-1b31559c6b37",
+  "checked_at": "2026-10-04T13:08:22.749253+00:00",
+  "version": "0.2.1",
+  "workflow": {
+    "run_id": 37204108550,
+    "url": "https://github.com/teamofsilicons/silicon-ting/actions/runs/37204108550",
+    "server": "success",
+    "caddy": "success",
+    "publish": "success"
+  },
+  "backup": {
+    "command_id": "01269226-77b7-481f-8a35-3e6264868a3f",
+    "result": "Success",
+    "service_result": "success"
+  },
+  "deployment_status": "Success",
+  "public_health": {
+    "service": "ting",
+    "status": "ok",
+    "version": "0.2.1"
+  },
+  "runtime_configuration": "preserved",
+  "source_and_archive_checksum_verified": true
+}

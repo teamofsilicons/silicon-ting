@@ -6,7 +6,7 @@ Notifications for carbons and silicons. A Rust service, HTTP/WebSocket client, C
 - **API:** https://backend.ting.teamofsilicons.com
 - **IAM application:** `ting`
 
-Current release: [0.1.9](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.9), also available through `honeycomb install 'ting'`. Previous releases [0.1.8](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.8), [0.1.7](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7), [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+Current release: [0.2.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.2.1), also available through `honeycomb install 'ting'`. Previous releases [0.1.8](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.8), [0.1.7](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7), [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
 
 ## Start receiving
 
@@ -21,13 +21,13 @@ ting inbox list --all
 
 The installer downloads a checksum-verified release and registers one system daemon. Windows installation is described in [installers/README.md](installers/README.md). Each identity keeps credentials in `$SILICON_HOME/.ting/`; all identities share the daemon connection. Local URLs and webhook secrets never leave the device.
 
-Applications obtain separate endpoint approval in IAM, then retain a dedicated OBO access/refresh pair. Ting also requires an active recipient subscription. Prepare the operation and submit it with the endpoint access token:
+Applications first use a recipient-approved OBO token to register that recipient at Ting. Save the canonical `org_id` returned by registration. Subsequent sends use the app's own ATA token, with no recipient session or user OBO token. Ting checks both current ATA endpoint authority and the stored recipient subscription:
 
 ```sh
-ting send --org tos --type 'example.message.received' --for si:assistant \
+ting send --org '<recipient-org-UUID>' --type 'example.message.received' --for si:assistant \
   --key unique-event-key --data '{"message":"Hello"}' --write-request send.json --json
-# Approve the tings.send endpoint in IAM and securely supply its oba_ access token.
-ting send --request-file send.json --proof-token-stdin --json
+# Obtain ATA application verification for tings.send and securely supply its ata_ token.
+ting send --request-file send.json --ata-stdin --json
 ```
 
 Actor IDs are complete IAM identities (`c:alice0`, `si:assistant`); app IDs are bare handles (`ting`, `dm`). Organization selection and authority remain separate. Existing queued requests and delivery receipts retain their exact bytes and stable IDs through migration.
@@ -47,7 +47,7 @@ Read **or** silent tings expire one calendar month after their original `created
 
 Within that window, each webhook has an independent copy. The daemon durably queues before delivery ACK, and retains local acceptance until the server confirms read ACK. Webhooks return `204` only after accepting the complete `{ "tings": [...] }` batch. Consumers must deduplicate by ting ID, since transport is at least once. A failed hook retries independently for twelve hours before requiring explicit reconnection.
 
-App send idempotency lasts fourteen days. Every replay revalidates the reusable OBO access token with IAM. Notification preferences never grant permission to send; IAM grants and current authorization are checked separately.
+App send idempotency lasts fourteen days. Every replay revalidates the reusable ATA or supported OBO access token with IAM. Notification preferences never grant permission to send; IAM grants and current authorization are checked separately.
 
 ## Development
 

@@ -24,6 +24,7 @@ Apps can also ask for the tings they have sent out to see their status (read or 
 ## Sending a Ting
 the app sends this:
 {
+    org_id: "<canonical recipient organization UUID from OBO registration>",
     type: "...",
     data: {...},
     metadata: {...},
@@ -31,7 +32,7 @@ the app sends this:
     key: {idempotency key},
 }
 
-as POST and in Authorization it sends a Proof Token that can be verified using IAM. Only send if it gets verified.
+After OBO registration, the app sends as itself using its IAM ATA access token in Authorization. Ting verifies the app and the exact endpoint with IAM on every call, then checks the stored subscription for that app, recipient and recipient organization. No recipient login, live receiver or user OBO token is needed for these later sends. An app cannot use ATA to subscribe someone. Registration returns the canonical recipient org_id to save with the subscription and use on later ATA calls. The app can also use ATA to query its subscriptions and sent status, update its sent read state, or revoke its subscriptions.
 
 this is possible to do via POST request, or by establishing a persistent websocket for ultra-fast ting delivery.
 Eg: Non-time sensitive tings can be POST and new messages can be sent over websockets.

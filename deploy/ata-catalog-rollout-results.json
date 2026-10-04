@@ -1,0 +1,149 @@
+{
+  "checked_at": "2026-10-04T13:10:37.825945+00:00",
+  "app_id": "ting",
+  "requested_revision": 9,
+  "effective_revision": 9,
+  "iam_revision": 78,
+  "state": "published",
+  "operation_id": "1a7d0e27-9613-4e08-9728-cb96fecf9448",
+  "publication_request_id": "a0bf1b39-2e3b-4020-a693-cd667ffd7738",
+  "review_plan_id": "ed50d585-efc6-4cdd-a1ec-16cef629feb3",
+  "reviewer_can_decide": true,
+  "reviewed": true,
+  "approval_deferred_until_backend_deployment": false,
+  "added_ata_endpoints": [
+    {
+      "endpoint_id": "sent.query",
+      "path": "/v1/sent/query"
+    },
+    {
+      "endpoint_id": "sent.read",
+      "path": "/v1/sent/read"
+    },
+    {
+      "endpoint_id": "subscriptions.query",
+      "path": "/v1/subscriptions/query"
+    },
+    {
+      "endpoint_id": "subscriptions.revoke",
+      "path": "/v1/subscriptions/revoke"
+    },
+    {
+      "endpoint_id": "tings.send",
+      "path": "/v1/tings"
+    }
+  ],
+  "preserved_obo_endpoint_count": 7,
+  "existing_app_scopes_and_webhook_preserved": true,
+  "runtime_test_environment": {
+    "environment_id": "5dc74d75-6802-4dbd-9289-691c4360c452",
+    "ata_discovery_status": 200,
+    "ata_endpoints": [],
+    "verification_creation_supported": false,
+    "reason": "Honeycomb ATA management rejects a testing context; IAM protected management rejects the testing-plane header and its ATA creation contract has no environment selector."
+  },
+  "sources": [
+    "https://docs.iam.teamofsilicons.com/client/ata/",
+    "https://docs.honeycomb.teamofsilicons.com/application-config/",
+    "https://github.com/teamofsilicons/silicon-iam/blob/d0c3206d068970978b5967b3a1cdb5705ea1f1d5/src/features/applications/honeycomb.rs",
+    "https://github.com/teamofsilicons/silicon-honeycomb/blob/a25d1afee3d35f7ec6e13895c05ad155e0b00389/crates/server/src/ata.rs"
+  ],
+  "backend_before_approval": {
+    "commit": "a93d60fde238213570debfb885b220efaed9f6a0",
+    "version": "0.2.1",
+    "ssm_command_id": "1028006c-ab14-4b2e-8274-1b31559c6b37"
+  },
+  "approval": {
+    "operation_id": "19a3f9d2-4bc5-45e9-a7ac-b646e3e90f74",
+    "provider": "honeycomb",
+    "revision": 9,
+    "state": "accepted",
+    "publication_state": "published",
+    "automatic_activation": true
+  },
+  "iam_production_discovery": {
+    "status": 200,
+    "app_id": "ting",
+    "endpoints": [
+      {
+        "additional_warnings": [],
+        "ata_id": "[ting:ata:sent.query]",
+        "critical": true,
+        "description": "Query only notifications sent by the calling app.",
+        "downstream": [],
+        "enabled": true,
+        "endpoint_id": "sent.query",
+        "metadata": {},
+        "name": "View sent notifications",
+        "note_to_user": "Authorizes application actions on the calling application\u2019s own notifications and subscriptions. Recipient enrollment and user authority remain separate.",
+        "path": "/v1/sent/query",
+        "version": 1
+      },
+      {
+        "additional_warnings": [],
+        "ata_id": "[ting:ata:sent.read]",
+        "critical": true,
+        "description": "Change overall read state for the calling app\u2019s sent notifications; delivery acknowledgments remain separate.",
+        "downstream": [],
+        "enabled": true,
+        "endpoint_id": "sent.read",
+        "metadata": {},
+        "name": "Mark sent notifications read or unread",
+        "note_to_user": "Authorizes application actions on the calling application\u2019s own notifications and subscriptions. Recipient enrollment and user authority remain separate.",
+        "path": "/v1/sent/read",
+        "version": 1
+      },
+      {
+        "additional_warnings": [],
+        "ata_id": "[ting:ata:subscriptions.query]",
+        "critical": true,
+        "description": "Query subscriptions for the calling application; no user identity is represented by this ATA token.",
+        "downstream": [],
+        "enabled": true,
+        "endpoint_id": "subscriptions.query",
+        "metadata": {},
+        "name": "View notification subscriptions",
+        "note_to_user": "Authorizes application actions on the calling application\u2019s own notifications and subscriptions. Recipient enrollment and user authority remain separate.",
+        "path": "/v1/subscriptions/query",
+        "version": 1
+      },
+      {
+        "additional_warnings": [],
+        "ata_id": "[ting:ata:subscriptions.revoke]",
+        "critical": true,
+        "description": "Revoke subscriptions belonging to the calling application; this does not enroll recipients or grant user authority.",
+        "downstream": [],
+        "enabled": true,
+        "endpoint_id": "subscriptions.revoke",
+        "metadata": {},
+        "name": "Revoke a notification subscription",
+        "note_to_user": "Authorizes application actions on the calling application\u2019s own notifications and subscriptions. Recipient enrollment and user authority remain separate.",
+        "path": "/v1/subscriptions/revoke",
+        "version": 1
+      },
+      {
+        "additional_warnings": [
+          "shares_data"
+        ],
+        "ata_id": "[ting:ata:tings.send]",
+        "critical": true,
+        "description": "Send the calling app\u2019s registered event type to a consenting recipient with an active subscription.",
+        "downstream": [],
+        "enabled": true,
+        "endpoint_id": "tings.send",
+        "metadata": {},
+        "name": "Send a notification",
+        "note_to_user": "Authorizes application actions on the calling application\u2019s own notifications and subscriptions. Recipient enrollment and user authority remain separate.",
+        "path": "/v1/tings",
+        "version": 1
+      }
+    ]
+  },
+  "live_verification": {
+    "result_file": "deploy/ata-authority-live-results.json",
+    "passed": true,
+    "notifications_created": 0,
+    "temporary_verifications_revoked": 2,
+    "delivery_verified": false
+  }
+}

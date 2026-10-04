@@ -1,9 +1,9 @@
 # Ting CLI
 
-> **Integration baseline — October 3, 2026:** Ting 0.2.0 uses IAM 5 reusable OBO credentials. The website supports Carbon/Silicon login and catalog-approval popups, with a full-page fallback. The CLI retains its manual-code approval flow. Saved multi-workspace switching remains a separate follow-up.
+> **Integration baseline — October 4, 2026:** Ting 0.2.1 uses IAM 5 OBO for recipient registration and ATA for subsequent app operations. Existing OBO app calls remain compatible. Carbon/Silicon login, catalog-approval popups and CLI manual-code approval remain available.
 
 
-The v1 implementation contract, based on [understanding.md](understanding.md), [iam.md](iam.md), and the latest product decisions. These commands are not implemented yet. Examples show JSON output; without `--json`, print the same information in readable text. The CLI and daemon use the stateless Rust client library.
+The v1 implementation contract, based on [understanding.md](understanding.md), [iam.md](iam.md), and the latest product decisions. Examples show JSON output; without `--json`, print the same information in readable text. The CLI and daemon use the stateless Rust client library.
 
 For server requests and delivery messages, see [api.md](api.md).
 
@@ -117,19 +117,19 @@ Type names use `{app_id}.{service}.{past-tense-event}`. These commands use the s
 
 ```sh
 ting --org tos types list --app 'dm'
-ting --org bricks send --type 'dm.msg.received' \
+ting --org '<recipient-org-UUID>' send --type 'dm.msg.received' \
   --for si:assistant --key dm-456 --data '{"message_id":"dm_456"}' \
   --write-request send.json
 ```
 
-Obtain an IAM OBO access token for the prepared endpoint and selected `bricks` context, then execute it with `ting --org bricks send --request-file send.json --proof-token-stdin`.
+Use the recipient organization UUID saved from OBO subscription registration when preparing this send. Obtain the app's ATA access token for `/v1/tings`, then execute it with `ting send --request-file send.json --ata-stdin`. Any selected organization must match the UUID in the request file.
 
 ## Permission to receive from an app
 
 | Command | Output |
 | --- | --- |
 | `ting subscriptions register --app 'dm' --for si:assistant --write-request register.json` | Request-file information, as described below. |
-| `ting subscriptions register --request-file register.json --obo-stdin` | `{ "id": "sub_123", "app_id": "dm", "for": "si:assistant", "active": true }` |
+| `ting subscriptions register --request-file register.json --obo-stdin` | `{ "id": "sub_123", "org_id": "11111111-1111-4111-8111-111111111111", "app_id": "dm", "for": "si:assistant", "active": true }` |
 | `ting subscriptions list` | `{ "items": [{ "id": "sub_123", "app_id": "dm", "for": "si:assistant", "active": true }] }` |
 | `ting subscriptions revoke sub_123` | `{ "id": "sub_123", "active": false }` |
 
@@ -137,18 +137,18 @@ Registration uses an independently approved IAM OBO access token for `subscripti
 
 The grant covers the app's current and future ting types. New types are enabled automatically, while existing recipient app, service and event opt-outs still apply.
 
-List accepts optional `--app APP_ID` and `--for ID` filters. Without preparation or app proof flags, list and revoke use the saved recipient session and can only act on that recipient's grants. To act as the app, prepare the fixed app route with `--write-request`, then execute with `--request-file` and exactly one of `--proof-token-stdin` or `--proof-token-file PATH`. App list preparation requires `--app`; app revoke preparation requires one subscription ID.
+List accepts optional `--app APP_ID` and `--for ID` filters. Without preparation or app proof flags, list and revoke use the saved recipient session and can only act on that recipient's grants. To act as the app, prepare the fixed app route with `--write-request`, then execute with `--request-file` and exactly one of `--proof-token-stdin` or `--proof-token-file PATH`. App list preparation requires `--app`; app revoke preparation requires one subscription ID and, for ATA, `--app`. Use the canonical `org_id` returned by registration for ATA requests. App execution also accepts `--ata-stdin` or `--ata-file PATH`.
 
 Revocation blocks new sends and further delivery under the grant; it cannot retract tings already accepted by a webhook.
 
 ## Prepare and authenticate app requests
 
-Each app operation requires a separately approved IAM OBO `oba_` access token for its endpoint. Ting verifies current authority on every call without consuming the token. Dedicated `obr_` refresh tokens stay in the calling app's encrypted store. Ordinary login consent, a Ting session, a login token, test secrets and legacy single-use proofs cannot replace this authorization. Historical `--proof-token-*` and `--obo-*` flags remain compatible names for the new access token inputs.
+Use OBO (`oba_`) for `subscriptions register`, then ATA (`ata_`) for app sends, sent status/read updates and app subscription queries/revocation. Registration returns the canonical recipient `org_id`; prepare later ATA requests with that UUID. No recipient CLI login or user token is needed for ATA calls. Ting verifies current endpoint authority on every call without consuming the token. Keep the corresponding `obr_` or `atr_` refresh family in the calling app's encrypted store. A Ting session, login token, test secret or legacy single-use proof cannot replace this authority. Existing OBO app calls remain compatible. App commands accept `--ata-file PATH` / `--ata-stdin` as aliases for historical `--proof-token-*` inputs; registration uses only `--obo-*`.
 
 All app-proof commands use the same two modes:
 
 1. `--write-request PATH` builds and validates the body from flags, writes its exact UTF-8 JSON bytes to a new private file, and prints the information below. It makes no request and needs no proof or login. An existing output file is an error. Select an org through the normal org rules.
-2. Obtain separate endpoint approval and a dedicated OBO access token through the calling app's IAM integration, then use `--request-file PATH` with the command's token input. Read the bytes once, validate them without changing them, and send those same bytes. Do not parse and reserialize the file.
+2. Obtain the appropriate OBO recipient approval or ATA application verification through the calling app's IAM integration, then use `--request-file PATH` with the command's token input. Read the bytes once, validate them without changing them, and send those same bytes. Do not parse and reserialize the file.
 
 Preparation output:
 
@@ -161,42 +161,42 @@ Preparation output:
 }
 ```
 
-`--write-request` and `--request-file` are mutually exclusive. Proof inputs are forbidden in preparation mode. Execution requires a request file and a valid OBO access token; it rejects body-building flags and positional body arguments. Global context flags, `--json`, and send's `--transport` remain allowed. The file must contain `org_id`; if an org is selected through flags, environment or saved settings, it must match. File mode can use its own `org_id` when no org is otherwise selected. Never rewrite the file's org.
+`--write-request` and `--request-file` are mutually exclusive. Proof inputs are forbidden in preparation mode. Execution requires a request file and a valid endpoint access token; it rejects body-building flags and positional body arguments. Global context flags, `--json`, and send's `--transport` remain allowed. The file must contain `org_id`; if an org is selected through flags, environment or saved settings, it must match. File mode can use its own `org_id` when no org is otherwise selected. Never rewrite the file's org.
 
 | Command | Registered method and path | Body built in preparation mode |
 | --- | --- | --- |
 | `send` | `POST /v1/tings` | `org_id`, required `--type`, `--for`, `--key`, `--data`; optional `--metadata`, default `{}`. |
 | `subscriptions register` | `POST /v1/subscriptions` | `org_id`, required `--app` as `app_id`; optional `--for`. |
 | `subscriptions list` as app | `POST /v1/subscriptions/query` | `org_id`, required `--app` as `app_id`; optional `--for`, `--limit`, `--cursor`. |
-| `subscriptions revoke` as app | `POST /v1/subscriptions/revoke` | `org_id`, required positional subscription ID as `id`. |
+| `subscriptions revoke` as app | `POST /v1/subscriptions/revoke` | `org_id`, required positional subscription ID as `id`; `--app` as `app_id` required for ATA, optional for OBO. |
 | `sent list` | `POST /v1/sent/query` | `org_id`, required `--app` as `app_id`; optional `--for`, `--type`, `--read`, `--limit`, `--cursor`. |
 | `sent get` | `POST /v1/sent/query` | `org_id`, required `--app` as `app_id`, required positional ting ID as `id`; optional `--deliveries-cursor` as `deliveries_cursor`. |
 | `sent mark-read` / `sent mark-unread` | `POST /v1/sent/read` | `org_id`, required `--app` as `app_id`, 1–100 positional ting IDs as `message_ids`, required `--key`; `read` is `true` / `false` respectively. |
 
 List preparation writes its effective limit, including the default `50`; omit unused optional filters. A `get` body cannot contain list filters, `limit` or `cursor`; only its separate `deliveries_cursor` is allowed for detail pagination. Request files must match the selected command's schema. Sending body JSON is at most 256 KiB; validate size before asking IAM for a proof or sending it. File paths, tokens and proofs are never part of the body.
 
-Do not automatically retry a request with a used proof. If the response is uncertain, obtain a valid OBO access token for the same body bytes. For `send`, retain the same ting key: Ting returns the original accepted ting if it already stored the request. For `sent mark-read` and `sent mark-unread`, retain the same operation key to recover the original response without overwriting a later read-state change. The caller obtains each proof; Ting never stores the sending app's secret.
+If a response is uncertain, retry the same body bytes with a valid endpoint access token. Tokens are reusable until expiry or revocation. For `send`, retain the same ting key: Ting returns the original accepted ting if it already stored the request. For `sent mark-read` and `sent mark-unread`, retain the same operation key to recover the original response without overwriting a later read-state change. The caller obtains each proof; Ting never stores the sending app's secret.
 
 ## Send, inspect and update sent tings
 
 ```sh
-ting send --type 'dm.msg.received' --for si:assistant --key dm-456 \
+ting send --org '<recipient-org-UUID>' --type 'dm.msg.received' --for si:assistant --key dm-456 \
   --data @message.json --metadata @metadata.json --write-request send.json --json
-# Obtain an IAM OBO access token for the prepared endpoint; its request body remains subject to Ting resource checks.
-ting send --request-file send.json --proof-token-stdin --json
+# Use the recipient org UUID from OBO registration and the app's ATA token.
+ting send --request-file send.json --ata-stdin --json
 ```
 
 ```json
 { "id": "msg_123", "created_at": "2026-09-22T10:00:00Z", "status": "accepted", "key": "dm-456", "silent": false }
 ```
 
-Execution requires exactly one proof source: `--proof-token-stdin` or `--proof-token-file PATH`. An IAM OBO access token is required for HTTP, WebSocket and test sends. `--transport http|websocket` defaults to `http`; preparation is identical for both.
+Execution requires exactly one token source: `--ata-stdin` / `--ata-file PATH`, or their historical `--proof-token-*` names. ATA or a supported OBO endpoint token is required for HTTP, WebSocket and test sends. `--transport http|websocket` defaults to `http`; preparation is identical for both.
 
 Each send submits one ting. HTTP posts the exact file bytes to `/v1/tings`. WebSocket sends those same bytes as the frame's `body` string through the daemon's shared connection, using the same logical `POST /v1/tings` proof binding. It does not open a second socket. Both transports use the same permission checks.
 
 Flow: validate sender and recipient permission → store ting → return its ID → deliver to active receivers if enabled. Acceptance means stored, not read.
 
-Reuse the same key and a valid OBO access token when retrying the same send. Ting retains the key record for 14 days in a durable database transaction with the ting and initial delivery state. Redis may cache results, but cache eviction or restart cannot shorten the guarantee. Within that period, the same key and normalized request returns the original result; changed content produces a conflict. This limit applies only to idempotency keys: the tings themselves stay for one calendar month when read or silent, or three months while unread and non-silent, measured from their original creation time. See [api.md](api.md) for key scope and expiry behavior.
+Reuse the same key and a valid endpoint access token when retrying the same send. Ting retains the key record for 14 days in a durable database transaction with the ting and initial delivery state. Redis may cache results, but cache eviction or restart cannot shorten the guarantee. Within that period, the same key and normalized request returns the original result; changed content produces a conflict. This limit applies only to idempotency keys: the tings themselves stay for one calendar month when read or silent, or three months while unread and non-silent, measured from their original creation time. See [api.md](api.md) for key scope and expiry behavior.
 
 | Command | Output |
 | --- | --- |
@@ -211,11 +211,11 @@ Reuse the same key and a valid OBO access token when retrying the same send. Tin
 
 Sent-list preparation accepts `--for ID`, `--type TYPE`, `--read true|false` and pagination flags. Each query execution needs a valid endpoint access token; a saved recipient session cannot inspect the app's sent history. `--proof-token-file PATH` is an alternative to stdin for every sent command.
 
-`sent mark-read` and `sent mark-unread` require an IAM `sent.read` proof over `POST /v1/sent/read`; no recipient Ting login or receiver is needed. Preparation requires `--app`, a unique operation `--key`, and 1–100 ting IDs. Duplicate IDs are collapsed. The request file's `read` value must match the selected command. Ting validates all IDs before changing any: each must still be retained and belong to the issuing app in the proof's organization and environment. Any missing, expired or out-of-scope ID returns `404` with no partial update; an `app_id` that differs from the proof issuer returns `403`.
+`sent mark-read` and `sent mark-unread` require an ATA app token authorized for `/v1/sent/read` (or a supported OBO `sent.read` token); no recipient Ting login or receiver is needed. Preparation requires `--app`, a unique operation `--key`, and 1–100 ting IDs. Duplicate IDs are collapsed. The request file's `read` value must match the selected command. Ting validates all IDs before changing any: each must still be retained and belong to the issuing app in the selected recipient organization and verified environment. Any missing, expired or out-of-scope ID returns `404` with no partial update; an `app_id` that differs from the proof issuer returns `403`.
 
-Use the same operation key and valid OBO access token after an uncertain response. Ting keeps its original response for 14 days within the app/org/environment and `sent.read` operation, separately from send keys. Replaying it does not reapply the update or undo a later read-state change. Changed content with that key returns `409 idempotency_conflict`; use a new key for a new intended change. These updates never reset `created_at` or resurrect expired tings. Marking an older ting read may shorten its remaining retention to zero.
+Use the same operation key and a valid ATA or supported OBO endpoint token after an uncertain response. Ting keeps its original response for 14 days within the app/org/environment and `sent.read` operation, separately from send keys. Replaying it does not reapply the update or undo a later read-state change. Changed content with that key returns `409 idempotency_conflict`; use a new key for a new intended change. These updates never reset `created_at` or resurrect expired tings. Marking an older ting read may shorten its remaining retention to zero.
 
-Sent detail returns at most 100 entries in `deliveries`. If more remain, preserve its `deliveries_next_cursor` in CLI output. Prepare another `sent get` request with `--deliveries-cursor CURSOR`, obtain a valid OBO access token and execute it to fetch the next delivery page. Omit `deliveries_next_cursor` on the final page; do not replace it with the list-page `next_cursor`.
+Sent detail returns at most 100 entries in `deliveries`. If more remain, preserve its `deliveries_next_cursor` in CLI output. Prepare another `sent get` request with `--deliveries-cursor CURSOR`, obtain a valid endpoint access token and execute it to fetch the next delivery page. Omit `deliveries_next_cursor` on the final page; do not replace it with the list-page `next_cursor`.
 
 ```json
 {
@@ -409,6 +409,6 @@ Errors identify the cause and the next step. Typical cases include missing login
 
 Use `ting subscriptions required-delivery SUBSCRIPTION_ID` to inspect the current choice. The owning recipient can explicitly set `--enabled true` or `--enabled false`; this requires an existing active grant and never changes notification preferences. Revoking the grant clears this choice.
 
-An app prepares an automation event with `ting send --delivery required` and its usual type, recipient, key and data flags. The exact request still needs a valid separately approved `tings.send` OBO access token. A recipient who has not opted in receives no required event: Ting rejects the new send instead of treating silent storage as delivery. Retention and destination acknowledgment semantics remain unchanged.
+An app prepares an automation event with `ting send --delivery required` and its usual type, recipient, key and data flags. The exact request still needs a valid ATA app token for `/v1/tings` or a supported OBO `tings.send` token; ATA does not replace the recipient’s separate required-delivery opt-in. A recipient who has not opted in receives no required event: Ting rejects the new send instead of treating silent storage as delivery. Retention and destination acknowledgment semantics remain unchanged.
 
 See [catalog authorization migration](https://ting.teamofsilicons.com/docs/catalog-authorization.md) for consent, durable token refresh and release requirements.

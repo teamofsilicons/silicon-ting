@@ -1413,7 +1413,8 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]
-    async fn proof_sends_share_one_socket_and_preserve_body() {
+    async fn app_sends_need_no_profile_and_share_one_socket_with_exact_bytes() {
+        const BODY: &str = r#"{ "org_id":"7359ca28-7878-41e4-82c9-f28c073c622b", "type":"dm.msg.received", "for":"si:recipient", "key":"app/retry-1", "data":{"text":"original bytes"} }"#;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -1429,7 +1430,10 @@ mod tests {
             for _ in 0..2 {
                 let msg = ws.next().await.unwrap().unwrap();
                 let value: Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
-                assert_eq!(value["body"], r#"{ "exact": true }"#);
+                assert_eq!(value["body"], BODY);
+                assert_eq!(value["proof_token"], "app-authority-test");
+                assert!(value.get("session_token").is_none());
+                assert!(value.get("profile").is_none());
                 ws.send(Message::Text(
                     json!({"op":"accepted","request_id":value["request_id"],"id":"m"})
                         .to_string()
@@ -1450,13 +1454,13 @@ mod tests {
         };
         let driver = tokio::spawn(socket_loop(sh.clone(), rx));
         for _ in 0..2 {
-            let v = sh
-                .ws(
-                    &api,
-                    json!({"op":"send","proof_token":"proof","body":r#"{ "exact": true }"#}),
-                )
-                .await
-                .unwrap();
+            let v = control(
+                &sh,
+                json!({"op":"send","api_url":api,"proof_token":"app-authority-test","body":BODY}),
+                0,
+            )
+            .await
+            .unwrap();
             assert_eq!(v["id"], "m");
         }
         server.await.unwrap();

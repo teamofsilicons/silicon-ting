@@ -115,9 +115,32 @@ with tempfile.TemporaryDirectory() as d:
         result = subprocess.run([str(binary), *args, '--json'], input=text, text=True, capture_output=True, env=env, cwd=d)
         assert result.returncode == code, (args, result.stderr)
         assert 'private-session-test' not in result.stdout + result.stderr
+        assert 'app-authority-test' not in result.stdout + result.stderr
         if code: assert not result.stdout
         return json.loads(result.stdout if code==0 else result.stderr)
     assert cli('iam')['app_id'] == 'ting'
+    # App authority works in a fresh profile: no IAM user login or Ting session.
+    app_org = '7359ca28-7878-41e4-82c9-f28c073c622b'
+    app_raw = ('{ "org_id":"' + app_org + '", "type":"dm.msg.received", "for":"si:recipient", "key":"app/retry-1", "data":{"text":"original bytes"}, "metadata":{} }').encode()
+    Path(d, 'app-send.json').write_bytes(app_raw)
+    Path(d, 'app-token.txt').write_text('app-authority-test\n')
+    for args, token in [(['--ata-stdin'], 'app-authority-test'), (['--ata-file', 'app-token.txt'], 'app-authority-test'), (['--proof-token-stdin'], 'legacy-obo-test')]:
+        cli('send', '--request-file', 'app-send.json', *args, text=token + '\n' if args[-1].endswith('stdin') else None)
+        assert received[-1] == ('/v1/tings', 'Bearer ' + token, app_raw)
+    for command, path in [('list', '/v1/sent/query'), ('get', '/v1/sent/query')]:
+        filename = 'app-sent-' + command + '.json'
+        positional = ['msg_test'] if command == 'get' else []
+        cli('sent', command, *positional, '--app', 'dm', '--org', app_org, '--write-request', filename)
+        raw = Path(d, filename).read_bytes()
+        cli('sent', command, '--request-file', filename, '--ata-file', 'app-token.txt')
+        assert received[-1] == (path, 'Bearer app-authority-test', raw)
+    cli('subscriptions', 'revoke', 'sub_test', '--app', 'dm', '--org', app_org, '--write-request', 'app-revoke.json')
+    raw = Path(d, 'app-revoke.json').read_bytes()
+    assert json.loads(raw) == {'org_id': app_org, 'app_id': 'dm', 'id': 'sub_test'}
+    cli('subscriptions', 'revoke', '--request-file', 'app-revoke.json', '--ata-stdin', text='app-authority-test\n')
+    assert received[-1] == ('/v1/subscriptions/revoke', 'Bearer app-authority-test', raw)
+    assert not Path(d, '.ting', 'session.json').exists()
+    assert not any(path in ['/v1/me', '/v1/orgs', '/v1/session'] for path, _, _ in received)
     cli('login','--token-stdin',text='short-lived-test\n',code=1)
     attempt_path=Path(d,'.ting','login-attempt.json')
     attempt=json.loads(attempt_path.read_text()); attempt['created']-=125
@@ -407,5 +430,5 @@ WantedBy=multi-user.target
                 if os.lstat(socket_dir).st_uid == os.getuid(): shutil.rmtree(socket_dir, ignore_errors=True)
                 else: subprocess.run(['sudo', '-n', 'rm', '-rf', str(socket_dir)], capture_output=True)
 server.shutdown()
-print('CLI smoke passed: login replacement/recovery, canonical org, exact proof bytes, sent read/unread, private files, input rejection, origin isolation'
+print('CLI smoke passed: login replacement/recovery, canonical org, no-session ATA app sends/queries/revocation, exact proof bytes, sent read/unread, private files, input rejection, origin isolation'
       + (f', on-demand daemon rows {", ".join(sorted(set(passed), key=int))}.' if passed else '; on-demand daemon rows skipped.'))
