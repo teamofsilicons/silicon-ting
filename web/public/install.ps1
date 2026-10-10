@@ -1,6 +1,6 @@
 #requires -Version 5.1
 #requires -RunAsAdministrator
-param([string]$Version = 'v0.2.1')
+param([string]$Version = 'v0.3.0')
 $ErrorActionPreference = 'Stop'
 $repository = 'https://github.com/teamofsilicons/silicon-ting'
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -32,5 +32,5 @@ try {
     Start-ScheduledTask -TaskName 'SiliconTingDaemon'
     $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine')
     if (($machinePath -split ';') -notcontains $destination) { [Environment]::SetEnvironmentVariable('Path', "$machinePath;$destination", 'Machine') }
-    Write-Host "Installed Ting $Version and its shared system task. Open a new terminal and run ting --help. No Silicon Accounts login was performed."
+    Write-Host "Installed Ting $Version and its shared system task. Open a new terminal and run ting --help. No Silicon Accounts sign-in was performed."
 } finally { Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue }
