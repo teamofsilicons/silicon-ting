@@ -17,7 +17,9 @@ fn arg(name: &'static str) -> Arg {
     Arg::new(name)
 }
 fn command(name: &'static str, about: &'static str) -> Command {
-    Command::new(name).about(about).after_help("Global options: --org ORG --api-url ORIGIN --json\nSee also: ting docs, ting COMMAND --help")
+    Command::new(name).about(about).after_help(
+        "Global options: --api-url ORIGIN --json\nSee also: ting docs, ting COMMAND --help",
+    )
 }
 fn group(name: &'static str, about: &'static str) -> Command {
     command(name, about)
@@ -36,38 +38,23 @@ fn filters(c: Command) -> Command {
         .arg(a("type"))
         .arg(a("read").value_parser(["true", "false"]))
 }
-fn proof(c: Command, obo: bool) -> Command {
-    let c = c
-        .arg(a("write-request").conflicts_with_all([
-            "request-file",
-            "proof-token-stdin",
-            "proof-token-file",
-        ]))
-        .arg(a("request-file"))
-        .arg(flag("proof-token-stdin").conflicts_with("proof-token-file"))
-        .arg(a("proof-token-file"));
-    if obo {
-        c.arg(flag("obo-stdin").conflicts_with_all([
-            "obo-file",
-            "write-request",
-            "proof-token-stdin",
-            "proof-token-file",
-        ]))
-        .arg(a("obo-file").conflicts_with_all([
-            "write-request",
-            "proof-token-stdin",
-            "proof-token-file",
-        ]))
-    } else {
-        c.mut_arg("proof-token-stdin", |a| {
-            a.visible_alias("ata-stdin")
-                .help("Read an ATA app token from stdin; legacy OBO is also accepted")
-        })
-        .mut_arg("proof-token-file", |a| {
-            a.visible_alias("ata-file")
-                .help("Read an ATA app token from a private file; legacy OBO is also accepted")
-        })
-    }
+fn proof(c: Command, delegated: bool) -> Command {
+    c.arg(a("write-request").conflicts_with_all([
+        "request-file",
+        "app-token-stdin",
+        "app-token-file",
+    ]))
+    .arg(a("request-file"))
+    .arg(
+        flag("app-token-stdin")
+            .conflicts_with("app-token-file")
+            .help(if delegated {
+                "Read the recipient's delegated Silicon Accounts app token from stdin"
+            } else {
+                "Read a scoped Silicon Accounts app token from stdin"
+            }),
+    )
+    .arg(a("app-token-file").help("Read a scoped Silicon Accounts app token from a private file"))
 }
 fn prefs(c: Command) -> Command {
     app(c)
@@ -76,23 +63,22 @@ fn prefs(c: Command) -> Command {
 }
 fn cli() -> Command {
     Command::new("ting").about("Durable notifications for carbons and silicons.").disable_version_flag(true)
- .arg(flag("json").global(true)).arg(a("org").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
- .after_help("Receive: ting login --token-stdin → ting org use tos → ting webhook http://localhost:8080/ting\nSend: ting send --org ORG_ID --type 'dm.msg.received' --for ID --key KEY --data '{}' --write-request send.json\nRegister the recipient once with OBO, then send with an IAM ATA app token: ting send --request-file send.json --ata-stdin\nUse the canonical recipient org_id returned by subscription registration; sending does not require a Ting login.\nAll commands support --help. Documentation: ting docs")
- .subcommand(command("iam","Show Ting application information"))
+ .arg(flag("json").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
+ .after_help("Receive: ting login --token-stdin → ting webhook http://localhost:8080/ting\nSend: ting send --type dm.msg.received --for si:recipient --key KEY --data '{}' --write-request send.json\nRegister the recipient once with an delegated Accounts token, then send with an app token: ting send --request-file send.json --app-token-stdin\nAll commands support --help. Documentation: ting docs")
+ .subcommand(command("accounts","Show Ting Silicon Accounts integration"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
- .subcommand(command("login","Exchange an IAM short-lived login token; never a password").arg(arg("token").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
+ .subcommand(command("login","Sign in with a Silicon Accounts short-lived token").arg(arg("token").conflicts_with_all(["token-stdin","slt"])).arg(a("slt").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","slt","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
- .subcommand(group("org","Choose an IAM organisation").subcommand(page(command("list","List accessible organisations"))).subcommand(command("current","Show effective organisation and selection source")).subcommand(command("use","Validate and save an organisation").arg(arg("id").required(true))))
- .subcommand(group("apps","Inspect visible Honeycomb applications").subcommand(page(command("list","List visible applications"))).subcommand(group("authorize","Approve Honeycomb catalog access separately from login").subcommand(command("start","Review the returned consent URL in IAM").arg(a("key").help("Reuse this idempotency key when retrying a start"))).subcommand(command("status","Inspect one authorization").arg(arg("id").required(true))).subcommand(command("complete","Save explicit approval; tokens remain on the server").arg(arg("id").required(true)).arg(a("state").required(true)).arg(a("code-file").required(true).help("Private file containing the single-use IAM code")))))
+ .subcommand(group("apps","Inspect Silicon Apps applications").subcommand(page(command("list","List visible applications"))))
  .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
- .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute an OBO subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
+ .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute a recipient-approved subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
  .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
- .subcommand(group("sent","Inspect and update application sent history using an ATA app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
+ .subcommand(group("sent","Inspect and update application sent history using a Silicon Accounts app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
  .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
  .subcommand(command("unhook","Detach one destination while retaining its stable ID and pending history").arg(arg("id").required(true)))
- .subcommand(group("daemon","Start or inspect the local Ting receiver").subcommand(command("start","Start the local receiver if it is not running; needs no login")).subcommand(command("status","Report status without starting the daemon")).subcommand(command("reconnect","Resume this identity's attached or paused hooks in the selected org")))
+ .subcommand(group("daemon","Start or inspect the local Ting receiver").subcommand(command("start","Start the local receiver if it is not running; needs no login")).subcommand(command("status","Report status without starting the daemon")).subcommand(command("reconnect","Resume this identity's attached or paused hooks for this account")))
  .subcommand(group("config","Manage private profile settings").subcommand(command("list","List settings")).subcommand(command("get","Get a setting").arg(arg("key").required(true))).subcommand(command("set","Set a setting").arg(arg("key").required(true)).arg(arg("value").required(true).value_parser(["true","false"]))))
  .subcommand(group("bug","Submit an explicit bug report").subcommand(command("report","Upload supplied report and attachments to Ting support storage").arg(a("title").required(true)).arg(a("body").conflicts_with("body-file")).arg(a("body-file")).arg(a("attach").action(ArgAction::Append)).arg(a("pr"))))
 }
@@ -133,24 +119,6 @@ fn list_query(m: &ArgMatches, extra: &[(&str, &str)]) -> Vec<(String, String)> {
     }
     q
 }
-fn selection(root: &ArgMatches, settings: &Settings) -> Result<Option<(String, &'static str)>> {
-    let v = if let Some(o) = s(root, "org") {
-        Some((o.to_owned(), "--org"))
-    } else if let Ok(o) = std::env::var("SILICON_ORG") {
-        Some((o, "SILICON_ORG"))
-    } else {
-        settings.org.clone().map(|o| (o, "saved"))
-    };
-    if let Some((v, _)) = &v {
-        nonempty(v, "Org")?;
-    }
-    Ok(v)
-}
-fn selected<'a>(v: &'a Option<(String, &str)>) -> Result<&'a str> {
-    v.as_ref()
-        .map(|(s, _)| s.as_str())
-        .ok_or_else(|| Error::input("Select an org with --org, SILICON_ORG or ting org use."))
-}
 fn origin(root: &ArgMatches) -> Result<String> {
     let raw=s(root,"api-url").map(str::to_owned).or_else(||std::env::var("TING_API_URL").ok()).or_else(||Some(option_env!("TING_API_URL").unwrap_or("https://backend.ting.teamofsilicons.com").to_owned())).ok_or_else(||Error::input("This development build has no published API origin. Supply --api-url or TING_API_URL."))?;
     api_origin(&raw)
@@ -158,27 +126,23 @@ fn origin(root: &ArgMatches) -> Result<String> {
 async fn recipient(
     client: &Client,
     profile: &Profile,
-    test: &TestHeaders,
     method: &str,
     path: &str,
     body: Option<Value>,
 ) -> Result<Value> {
     let session = profile.session(&client.origin)?;
-    client
-        .json(method, path, body, Some(&session.token), test)
-        .await
+    client.json(method, path, body, Some(&session.token)).await
 }
 fn proof_mode(m: &ArgMatches) -> bool {
-    ["write-request", "request-file", "proof-token-file"]
+    ["write-request", "request-file", "app-token-file"]
         .iter()
         .any(|k| s(m, k).is_some())
-        || b(m, "proof-token-stdin")
+        || b(m, "app-token-stdin")
 }
 async fn execute_proof(
     op: ProofOperation,
     m: &ArgMatches,
     root: &ArgMatches,
-    org: Option<&str>,
     sent_read: Option<bool>,
 ) -> Result<Value> {
     let building = [
@@ -203,30 +167,16 @@ async fn execute_proof(
                 "Request-file execution cannot include body-building flags or positional IDs.",
             ));
         }
-        let obo = op == ProofOperation::Register;
-        let stdin = b(
-            m,
-            if obo {
-                "obo-stdin"
-            } else {
-                "proof-token-stdin"
-            },
-        );
-        let file_secret = s(m, if obo { "obo-file" } else { "proof-token-file" });
+        let stdin = b(m, "app-token-stdin");
+        let file_secret = s(m, "app-token-file");
         if stdin == file_secret.is_some() {
             return Err(Error::input(
-                "Execution requires exactly one matching token input (--obo-* for registration; --ata-* or --proof-token-* for app operations).",
-            ));
-        }
-        if obo && (b(m, "proof-token-stdin") || s(m, "proof-token-file").is_some()) {
-            return Err(Error::input(
-                "Subscription registration requires --obo-stdin or --obo-file.",
+                "Execution requires exactly one app token input: --app-token-stdin or --app-token-file.",
             ));
         }
         let p = Prepared::new(
             op,
             fs::read(file).map_err(|_| Error::input("Could not read request file."))?,
-            org,
         )?;
         if sent_read.is_some_and(|read| p.value["read"] != read) {
             return Err(Error::input(
@@ -234,12 +184,11 @@ async fn execute_proof(
             ));
         }
         let proof = secret(file_secret)?;
-        let test = TestHeaders::environment()?;
         let api = origin(root)?;
         if op == ProofOperation::Send && s(m, "transport") == Some("websocket") {
-            return service::ipc_starting(json!({"op":"send","api_url":api,"proof_token":proof,"body":String::from_utf8(p.body).map_err(|_|Error::input("Request must be UTF-8."))?,"headers":test})).await;
+            return service::ipc_starting(json!({"op":"send","api_url":api,"proof_token":proof,"body":String::from_utf8(p.body).map_err(|_|Error::input("Request must be UTF-8."))?})).await;
         }
-        let mut result = p.execute(&Client::new(&api)?, &proof, &test).await?;
+        let mut result = p.execute(&Client::new(&api)?, &proof).await?;
         if op == ProofOperation::SentList
             && let Some(items) = result["items"].as_array_mut()
         {
@@ -252,15 +201,11 @@ async fn execute_proof(
         }
         return Ok(result);
     }
-    if b(m, "proof-token-stdin")
-        || s(m, "proof-token-file").is_some()
-        || b(m, "obo-stdin")
-        || s(m, "obo-file").is_some()
-    {
-        return Err(Error::input("Proof inputs require --request-file."));
+    if b(m, "app-token-stdin") || s(m, "app-token-file").is_some() {
+        return Err(Error::input("App token inputs require --request-file."));
     }
     let out = required(m, "write-request")?;
-    let mut v = json!({"org_id":org.ok_or_else(||Error::input("Select an org before preparing a request."))?});
+    let mut v = json!({});
     let obj = v.as_object_mut().unwrap();
     for (arg, field) in [
         ("app", "app_id"),
@@ -298,12 +243,11 @@ async fn execute_proof(
         obj.insert("message_ids".into(), json!(unique_ids(ids)?));
         obj.insert("read".into(), json!(read));
     }
-    Prepared::new(op, serde_json::to_vec(&v).unwrap(), org)?.write(Path::new(out))
+    Prepared::new(op, serde_json::to_vec(&v).unwrap())?.write(Path::new(out))
 }
 async fn daemon(
     profile: &Profile,
     api: &str,
-    org: &str,
     op: &str,
     mut args: Value,
     start: bool,
@@ -312,7 +256,6 @@ async fn daemon(
     let o = args.as_object_mut().unwrap();
     o.insert("op".into(), json!(op));
     o.insert("api_url".into(), json!(api));
-    o.insert("org_id".into(), json!(org));
     o.insert("profile".into(), json!(profile.dir));
     o.insert("session_token".into(), json!(session.token));
     if start {
@@ -338,28 +281,26 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             json!({"topic":topic,"content":if topic=="usage"{include_str!("../docs/cli.md")}else{include_str!("../docs/api.md")} }),
         );
     }
-    if name == "iam" {
+    if name == "accounts" {
         return Ok(
-            json!({"app_id":"ting","api_version":"v1","repository_url":option_env!("TING_REPOSITORY_URL").unwrap_or("https://github.com/teamofsilicons/silicon-ting"),"docs_url":option_env!("TING_DOCS_URL").unwrap_or("https://ting.teamofsilicons.com/docs"),"rust_package":option_env!("TING_RUST_PACKAGE").unwrap_or("silicon-ting-client")}),
+            json!({"app_id":"ting","accounts_url":"https://accounts.teamofsilicons.com","apps_url":"https://apps.teamofsilicons.com","api_version":"v1","repository_url":option_env!("TING_REPOSITORY_URL").unwrap_or("https://github.com/teamofsilicons/silicon-ting"),"docs_url":option_env!("TING_DOCS_URL").unwrap_or("https://ting.teamofsilicons.com/docs"),"rust_package":option_env!("TING_RUST_PACKAGE").unwrap_or("silicon-ting-client")}),
         );
     }
     if name == "daemon" && m.subcommand_name() == Some("start") {
-        // Needs no login or org and sends no IPC op; cheap enough for a liveness tick.
+        // Needs no login and sends no IPC op; cheap enough for a liveness tick.
         service::ensure_daemon().await?;
         return Ok(json!({"running":true}));
     }
     let profile = Profile::current()?;
     let profile_mutation = name == "logout"
         || name == "login" && m.subcommand().is_none()
-        || name == "config" && m.subcommand_name() == Some("set")
-        || name == "org" && m.subcommand_name() == Some("use");
+        || name == "config" && m.subcommand_name() == Some("set");
     let _profile_lock = if profile_mutation {
         Some(profile.lock()?)
     } else {
         None
     };
     let mut settings: Settings = profile.read("settings.json")?.unwrap_or_default();
-    let selection = selection(root, &settings)?;
     if name == "config" {
         let (sub, m) = m.subcommand().unwrap();
         let enabled = settings.telemetry.unwrap_or(true);
@@ -382,13 +323,8 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         };
         return Ok(json!({"key":key,"value":value}));
     }
-    if name == "org" && m.subcommand_name() == Some("current") {
-        let org = selected(&selection)?;
-        return Ok(json!({"org_id":org,"source":selection.as_ref().unwrap().1}));
-    }
-    let org_opt = selection.as_ref().map(|(s, _)| s.as_str());
     if name == "send" {
-        return execute_proof(ProofOperation::Send, m, root, org_opt, None).await;
+        return execute_proof(ProofOperation::Send, m, root, None).await;
     }
     if name == "sent" {
         let (sub, m) = m.subcommand().unwrap();
@@ -400,7 +336,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             },
             m,
             root,
-            org_opt,
             ["mark-read", "mark-unread"]
                 .contains(&sub)
                 .then_some(sub == "mark-read"),
@@ -418,7 +353,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 },
                 sm,
                 root,
-                org_opt,
                 None,
             )
             .await;
@@ -426,7 +360,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
     }
     let api = origin(root)?;
     let client = Client::new(&api)?;
-    let test = TestHeaders::environment()?;
     if name == "login" {
         if m.subcommand_name() == Some("status") {
             let sess = match profile.session(&api) {
@@ -436,11 +369,8 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 }
                 Err(e) => return Err(e),
             };
-            return match client
-                .json("GET", "/v1/me", None, Some(&sess.token), &test)
-                .await
-            {
-                Ok(v) => Ok(json!({"authenticated":true,"id":v["id"]})),
+            return match client.json("GET", "/v1/me", None, Some(&sess.token)).await {
+                Ok(v) => Ok(v),
                 Err(e)
                     if ["authentication_required", "session_expired"]
                         .contains(&e.code.as_str()) =>
@@ -452,7 +382,11 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         }
         let previous_session = profile.read::<Session>("session.json")?;
         let previous = profile.read::<Value>("login-attempt.json")?;
-        let slt = match (s(m, "token"), b(m, "token-stdin"), b(m, "recover")) {
+        let slt = match (
+            s(m, "slt").or_else(|| s(m, "token")),
+            b(m, "token-stdin"),
+            b(m, "recover"),
+        ) {
             (Some(t), false, false) => {
                 nonempty(t, "Token")?;
                 t.to_owned()
@@ -475,22 +409,18 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             .as_secs();
         let attempt = match previous {
             Some(a) => {
-                let same_test = a.get("test").map_or(
-                    test.app_secret.is_none() && test.key.is_none(),
-                    |original| original == &json!(test),
-                );
-                if a["api_url"] != api || a["slt"] != slt || !same_test {
+                if a["api_url"] != api || a["slt"] != slt {
                     return Err(Error::new(
                         "login_attempt_pending",
                         "The previous login attempt has an uncertain outcome.",
-                        "Use login --recover with the original API and testing selector. A new login cannot cancel the earlier attempt.",
+                        "Use login --recover with the original API. A new login cannot cancel the earlier attempt.",
                         false,
                     ));
                 }
                 a
             }
             None => {
-                let a = json!({"api_url":api,"slt":slt,"key":uuid::Uuid::new_v4().to_string(),"created":now,"test":test});
+                let a = json!({"api_url":api,"slt":slt,"key":uuid::Uuid::new_v4().to_string(),"created":now});
                 profile.save("login-attempt.json", &a)?;
                 a
             }
@@ -501,18 +431,38 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 "/v1/session",
                 Some(serde_json::to_vec(&json!({"slt":slt})).unwrap()),
                 None,
-                &test,
                 attempt["key"].as_str(),
             )
-            .await?;
+            .await;
+        let v = match v {
+            Ok(value) => value,
+            Err(error) => {
+                if [
+                    "invalid_input",
+                    "session_expired",
+                    "authentication_required",
+                    "login_outcome_unknown",
+                ]
+                .contains(&error.code.as_str())
+                {
+                    profile.remove("login-attempt.json")?;
+                }
+                return Err(error);
+            }
+        };
         let sess = Session {
             api_url: api,
-            id: v["id"].as_str().ok_or_else(Error::network)?.into(),
+            id: v["identity"]["id"]
+                .as_str()
+                .ok_or_else(Error::network)?
+                .into(),
             token: v["session_token"]
                 .as_str()
                 .ok_or_else(Error::network)?
                 .into(),
-            context: v.get("context").cloned(),
+            uuid: v["identity"]["uuid"].as_str().map(str::to_owned),
+            expires_at: v["expires_at"].as_str().map(str::to_owned),
+            context: v.get("identity").cloned(),
         };
         if let Some(old) = previous_session
             && let Err(e) = ipc(
@@ -525,17 +475,12 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         }
         profile.save("session.json", &sess)?;
         profile.remove("login-attempt.json")?;
-        return Ok(json!({"authenticated":true,"id":sess.id}));
+        return Ok(
+            json!({"authenticated":true,"id":sess.id,"uuid":sess.uuid,"expires_at":sess.expires_at}),
+        );
     }
     if name == "logout" {
-        if profile.read::<Value>("login-attempt.json")?.is_some() {
-            return Err(Error::new(
-                "login_cleanup_pending",
-                "A previous login still has an uncertain outcome.",
-                "Use login --recover with the original API and selector, then log out the recovered session.",
-                false,
-            ));
-        }
+        profile.remove("login-attempt.json")?;
         let sess = match profile.session(&api) {
             Ok(s) => s,
             Err(e) if e.code == "authentication_required" => {
@@ -547,9 +492,11 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             json!({"op":"logout","profile":profile.dir,"api_url":api,"session_token":sess.token}),
         )
         .await;
+        let cleanup = profile.remove("session.json");
         let remote = client
-            .json("DELETE", "/v1/session", None, Some(&sess.token), &test)
+            .json("DELETE", "/v1/session", None, Some(&sess.token))
             .await;
+        cleanup?;
         if let Err(e) = local
             && !no_local_daemon(&e)
         {
@@ -560,8 +507,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         {
             return Err(error);
         }
-        profile.remove("session.json")?;
-        profile.remove("login-attempt.json")?;
         return Ok(json!({"authenticated":false}));
     }
     if name == "bug" {
@@ -610,73 +555,15 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         if serde_json::to_vec(&body).unwrap().len() > 192 * 1024 {
             return Err(Error::input("Complete bug report exceeds 192 KiB."));
         }
-        return recipient(&client, &profile, &test, "POST", "/v1/bugs", Some(body)).await;
+        return recipient(&client, &profile, "POST", "/v1/bugs", Some(body)).await;
     }
-    if name == "org" {
-        let (sub, m) = m.subcommand().unwrap();
-        let v = recipient(&client, &profile, &test, "GET", "/v1/orgs", None).await?;
-        if sub == "list" {
-            return Ok(v);
-        }
-        let id = required(m, "id")?;
-        nonempty(id, "Org")?;
-        let canonical = v["items"]
-            .as_array()
-            .and_then(|xs| xs.iter().find(|x| x["id"] == id || x["handle"] == id))
-            .and_then(|x| x["id"].as_str())
-            .ok_or_else(|| {
-                Error::new(
-                    "permission_denied",
-                    "The selected organisation is not accessible.",
-                    "Choose an org shown by ting org list.",
-                    false,
-                )
-            })?;
-        settings.org = Some(canonical.into());
-        profile.save("settings.json", &settings)?;
-        return Ok(json!({"org_id":canonical,"saved":true}));
-    }
-    let org = selected(&selection)?;
-    let base = format!("/v1/orgs/{}", segment(org));
+    let base = "/v1";
     match name {
         "apps" => {
-            let (sub, m) = m.subcommand().unwrap();
-            if sub == "authorize" {
-                let (step, m) = m.subcommand().unwrap();
-                let (method, path, body) = match step {
-                    "start" => (
-                        "POST",
-                        format!("{base}/catalog-authorizations"),
-                        Some(
-                            json!({"idempotency_key":s(m,"key").map(str::to_owned).unwrap_or_else(||uuid::Uuid::new_v4().to_string())}),
-                        ),
-                    ),
-                    "status" => (
-                        "GET",
-                        format!(
-                            "{base}/catalog-authorizations/{}",
-                            segment(required(m, "id")?)
-                        ),
-                        None,
-                    ),
-                    "complete" => (
-                        "POST",
-                        format!(
-                            "{base}/catalog-authorizations/{}/complete",
-                            segment(required(m, "id")?)
-                        ),
-                        Some(
-                            json!({"state":required(m,"state")?,"code":secret(Some(required(m,"code-file")?))?}),
-                        ),
-                    ),
-                    _ => return Err(Error::input("Unknown authorization operation")),
-                };
-                return recipient(&client, &profile, &test, method, &path, body).await;
-            }
+            let (_, m) = m.subcommand().unwrap();
             recipient(
                 &client,
                 &profile,
-                &test,
                 "GET",
                 &query(&format!("{base}/apps"), &list_query(m, &[])),
                 None,
@@ -689,7 +576,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 return recipient(
                     &client,
                     &profile,
-                    &test,
                     "GET",
                     &query(
                         &format!("{base}/apps/{}/types", segment(required(m, "app")?)),
@@ -712,7 +598,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     "POST",
                     &path,
                     Some(json!({"type":t,"description":d})),
@@ -722,7 +607,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     "PATCH",
                     &format!("{path}/{}", segment(t)),
                     Some(json!({"description":d})),
@@ -737,7 +621,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     if enabled.is_some() { "PUT" } else { "GET" },
                     &format!(
                         "{base}/subscriptions/{}/required-delivery",
@@ -750,7 +633,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     "GET",
                     &query(
                         &format!("{base}/subscriptions"),
@@ -763,7 +645,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     "DELETE",
                     &format!("{base}/subscriptions/{}", segment(required(m, "id")?)),
                     None,
@@ -783,7 +664,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                     let mut v = recipient(
                         &client,
                         &profile,
-                        &test,
                         "GET",
                         &query(&format!("{base}/inbox"), &q),
                         None,
@@ -803,7 +683,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                     recipient(
                         &client,
                         &profile,
-                        &test,
                         "GET",
                         &format!("{base}/inbox/{}", segment(required(m, "id")?)),
                         None,
@@ -815,7 +694,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                     recipient(
                         &client,
                         &profile,
-                        &test,
                         "POST",
                         &format!("{base}/inbox/read"),
                         Some(json!({"message_ids":ids})),
@@ -834,7 +712,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             }
             let path = format!("{base}/preferences");
             if sub == "set" {
-                recipient(&client,&profile,&test,"PUT",&path,Some(json!({"app_id":required(m,"app")?,"service":s(m,"service"),"type":s(m,"type"),"enabled":required(m,"enabled")?=="true"}))).await
+                recipient(&client,&profile,"PUT",&path,Some(json!({"app_id":required(m,"app")?,"service":s(m,"service"),"type":s(m,"type"),"enabled":required(m,"enabled")?=="true"}))).await
             } else {
                 let mut q = list_query(
                     m,
@@ -846,7 +724,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 recipient(
                     &client,
                     &profile,
-                    &test,
                     if sub == "list" { "GET" } else { "DELETE" },
                     &query(&path, &q),
                     None,
@@ -859,13 +736,12 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 let mut v = recipient(
                     &client,
                     &profile,
-                    &test,
                     "GET",
                     &query(&format!("{base}/webhooks"), &list_query(sm, &[])),
                     None,
                 )
                 .await?;
-                let local = daemon(&profile, &api, org, "destinations", json!({}), false)
+                let local = daemon(&profile, &api, "destinations", json!({}), false)
                     .await
                     .unwrap_or(json!({}));
                 if let Some(items) = v["items"].as_array_mut() {
@@ -887,25 +763,15 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             } else {
                 None
             };
-            daemon(&profile,&api,org,"webhook",json!({"url":url,"id":s(m,"id"),"secret":sec,"clear_secret":b(m,"clear-secret"),"health_url":s(m,"health-url"),"clear_health_url":b(m,"clear-health-url"),"takeover":b(m,"takeover"),"headers":test}),true).await
+            daemon(&profile,&api,"webhook",json!({"url":url,"id":s(m,"id"),"secret":sec,"clear_secret":b(m,"clear-secret"),"health_url":s(m,"health-url"),"clear_health_url":b(m,"clear-health-url"),"takeover":b(m,"takeover")}),true).await
         }
         "unhook" => {
             let id = required(m, "id")?;
-            match daemon(
-                &profile,
-                &api,
-                org,
-                "unhook",
-                json!({"id":id,"headers":test}),
-                false,
-            )
-            .await
-            {
+            match daemon(&profile, &api, "unhook", json!({"id":id}), false).await {
                 Err(e) if no_local_daemon(&e) => {
                     recipient(
                         &client,
                         &profile,
-                        &test,
                         "DELETE",
                         &format!("{base}/webhooks/{}", segment(id)),
                         None,
@@ -917,15 +783,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         }
         "daemon" => {
             let (sub, _) = m.subcommand().unwrap();
-            let v = daemon(
-                &profile,
-                &api,
-                org,
-                sub,
-                json!({"headers":test}),
-                sub == "reconnect",
-            )
-            .await;
+            let v = daemon(&profile, &api, sub, json!({}), sub == "reconnect").await;
             if sub == "status" {
                 match v {
                     Err(e) if e.code == "daemon_unavailable" => {
@@ -967,7 +825,7 @@ async fn main() {
     }
     if let Some((command, sub)) = matches.subcommand()
         && result.is_ok()
-        && !["docs", "iam", "config", "org"].contains(&command)
+        && !["docs", "accounts", "config"].contains(&command)
         && !(command == "daemon" && sub.subcommand_name() == Some("start"))
         && s(leaf, "write-request").is_none()
         && let (Ok(api), Ok(profile)) = (origin(&matches), Profile::current())
@@ -999,97 +857,5 @@ async fn main() {
             }
             std::process::exit(if e.code == "invalid_input" { 2 } else { 1 })
         }
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn ata_aliases_preserve_legacy_flags_and_keep_registration_obo_only() {
-        for command in [
-            vec!["send"],
-            vec!["sent", "list"],
-            vec!["sent", "get"],
-            vec!["sent", "mark-read"],
-            vec!["subscriptions", "list"],
-            vec!["subscriptions", "revoke"],
-        ] {
-            let mut args = vec!["ting"];
-            args.extend(command);
-            args.extend(["--request-file", "request.json", "--ata-stdin"]);
-            let parsed = cli().try_get_matches_from(args.clone()).unwrap();
-            let mut operation = parsed.subcommand().unwrap().1;
-            if let Some((_, child)) = operation.subcommand() {
-                operation = child;
-            }
-            assert!(b(operation, "proof-token-stdin"));
-            args.extend(["--proof-token-file", "token.txt"]);
-            assert!(cli().try_get_matches_from(args).is_err());
-        }
-        assert!(
-            cli()
-                .try_get_matches_from([
-                    "ting",
-                    "subscriptions",
-                    "register",
-                    "--request-file",
-                    "request.json",
-                    "--ata-stdin"
-                ])
-                .is_err()
-        );
-        assert!(
-            cli()
-                .try_get_matches_from([
-                    "ting",
-                    "subscriptions",
-                    "register",
-                    "--request-file",
-                    "request.json",
-                    "--obo-stdin"
-                ])
-                .is_ok()
-        );
-        let parsed = cli()
-            .try_get_matches_from([
-                "ting",
-                "send",
-                "--request-file",
-                "request.json",
-                "--ata-file",
-                "token.txt",
-            ])
-            .unwrap();
-        assert_eq!(
-            s(parsed.subcommand().unwrap().1, "proof-token-file"),
-            Some("token.txt")
-        );
-    }
-    #[test]
-    fn command_contract() {
-        cli().debug_assert();
-        assert!(
-            cli()
-                .try_get_matches_from(["ting", "inbox", "list", "--silent", "--all"])
-                .is_err()
-        );
-        assert!(
-            cli()
-                .try_get_matches_from([
-                    "ting",
-                    "preferences",
-                    "set",
-                    "--app",
-                    "dm",
-                    "--enabled",
-                    "yes"
-                ])
-                .is_err()
-        );
-        assert!(
-            cli()
-                .try_get_matches_from(["ting", "send", "--request-file", "x", "--json"])
-                .is_ok()
-        );
     }
 }

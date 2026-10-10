@@ -1,17 +1,19 @@
 # Ting browser workspace
 
-SolidJS + TypeScript. Uses the same-origin API and its HttpOnly `ting_session` cookie; no client credentials, fake data, or development authentication bypass.
+SolidJS and TypeScript with the [Silicon UI](https://ui.teamofsilicons.com) foundation and native controls adapted from its button and input styles. The copied MIT-licensed foundation and attribution live in `src/silicon-ui/`.
 
 ```sh
 npm ci
-npm run dev # proxies /v1 and its WebSocket to 127.0.0.1:8080
+npm run dev
 npm run build
-npm test
-npm run test:browser # while the dev server is running; requires Chrome
 ```
 
-Set `TING_DEV_API` before starting Vite to change the development API. The browser smoke check intercepts the API in its isolated Chrome context only; fixtures are never bundled into the app.
+The development server proxies `/v1` and WebSockets to `127.0.0.1:8080`. Set `TING_DEV_API` to change that address. The production origin must route `/v1/*`, including WebSocket upgrades, to the backend and other paths to the frontend.
 
-Production frontend assets are hosted on Vercel. The canonical public origin routes `/v1/*` (including WebSocket upgrades) to the backend, and all other paths to this Vercel deployment. Direct Vercel preview URLs are frontend previews; authentication requires the canonical same-origin routing. Do not split browser API and WebSocket traffic onto different hosts: the session cookie is intentionally host-only.
+Carbon sign-in opens Silicon Accounts with a secure popup and full-page fallback. Silicons can paste a login token from `silicon-accounts login --app ting -q`. The backend exchanges credentials and sets a persistent, HttpOnly, host-only `ting_session` cookie. Credentials are never saved to browser storage. Sessions remain active until token expiry or logout; connection errors show a retry state without clearing identity. Account switching clears cached account data before loading new results.
 
-Docs are available at `/docs`; raw API/CLI contracts at `/docs/api.md` and `/docs/cli.md`. The deployment provides `/install.sh`. Browser telemetry preference is stored locally as `ting.telemetry.enabled` (default enabled); Set `VITE_SS_ANALYTICS_TABLE` and `VITE_SS_EVENTS_TABLE` to the actual provisioned Space Station tables to enable the official browser SDK. The backend provides `/v1/telemetry`, validates allowed table IDs, adds server-held ingest keys, and forwards the SDK `{ table, events }` envelope. No keys are included in browser assets. Telemetry uses the original fetch transport, waits one minute after an ingestion failure, and excludes extension runtime errors and rejection events without source attribution. Application runtime errors from this origin remain observable.
+All application, inbox, preference, subscription and webhook requests are account-scoped. Silicon Apps supplies the catalog; app authors can manage notification types. The developer portal manages app configuration and publication.
+
+Documentation is available at `/docs` and `/docs/api.md`, `/docs/cli.md`, `/docs/integration.md`, and `/docs/understanding.md`. Installers are served at `/install.sh` and `/install.ps1`.
+
+Browser diagnostics use the same-origin `/v1/telemetry` endpoint when `VITE_SS_ANALYTICS_TABLE` and `VITE_SS_EVENTS_TABLE` are configured. Ingestion credentials remain on the backend. The browser preference is stored locally as `ting.telemetry.enabled`. Payload bodies and credentials are excluded from telemetry.

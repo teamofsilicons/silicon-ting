@@ -4,6 +4,6 @@
   "go_version": "go1.27.1",
   "target": "linux/arm64",
   "sha256": "246f7f20f2d43ef0f03a61d5d09147280a613e91add9db8e1372ac5b5943869c",
-  "reason": "Stable2.11.4 drops IAM_TEST_APP_SECRET; explicit upstream allowlist preserves required test contract while keeping other underscore headers blocked.",
-  "verification": "Official upstream underscore header tests pass; LinuxARM64 build verified."
+  "reason": "Retain the existing pinned production Caddy source and toolchain for reproducible gateway builds.",
+  "verification": "The backend release workflow builds this commit for Linux ARM64 and validates the production Caddy configuration."
 }

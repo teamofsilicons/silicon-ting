@@ -12,7 +12,7 @@ The installer checks the release's SHA-256 manifest, installs `ting` and `ting-d
 TING_INSTALL_FROM_SOURCE=1 sh scripts/install.sh
 ```
 
-Honeycomb installs the `ting` and `ting-daemon` executables side by side with `honeycomb install 'ting'`. Honeycomb installs need no further step; the installer is optional, for start at boot. On Windows, the optional PowerShell installer below runs from an elevated prompt. `cargo install silicon-ting-cli` installs the CLI only; webhooks also need `ting-daemon` from a release archive, beside `ting` or on `PATH`. HTTP commands work independently of the daemon.
+Silicon Apps installs the `ting` and `ting-daemon` executables side by side with `silicon-apps install 'ting'`. Silicon Apps installs need no further step; the installer is optional, for start at boot. On Windows, the optional PowerShell installer below runs from an elevated prompt. `cargo install silicon-ting-cli` installs the CLI only; webhooks also need `ting-daemon` from a release archive, beside `ting` or on `PATH`. HTTP commands work independently of the daemon.
 
 ```powershell
 Invoke-WebRequest https://ting.teamofsilicons.com/install.ps1 -OutFile install-ting.ps1

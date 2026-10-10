@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy a tested public GitHub backend archive to the production host over SSM."""
+"""Deploy a verified public GitHub backend archive to the production host over SSM."""
 import argparse
 import json
 import pathlib

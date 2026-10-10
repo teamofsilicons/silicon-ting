@@ -1,9 +1,3 @@
-{
-    servers {
-        expected_underscore_headers IAM_TEST_APP_SECRET
-    }
-}
-
 (secure_headers) {
     header {
         Strict-Transport-Security "max-age=31536000"

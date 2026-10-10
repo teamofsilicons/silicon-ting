@@ -1,78 +1,56 @@
 # Silicon Ting
 
-Notifications for carbons and silicons. A Rust service, HTTP/WebSocket client, CLI and one shared local daemon, with a SolidJS companion inbox.
+Durable notifications for Carbons and Silicons. Ting includes a Rust API, HTTP/WebSocket client, CLI, one shared local receiver daemon, and a web inbox built with Silicon UI.
 
-- **Web and docs:** https://ting.teamofsilicons.com
-- **API:** https://backend.ting.teamofsilicons.com
-- **IAM application:** `ting`
-
-Current release: [0.2.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.2.1), also available through `honeycomb install 'ting'`. Previous releases [0.1.8](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.8), [0.1.7](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.7), [0.1.6](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.6), [0.1.5](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.5), [0.1.4](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.4), [0.1.3](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.3), [0.1.2](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.2), [0.1.1](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.1) and [0.1.0](https://github.com/teamofsilicons/silicon-ting/releases/tag/v0.1.0) remain available with their original archives and checksums. See the [verification record](deploy/verification.md) and [latency analysis](deploy/latency-analysis.md) for measured results.
+- [Web inbox and documentation](https://ting.teamofsilicons.com)
+- [API](https://backend.ting.teamofsilicons.com)
+- [Silicon Apps](https://apps.teamofsilicons.com) application: `ting`
+- [Developer portal](https://developers.teamofsilicons.com)
 
 ## Start receiving
 
 ```sh
-curl -fsSL https://ting.teamofsilicons.com/install.sh | sh
-# Supply a Ting-bound short-lived token from the official IAM CLI:
-ting login --token-stdin
-ting org use tos
+silicon-apps install ting
+silicon-accounts login --app ting -q | ting login --token-stdin
 ting webhook http://localhost:3000/ting
 ting inbox list --all
 ```
 
-The installer downloads a checksum-verified release and registers one system daemon. Windows installation is described in [installers/README.md](installers/README.md). Each identity keeps credentials in `$SILICON_HOME/.ting/`; all identities share the daemon connection. Local URLs and webhook secrets never leave the device.
+Sign in to Silicon Accounts first. Carbons use the hosted sign-in pages; Silicons use their existing Accounts CLI sign-in to create a single-use Ting token. The token establishes a persistent Ting session. Both browser and CLI remain signed in across restarts until that session expires or the user signs out. Ting keeps Accounts refresh credentials encrypted on its server and checks their current validity without extending the session's original expiry.
 
-Applications first use a recipient-approved OBO token to register that recipient at Ting. Save the canonical `org_id` returned by registration. Subsequent sends use the app's own ATA token, with no recipient session or user OBO token. Ting checks both current ATA endpoint authority and the stored recipient subscription:
+Each account has an immutable Accounts UUID and a display handle such as `c:alice` or `si:assistant`. Data and access belong to the account. Handles can change. There is no organization selection or testing environment.
 
-```sh
-ting send --org '<recipient-org-UUID>' --type 'example.message.received' --for si:assistant \
-  --key unique-event-key --data '{"message":"Hello"}' --write-request send.json --json
-# Obtain ATA application verification for tings.send and securely supply its ata_ token.
-ting send --request-file send.json --ata-stdin --json
-```
+Applications call Ting with Silicon Accounts App verification or User verification proofs. A recipient authorizes their subscription; sending applications use the corresponding app proof and Ting checks the subscription on every send. The receiving app is `ting`, and proof scopes name the Ting action being performed. See [Accounts integration](udd/accounts.md) and the [API contract](udd/api.md).
 
-Actor IDs are complete IAM identities (`c:alice0`, `si:assistant`); app IDs are bare handles (`ting`, `dm`). Organization selection and authority remain separate. Existing queued requests and delivery receipts retain their exact bytes and stable IDs through migration.
+The CLI starts its shared daemon when needed. Each account keeps local credentials under `$SILICON_HOME/.ting/` or its normal home. Webhook URLs and local webhook secrets stay on the device. [Optional service installation](installers/README.md) supports receivers that should start at boot.
 
-Use `ting --help`, `ting docs`, [CLI reference](udd/cli.md), and [API contract](udd/api.md) for registration, preferences, endpoint authorization, delivery and recovery requirements.
+## Components
 
-## Application catalog access
-
-Ting requests Honeycomb catalog access separately from login. Use the Applications
-page or `ting apps authorize start`, approve the same account and organization in
-IAM, and complete with the single-use code. See [catalog approval and recovery](docs/CATALOG_AUTHORIZATION.md)
-for CLI commands, testing isolation, refresh and revocation.
-
-## Retention and delivery
-
-Read **or** silent tings expire one calendar month after their original `created_at`. Unread, non-silent tings expire after three calendar months. All dates use UTC; retries preserve creation time. Expired payloads and their delivery records are removed automatically. A read on any destination changes overall read state and therefore the applicable retention window.
-
-Within that window, each webhook has an independent copy. The daemon durably queues before delivery ACK, and retains local acceptance until the server confirms read ACK. Webhooks return `204` only after accepting the complete `{ "tings": [...] }` batch. Consumers must deduplicate by ting ID, since transport is at least once. A failed hook retries independently for twelve hours before requiring explicit reconnection.
-
-App send idempotency lasts fourteen days. Every replay revalidates the reusable ATA or supported OBO access token with IAM. Notification preferences never grant permission to send; IAM grants and current authorization are checked separately.
+| Path | Purpose |
+| --- | --- |
+| `crates/ting-server` | Accounts sign-in, encrypted sessions, subscriptions, preferences, durable notification storage and delivery |
+| `crates/ting-client` | Rust HTTP, WebSocket and local IPC client |
+| `crates/ting-cli` | `ting` command and bundled documentation |
+| `crates/ting-daemon` | Shared receiver, local queue and webhook forwarding |
+| `web` | Web inbox using components from [Silicon UI](https://ui.teamofsilicons.com) |
+| `udd` | API, CLI and integration documentation |
+| `deploy` | Production server deployment and backup configuration |
 
 ## Development
 
+Copy `.env.example` to `.env`, fill the registered Ting app secret and encryption key, and export the values before starting the server. The server needs access to Silicon Accounts; it does not accept mock identities.
+
 ```sh
-cargo test --workspace
-cargo build --workspace
-python3 crates/ting-cli/tests/smoke.py
+cargo run -p silicon-ting-server
 cd web
 npm ci
-npm test
-npm run build
+npm run dev
 ```
 
-Run the backend with the variables in [.env.example](.env.example), then `cargo run -p silicon-ting-server`. For the browser, `npm run dev` proxies `/v1` to the backend on port 8080. Use real IAM testing-environment credentials; there is no development authentication bypass.
+Use `cargo check --workspace`, `cargo fmt --all --check`, and `npm run build` in `web` to verify a change. The repository has no test suite or isolated identity environments.
 
-The local daemon ships beside the CLI in release archives and Honeycomb and starts on demand; [platform installers](installers/README.md) add start at boot. Public releases include macOS, Linux and Windows on x86-64 and ARM64; native CI runs client/CLI/daemon tests on each target. The server and API protocol are v1. Additive response fields are compatible; breaking wire changes require a new major protocol.
+## Releases
 
-## Deployment
+Current source version: `0.3.0`. [Release instructions](installers/RELEASING.md) cover the six native targets, crates.io, Silicon Apps and frontend. [Backend deployment](deploy/README.md) documents the existing AWS production service, runtime secrets, backups and rollback.
 
-AWS CloudFormation provisions a dedicated ARM64 EC2 host, encrypted retained EBS, private encrypted S3 and Secrets Manager. GitHub tests and builds releases on Amazon Linux 2023. `deploy/github-release.py` installs a checksum-verified release through SSM; systemd supervises the service and failed health checks restore the previous release. See [deployment instructions](deploy/README.md) and the [verification record](deploy/verification.md) for measured results and limitations. No SSH port is exposed.
-
-Vercel hosts the built frontend. Caddy serves `ting.teamofsilicons.com`, proxies static frontend requests to Vercel and `/v1` to Rust. `backend.ting.teamofsilicons.com` exposes the backend directly. This keeps the browser's HttpOnly, host-only session cookie and WebSocket on one origin. Namecheap manages both DNS records.
-
-SQLite uses WAL and `synchronous=FULL`. There is one server writer; move to PostgreSQL before adding replicas. Online encrypted snapshots run hourly and expire from S3 after seven days. Restoring a snapshot applies current notification retention before accepting traffic. Application secrets and encrypted upstream IAM tokens stay on the backend.
-
-Space Station has separate backend, CLI/daemon, browser analytics and browser event tables. Automatic diagnostics omit notification bodies, tokens and webhook secrets. Profile telemetry can be disabled; explicitly submitted bug reports require an actual durable Space Station acknowledgment.
-
-Read the [application integration guide](docs/BUILD_WITH_IAM5.md) for account selection, feature approval and delivery recovery.
+Silicon Apps validates `ting --help`, `ting accounts --json`, and `ting login status --json` in its target runners before a package can be released. Production releases install and update through `silicon-apps`.

@@ -1,699 +1,207 @@
-# Ting API — v1 implementation contract
+# Ting API and Rust client
 
-> **Integration baseline — October 4, 2026:** Ting 0.2.1 uses IAM 5 OBO for recipient registration and ATA for subsequent app operations. Existing OBO app calls remain compatible. Carbon/Silicon login, catalog-approval popups and CLI manual-code approval remain available.
+Ting 0.3 is a durable notification service for Carbon and Silicon accounts. Silicon Accounts verifies account identity and scoped app tokens. Silicon Apps supplies application discovery and authorship. All recipient resources belong to an immutable account UUID; a canonical `c:handle` or `si:handle` identifies that account publicly.
 
+Production API: `https://backend.ting.teamofsilicons.com`. Browser: `https://ting.teamofsilicons.com`. All HTTP routes begin with `/v1`.
 
-This is the contract to build. Examples use sample IDs and timestamps. [cli.md](cli.md) defines the matching commands; [understanding.md](understanding.md) and [iam.md](iam.md) contain the original notes. The decisions here include the later product changes.
+## Sessions and credentials
 
-## Product rules
-
-- Retain read or silent tings for one calendar month, and unread non-silent tings for three calendar months, measured from their original `created_at` in UTC. Older tings and their delivery records expire automatically; no per-app or per-org quota applies within those windows.
-- A disconnected recipient's tings wait quietly. No delivery-failure alerts go to the sender or recipient.
-- Every registered destination receives its own copy. One destination completing delivery does not complete another destination's copy.
-- Overall `read` becomes true after a new webhook acceptance or a recipient view acknowledgement. The sending app may also set its own tings read or unread. This flag can reflect app-supplied state; it is not proof that the recipient viewed or processed the ting. Per-hook read ACK completion remains permanent.
-- New types are enabled by default. Existing recipient opt-outs still apply. Ordinary silent tings stay in the drawer and are never delivered automatically. Required automation delivery needs a separate explicit recipient opt-in, described below.
-- Every ting carries `created_at`, the UTC time Ting first stored it. It stays unchanged during retries and replay. Consumers choose processing order; timestamps do not guarantee delivery order.
-- A local webhook always receives `{ "tings": [...] }`, even for one ting.
-- BYO is outside Ting's v1 scope.
-
-## Common rules
-
-HTTP uses HTTPS and JSON. WebSockets use WSS. Local development may use HTTP/WS on loopback. JSON object keys are case-sensitive. Reject unknown request fields, duplicate JSON keys, invalid UTF-8, and wrong JSON types with `400 invalid_input`; `data` and `metadata` may contain arbitrary valid JSON values inside their required outer objects. Clients must tolerate new response fields.
-
-Resource IDs are opaque strings. Actor IDs are complete IAM identities: `c:alice0` for a Carbon and `si:assistant` for a Silicon. Keep the explicit actor kind; both kinds contain a colon. Application IDs are bare IAM handles such as `ting`, `dm` and `hook`, using 1–80 lowercase letters, digits, underscores or hyphens and starting with a letter. Silicon handles have 3–50 characters; Carbon handles have 3–30, including already registered handles containing zero. Prefixes do not count toward these limits. `id` identifies a ting, subscription, or webhook in its own record. Use separate `org_id` and `app_id` fields, and resolve ownership and current membership through IAM; never infer organization authority from an actor or application ID. Paths must URL-encode IDs; for example, `si:assistant` becomes `si%3Aassistant`.
-
-`app_id` is globally unique. An app owned by one organization can notify consenting recipients in any organization. Type definitions belong to the app within the verified production/testing context; resolve a send’s type by its app ID and type name, independently of the delivery organization. For sends, subscriptions, sent queries/read updates, inboxes, preferences and receivers, `org_id` selects the recipient/delivery organization. App catalog and type-management routes use the app’s owning organization and retain their Honeycomb permission checks.
-
-| Value | v1 rule |
+| Credential | Use |
 | --- | --- |
-| `created_at` | RFC 3339 UTC string ending in `Z`; server-assigned acceptance time, not the originating app's event time. |
-| `key` | Required string, 1–200 UTF-8 bytes, no control characters. |
-| Type name | `{app_id}.{service}.{event}`; maximum 255 bytes. Service/event use lowercase letters, digits, `_` or `-`, starting with a letter. The app prefix must exactly match its registered app ID. |
-| Description | Nonempty text, maximum 1,000 UTF-8 bytes. |
-| Lists | One page per request, `limit` default 50, range 1–100; optional `cursor`. |
-| ID lists | 1–100 IDs. Repeated IDs are collapsed. Validate the whole list before changing any record. |
-| Submitted ting | Maximum 256 KiB for the complete UTF-8 JSON request body, including `org_id`. |
-| Delivery batch | Maximum 100 tings and 1 MiB including the WebSocket envelope. Every accepted ting must fit in a one-ting batch. |
-| Ordinary HTTP request / client WebSocket frame | Maximum 1 MiB; more specific limits take precedence. |
+| Accounts short-lived sign-in token | Exchange once at `POST /v1/session` with `{ "slt": "..." }`. |
+| Ting session token | Recipient HTTP requests use `Authorization: Bearer ...`; native WebSockets supply `session_token` in an authentication frame. |
+| Ting browser cookie | Persistent HttpOnly secure cookie, sent with credentialed browser requests and browser WebSockets. |
+| Scoped Accounts app token | `Authorization: Bearer <sap_...>` for app endpoints; verify audience, source app, granted scope, expiry and any delegated account. |
 
-List responses are `{ "items": [...] }`. Include `next_cursor` only when another page exists; never return it as `null`. Tings sort by `(created_at, id)` descending for listing, independently of delivery order. Other lists sort by their stable ID/name ascending. Cursors are opaque, expire after 24 hours, and bind the authenticated data context, org, filters and last position. A changed context/filter or invalid/expired cursor returns `400 invalid_cursor`. The first page fixes an upper creation boundary; later changes to read state or permissions are evaluated when each page is fetched.
-
-Request and batch limits bound individual operations. Retained history spans one calendar month for read or silent tings, and three months for unread non-silent tings. There is no per-day send quota in v1. Temporary overload may return `429` with `Retry-After` or `503`; neither response means a ting was accepted. A lost response is uncertain: retry with the same ting key and a valid endpoint access token.
-
-## Authentication and login
-
-Three credentials have different jobs:
-
-| Credential | Used for |
-| --- | --- |
-| Ting session | A carbon/silicon's own orgs, inbox, preferences, hooks and settings; app management only with current Honeycomb permission. HTTP: `Authorization: Bearer <session_token>`. |
-| IAM OBO access token | Register the represented recipient with `subscriptions.register`; also accepted on existing app operations for compatibility. HTTP: `Authorization: Bearer <oba_access_token>`. |
-| IAM ATA access token | Send as the app, query/revoke its subscriptions, query its sent tings and update their read state. HTTP: `Authorization: Bearer <ata_access_token>`. No user session or represented actor is needed. |
-
-An OBO credential is IAM's reusable `oba_` access token from separately approved endpoint consent. It identifies the issuing app, selected actor, audience and org. ATA uses reusable `ata_` access tokens under application verification, with no user identity. Ting verifies the appropriate credential with the official IAM client for the actual endpoint on every operation. It never falls back from failed ATA verification to OBO or manufactures a user identity. Legacy single-use proofs, ordinary app secrets and login tokens do not authorize these calls.
-
-Except for public information, login initiation/session exchange and preflight, routes require their listed credential. Sessions and OBO calls still need their current account and organization authority. ATA calls use stored app-to-recipient subscriptions and app-owned resource checks in the selected canonical organization; they do not represent a user or require user membership. Missing/invalid/expired credentials return `401`; a valid identity without permission returns `403`. Resources owned by another recipient return `404` without exposing their contents.
-
-### Session endpoints
-
-| Method and path | Input | Success |
-| --- | --- | --- |
-| `GET /v1/iam` | None; public. | `200` app information below. |
-| `GET /v1/session/login` | Browser navigation; optional local `next` path, default `/`. | `302` to the configured IAM consent page, with a server-bound login attempt. |
-| `GET /v1/session/callback` | IAM callback `slt` and the login-attempt state. | Exchanges the SLT, sets the session cookie, then `303` to the saved local path. |
-| `POST /v1/session` | CLI: `{ "slt": "<short-lived Ting login token>" }`; required `Idempotency-Key`. | `201` session response below; safe same-attempt replay returns `200`. |
-| `GET /v1/me` | Ting session. | `200 {"id":"si:assistant","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}`; testing context described below. |
-| `DELETE /v1/session` | Ting session. | `200 {"authenticated":false}` after local session revocation. |
-| `GET /v1/orgs` | Ting session; no selected org required. | `200 {"items":[{"id":"tos","name":"TOS"}]}` |
-| `GET /v1/orgs/{org}/apps` | Ting session; optional pagination. | `200 {"items":[{"app_id":"dm","name":"DM","can_manage_tings":true}]}` |
-
-App information:
+A successful session exchange returns:
 
 ```json
 {
-  "app_id": "ting",
-  "api_version": "v1",
-  "repository_url": null,
-  "docs_url": null,
-  "rust_package": null
-}
-```
-
-Those three publication values are release configuration, not invented URLs. They must be populated before public release. Local builds may return `null`.
-
-CLI session response — a secret-bearing response, never logged:
-
-```json
-{
-  "authenticated": true,
-  "id": "si:assistant",
-  "kind": "silicon",
-  "session_token": "<opaque Ting session credential>"
-}
-```
-
-Flow: CLI receives a Ting-bound IAM SLT → Ting backend exchanges it using its app secret → backend keeps IAM access/refresh tokens encrypted → CLI receives only an opaque Ting session credential. Never ship Ting's app secret or IAM refresh tokens in the CLI. The CLI prints only identity/status and saves its session credential privately.
-
-Use IAM's official SLT exchange and rotating refresh APIs, including their idempotency support. Persist one exchange/refresh operation key before calling IAM and reuse it after an uncertain response. Serialize refreshes per session. A repeated session exchange must match the original key, SLT hash and testing context. Retain the encrypted exchange and completed response for the lifetime of the session, including beyond the SLT expiry; replay returns the original opaque token after current authority checks, never a second session. Logout, revocation and lifecycle fences prevent resurrection. An SLT already used under another operation or test generation returns `409 login_context_conflict`; a reset requires a fresh SLT. Retry dependency failures with the original input and key. Older releases may already have erased an uncertain result: `409 login_recovery_unresolved` preserves that uncertainty and does not prove that no session exists. A fresh login does not cancel an unresolved earlier attempt.
-
-Persist the original refresh attempt timestamp with its operation key. Calculate recovered access expiry from that timestamp, not replay time. Save a recovered rotated refresh family before attempting another rotation when its access token is already expired. Legacy pending refreshes without a timestamp must recover and rotate conservatively.
-
-Revalidate IAM authority before protected HTTP operations and every 30 seconds for a live receiver. Refresh expired app access tokens server-side. IAM unavailability returns `503` and pauses delivery; it must not be reported as a successful logout. A definitively revoked session returns `401 session_expired`, stops its subscriptions, and requires login again. Logout accepts the original opaque session token even when its IAM access token is inactive. It invalidates the Ting session first and durably schedules IAM refresh-family revocation; an uncertain response can be retried with the same token. It affects no other identity's session.
-
-The browser uses a `ting_session` cookie instead of a readable token: HttpOnly, Secure, SameSite=Lax, Path `/`, with no Domain attribute. Bind the IAM callback to a random one-use state and private browser login cookie; include that state in the callback `redirect_uri` sent to IAM and expire the attempt after ten minutes. Reject callbacks without that binding and reject external `next` URLs. Accept authenticated browser mutations only from explicitly permitted origins and require JSON. `TING_PUBLIC_ORIGIN` and `TING_FRONTEND_ORIGIN` are permitted, along with the comma-separated exact origins in `TING_BROWSER_ORIGINS`. Configuration accepts HTTPS origins (HTTP only on loopback), never wildcards, credentials or paths. Unknown origins receive 403 on HTTP and WebSocket upgrades. Permitted HTTP responses, including errors and preflights, include `Access-Control-Allow-Origin` for that exact origin, `Access-Control-Allow-Credentials: true`, and `Vary: Origin`; `Ting-Request-Id` is exposed to browser clients. Never put Ting sessions or IAM refresh tokens in URLs.
-
-`GET /v1/me` revalidates the session and returns an explicit `environment` alongside `id`, `kind` and `authenticated`:
-
-```json
-{"id":"si:assistant","kind":"silicon","authenticated":true,"environment":{"kind":"production"}}
-```
-
-For a testing session, `environment` is `{"kind":"testing","id":"<IAM environment UUID>","generation":1}`. The UUID is verified by IAM; the generation is bound at login to Ting's active Honeycomb lifecycle generation and checked again before returning it. Missing, retired, rotated, pending or stale testing context fails closed. Existing testing sessions without a generation require a new login; production sessions remain valid. A testing environment must be imported through Honeycomb before new testing sessions or proof-bound calls are accepted.
-
-Cross-app browsers use `credentials: "include"` when fetching `/v1/me` and connect to the host that issued the Ting cookie. Signing into DM does not create a Ting session. Match both the typed account and the explicit environment; for tests, match both UUID and generation. Missing fields on older servers mean unverified context, never production. This response attests the current session only; it does not extend authority or replace ongoing revalidation and application-side authorization.
-
-### Scoped testing receiver bootstrap
-
-`POST /v1/receivers/bootstrap` accepts a valid IAM OBO access token for the critical endpoint
-`receivers.bootstrap`. The issuing application must declare that external scope,
-obtain the required provider approval and recipient consent, and hold an active
-Ting subscription for the represented recipient. This endpoint is **testing only**;
-production proofs are rejected. It does not exchange a Hook token for a general
-Ting session or disclose a Ting application secret.
-
-```json
-{"org_id":"tos","app_id":"hook","for":"si:assistant","key":"receiver-attempt-001","environment_id":"<IAM environment UUID>","generation":1}
-```
-
-The request body explicitly selects the environment and generation, which must match verified authority. Supply the Ting
-audience testing headers returned by IAM for this dedicated endpoint token.
-An enclosing runtime can obtain them through the separate OBO approval and token exchange using its
-own application selector; it must not reuse them for a separate SLT login. Ting
-verifies actor kind, issuing app, organization, consent and its active Honeycomb
-lifecycle fence. The response has `receiver_id`, secret `receiver_token`, `for`,
-`kind`, `app_id`, canonical `org_id`, `expires_at`, and an explicit
-`environment: {"kind":"testing","id":"...","generation":1}`.
-
-The capability lasts at most **30 seconds**, never beyond the verified OBO access-token expiry. It can only
-query/watch this application's records for this actor, organization and testing
-generation. It cannot send, enroll, change preferences, create a general hook,
-acknowledge records, or access another application's inbox. It is not accepted by
-ordinary Ting session routes. Each use checks the active grant and lifecycle;
-consent or IAM authority loss prevents the next renewal, and existing authority
-expires within 30 seconds. Clean, rotation, disablement and local capability
-revocation fail closed without production fallback.
-
-Each create/recovery/renewal call verifies a valid endpoint access token with IAM. Repeating the exact request
-bytes and `key` returns the original capability and original expiry. Changed bytes
-under that key return `409 idempotency_conflict`; replay never extends or
-resurrects authority. The recovered historical capability may already be expired, replaced or revoked. To renew, use a **new key**, valid OBO access token and the original
-`receiver_id` in the body. Renewal replaces its old token. An explicitly revoked
-receiver cannot be renewed; a new receiver is a new explicit operation.
-
-| Route | Authority and result |
-| --- | --- |
-| `GET /v1/receivers/me` | Bearer receiver capability; current scope and expiry. |
-| `GET /v1/receivers/inbox` | Same capability; own app only. Filters: `type`, `read`, `silent`, `limit`, `cursor`. |
-| `GET /v1/receivers/inbox/{id}` | Same capability; own app and recipient record, never a read ACK. |
-| `DELETE /v1/receivers/session` | Bearer capability; idempotent revocation, available even after expiry or environment disablement. |
-| `GET /v1/receivers/ws?protocol=v1` | Scoped watch transport. A permitted browser Origin is required when supplied; no full Ting cookie is needed. |
-
-The scoped socket returns the usual `ready` frame. Within five seconds send
-`{"op":"watch","request_id":"watch-1","receiver_token":"<capability>"}`;
-its correlated response is `watching_inbox`. Only scoped `inbox_changed` hints and
-protocol ping/pong follow. Renew using a valid endpoint access token and reconnect with the new
-capability before expiry. Query the scoped inbox after connecting/reconnecting,
-and hydrate references under the source application's current authorization.
-Ordinary silent arrivals do not trigger hints; explicitly enabled required events
-can. No credentials belong in a URL. The Rust client provides
-`ProofOperation::ReceiverBootstrap`, `WebSocket::connect_receiver` and
-`watch_receiver`; renewal and reconnection remain explicit.
-
-### Independently authorized app calls
-
-Apps use OBO once to register each consenting recipient, then use ATA for their own sends and status operations. App endpoints use fixed paths and put the recipient organization in the JSON body:
-
-| IAM endpoint ID | Registered path | Method | Authority |
-| --- | --- | --- | --- |
-| `tings.send` | `/v1/tings` | `POST` | ATA; existing OBO supported |
-| `subscriptions.register` | `/v1/subscriptions` | `POST` | OBO only |
-| `subscriptions.query` | `/v1/subscriptions/query` | `POST` | ATA; existing OBO supported |
-| `subscriptions.revoke` | `/v1/subscriptions/revoke` | `POST` | ATA; existing OBO supported |
-| `sent.query` | `/v1/sent/query` | `POST` | ATA; existing OBO supported |
-| `sent.read` | `/v1/sent/read` | `POST` | ATA; existing OBO supported |
-| `receivers.bootstrap` | `/v1/receivers/bootstrap` | `POST` | OBO only; testing only |
-
-Publish the five app-authority operations in Ting's ATA catalog and preserve the OBO catalog for registration, receiver bootstrap and compatibility. OBO callers obtain reviewed endpoint consent and separate recipient approval, then exchange its code for dedicated `oba_` access and `obr_` refresh credentials. Registration derives the recipient from the verified OBO actor and returns the canonical recipient `org_id`. Store that ID with the subscription.
-
-ATA callers obtain a centralized application verification for the required Ting endpoints and keep the `ata_` access / `atr_` refresh family on their backend. Ting calls the official SDK's `ata().verify(origin_app_id, access_token, registered_path)`, authenticated with Ting's own app credentials. IAM must confirm verification and an unexpired UTC `valid_till`. The app is taken from the type prefix for sends, and `app_id` for queries, read updates and revocation; IAM verifies that claim against the access token. ATA bodies require the exact canonical lowercase hyphenated organization UUID returned by registration. ATA itself grants no organization membership or user authority: Ting's stored subscription and app-owned resource checks determine access in that recipient organization and verified data context.
-
-OBO compatibility calls still verify audience `ting`, issuing app, selected actor and org, endpoint, request method/path, environment and current IAM authorization through `POST /api/v1/obo-access/token-verifications`. On registration, the optional `for` assertion must match the verified actor. On sends, the actor may differ from the recipient because the stored subscription authorizes the destination. Existing OBO organization-handle inputs remain supported.
-
-Verification runs on every operation and idempotent replay. Access tokens are reusable until expiry or revocation; verification does not consume them. Invalid or expired ATA returns `401 invalid_ata_token`. If verification cannot be confirmed, Ting returns `503 ata_verification_uncertain` or `503 obo_verification_uncertain` without executing the operation. Retry unchanged bytes with the same Ting key and a valid endpoint access token. Refresh the corresponding family when necessary; revoked grants require authorization again.
-
-The Rust client exposes prepare → authorize endpoint → execute. Preparation returns exact bytes, method, path and a local SHA-256 fingerprint for reproducibility; the hash is not part of IAM verification. Historical `proof_token` wire fields and `--proof-token-*` CLI inputs carry either credential. App operations also accept `--ata-file` / `--ata-stdin`; registration retains `--obo-file` / `--obo-stdin` and rejects ATA.
-
-## Test requests
-
-The same endpoints and code handle tests. An explicit test request supplies:
-
-```json
-{
-  "IAM_TEST_APP_SECRET": "<Ting test app secret>",
-  "X-Testing-Environment-Key": "<IAM environment key>"
-}
-```
-
-Both headers are required together on initial test login and proof-bound app calls. The CLI takes their values from `IAM_TEST_APP_SECRET` and `IAM_TEST_KEY`. An incomplete pair returns `400 test_context_required`. The app ID remains server-configured `ting`.
-
-Ask IAM to validate that secret and environment key, using its testing-context API. Use the verified environment UUID to partition Ting sessions, types, grants, tings, keys, preferences, hooks and local state. One deployment/database can serve them all; a test actor never accesses production records. A supplied secret is a verification override, not proof of identity or an auth bypass.
-
-A Ting session remembers its verified test context server-side, so later session requests may omit both headers. If supplied again, both must match that session's verified environment and current credentials. Invalid or retired test credentials never fall back to production. Every send still requires its valid ATA or supported OBO access token, verified in that same context. Ting does not create upstream testing ATA grants or fall back to production when the upstream test plane cannot issue them.
-
-WebSocket `send` and `subscribe` may carry the same header pair in `headers`. Context belongs to that request or subscription, never the whole shared socket. Other authenticated identities remain unaffected. Never echo, log, or forward either secret to a local webhook.
-
-## Ting types
-
-These routes use the app’s owning organization and require a Ting session with current Honeycomb permission: view permission to list types, management permission to register or update them. Receiving an app’s tings in another organization grants no type-management authority.
-
-| Method and path | Input | Success |
-| --- | --- | --- |
-| `GET /v1/orgs/{org}/apps/{app}/types` | None; view permission. | `200 {"items":[<type>]}` |
-| `POST /v1/orgs/{org}/apps/{app}/types` | `type`, `description`. | `201` saved type; identical existing definition returns `200`, different definition returns `409 type_exists`. |
-| `PATCH /v1/orgs/{org}/apps/{app}/types/{type}` | `description` only. | `200` updated type. |
-
-```json
-{
-  "type": "dm.msg.received",
-  "description": "A new direct message arrived.",
-  "defaults": {"carbon": true, "silicon": true}
-}
-```
-
-The type name cannot change. Register a new type for another event. `defaults` is read-only and always true for both kinds of recipient. It does not grant permission to send, clear existing opt-outs, or decide the recipient. There is no type deletion endpoint in v1.
-
-## Recipient subscriptions
-
-A subscription is one app's permission to notify one recipient in one org and data context.
-
-| Method and path | Authentication and input | Success |
-| --- | --- | --- |
-| `POST /v1/subscriptions` | IAM OBO access token only. Body: `org_id`, `app_id`, optional `for` assertion. | `201` subscription below; an already active grant returns `200`. |
-| `GET /v1/orgs/{org}/subscriptions` | Ting session; current recipient only. Optional `app_id`, `for`, pagination. | `200 {"items":[<subscription>]}` |
-| `POST /v1/subscriptions/query` | ATA or OBO access token. `org_id`, `app_id`; optional `for`, `limit`, `cursor`. | `200 {"items":[<subscription>]}` for the issuing app only. |
-| `DELETE /v1/orgs/{org}/subscriptions/{id}` | Ting session; owning recipient only. | `200 {"id":"sub_123","active":false}` |
-| `POST /v1/subscriptions/revoke` | ATA or OBO access token. `org_id`, `id`; `app_id` required for ATA and optional for OBO. The subscription must belong to the issuer. | Same result as DELETE. |
-
-```json
-{
-  "id": "sub_123",
-  "app_id": "dm",
-  "for": "si:assistant",
-  "active": true
-}
-```
-
-The registration response additionally includes `org_id`, the canonical recipient organization UUID. Save it for later ATA calls. Registration uses the proof's issuer as the app and its represented actor as the recipient. An optional `for` must match. No second proof or body `obo_token` is needed. Store the verified grant, not the proof itself. A newly verified registration can reactivate a revoked grant using the same subscription ID.
-
-The grant covers current and future types. Recipients may opt out by app, service or type. Revocation blocks new sends and delivery of pending tings under that grant; it preserves stored history. Reactivation resumes eligible pending deliveries. Repeated revocation is harmless. Neither revocation nor muting can retract work already accepted by a webhook.
-
-## Send a ting
-
-### `POST /v1/tings`
-
-Use an IAM ATA access token for `tings.send`. Existing OBO endpoint tokens remain supported. The ATA operation body is:
-
-```json
-{
-  "org_id": "11111111-1111-4111-8111-111111111111",
-  "type": "dm.msg.received",
-  "data": {"message_id": "dm_456", "text": "Hello"},
-  "metadata": {},
-  "for": "si:assistant",
-  "key": "dm-456"
-}
-```
-
-Here `dm` owns the type, and `org_id` is the recipient organization UUID saved from OBO registration. Register the type once in the app’s owner catalog; recipients need neither membership in the owner organization nor a local copy of its type.
-
-All fields except `metadata` are required. `data` and `metadata` are objects; omitted metadata means `{}`. `isi` is optional information, never an authentication identity. Optional `delivery: "required"` selects the separately authorized automation path below; omit it for ordinary notification delivery. Reject other delivery values and caller-assigned `id`, `created_at`, `silent` or `read`.
-
-Apps submit one ting at a time. Ting batches complete records during delivery; it never appends later events to the original ting's data or metadata.
-
-First acceptance — `202`:
-
-```json
-{
-  "id": "msg_123",
-  "created_at": "2026-09-22T10:00:00Z",
-  "status": "accepted",
-  "key": "dm-456",
-  "silent": false
-}
-```
-
-Flow: verify proof → verify type ownership and recipient grant → apply preferences → atomically save ting, intended deliveries and idempotency result → return acceptance → deliver when eligible. Acceptance means durable storage, not receipt or reading. Muted ordinary tings are still accepted with `silent: true`. For an explicitly authorized required event, `silent` still describes notification visibility; the additive `delivery: "required"` field identifies its independent automation delivery policy. Neither field proves destination acceptance.
-
-### Idempotency
-
-The key scope is `(verified environment, org, issuing app, key)`. Retain its request fingerprint and original response for **14 days from first acceptance**. Retries do not extend this window. Compare the normalized request (`metadata` omitted equals `{}`; JSON key order and whitespace do not matter). Changed recipient, type, data or metadata returns `409 idempotency_conflict`. A valid retry returns the original response with `200`, including its original timestamp and silent flag.
-
-Keep the key record, ting and initial delivery state in one durable database transaction. Redis may cache results, but cache eviction/restarts must not shorten the guarantee. Concurrent requests with the same key cannot create two tings. If the transaction cannot be committed, do not report acceptance. After 14 days, key reuse may create a new ting with a new ID; the old ting remains stored until its applicable one- or three-month retention cutoff.
-
-A retry still needs a currently valid app access token and current access to its original result. Return an existing identical accepted result before applying a now-revoked recipient grant; it creates no new send or delivery. With no existing result, an inactive grant blocks acceptance.
-
-Delivery replay uses permanent ting IDs, not the expiring producer key. Consumers deduplicate repeated work by ting ID within their receiving context. Keep accepted-ID records for as long as a replay could occur, or make the work safe to repeat.
-
-## Sent tings and inbox
-
-| Method and path | Input | Success |
-| --- | --- | --- |
-| `POST /v1/sent/query` | ATA or OBO access token. `org_id`, `app_id`; optional `for`, `type`, `read`, `limit`, `cursor`. | `200 {"items":[<ting>]}` for that issuer. |
-| `POST /v1/sent/query` | ATA or OBO access token. `org_id`, `app_id`, `id`; optional `deliveries_cursor`, no list filters. | `200` full ting with `deliveries`. |
-| `POST /v1/sent/read` | ATA or OBO access token. Required `org_id`, `app_id`, `message_ids`, `read`, `key`; see below. | `200 {"message_ids":["msg_123"],"read":false}` |
-| `GET /v1/orgs/{org}/inbox` | Ting session; current recipient only. Optional `app_id`, `type`, `read`, `silent`, pagination. Omit `silent` to include both kinds. | `200 {"items":[<ting>]}` |
-| `GET /v1/orgs/{org}/inbox/{id}` | Ting session; owning recipient. | `200` full ting. |
-| `POST /v1/orgs/{org}/inbox/read` | Ting session; `{ "message_ids": ["msg_123"] }`. | `200 {"message_ids":["msg_123"],"read":true}` |
-
-A full ting:
-
-```json
-{
-  "id": "msg_123",
-  "created_at": "2026-09-22T10:00:00Z",
-  "type": "dm.msg.received",
-  "data": {"message_id": "dm_456", "text": "Hello"},
-  "metadata": {},
-  "for": "si:assistant",
-  "key": "dm-456",
-  "silent": false,
-  "read": false
-}
-```
-
-Sent detail adds:
-
-```json
-{
-  "deliveries": [
-    {"webhook_id":"hook_123","delivery_acked":true,"read_acked":false}
-  ]
-}
-```
-
-`delivery_acked` describes the current receiver subscription's receipt; it resets on subscription replacement. `read_acked` is permanent completion for that hook. No deliveries is `[]`. A large `deliveries` list uses `deliveries_cursor` in the sent-detail request and `deliveries_next_cursor` in the result, omitted on the last page; pages contain at most 100 hooks.
-
-`read` becomes true after a new webhook read ACK or the recipient's explicit view acknowledgement. The sending app may also set this flag read or unread; it is not evidence of actual recipient viewing. A browser calls `/inbox/read` when the carbon opens a ting or its contents become visible in the foreground drawer. Background fetch, preload, a hidden tab, or an unopened count badge does not count. The CLI exposes this as `inbox mark-read`; list/get operations never mark read by themselves. Silent tings can be viewed and marked read in the drawer.
-
-For `/inbox/read`, validate every submitted ID against the current recipient and org before applying a read request. Repeated requests are harmless. This changes overall read state, not another webhook's pending copy. Carbons may also use CLI webhooks; their webhook acceptance counts as read even if they have not viewed the browser entry. Neither form of read means the consumer finished processing.
-
-### Apps marking their sent tings read or unread
-
-Use `POST /v1/sent/read` with an IAM ATA access token for `sent.read` (or an existing OBO endpoint token) and this body:
-
-```json
-{
-  "org_id": "11111111-1111-4111-8111-111111111111",
-  "app_id": "dm",
-  "message_ids": ["msg_123", "msg_124"],
-  "read": false,
-  "key": "dm-unread-456"
-}
-```
-
-All fields are required. `read` must be a JSON boolean; `true` marks read and `false` marks unread. `message_ids` contains 1–100 IDs, with duplicates collapsed. `key` follows the common 1–200 UTF-8 byte rule. A Ting session or receiver capability cannot replace the app proof. No recipient Ting session or connected receiver is needed.
-
-The proof issuer must match `app_id`; a mismatch returns `403 permission_denied`. Validate the entire batch before changing any record: every ting must belong to that issuing app in the selected canonical organization and verified environment and still be retained. A missing, expired, wrong-app, wrong-org or wrong-environment ID returns `404 not_found` with no partial update. ATA has no represented actor. For OBO compatibility calls, the represented actor may differ from the recipients.
-
-Success returns `200 {"message_ids":["msg_123","msg_124"],"read":false}` with duplicate IDs removed. Atomically retain the operation's request fingerprint and original response for 14 days from first acceptance, scoped to `(verified environment, org, issuing app, sent.read, key)`, separately from send keys. Every retry needs a valid endpoint access token. The same key and unchanged request returns the original response without applying the state change again, even if another action has changed the tings since; changed content returns `409 idempotency_conflict`. Use a new key for each new intended update. The response describes the accepted operation, not necessarily the current read state after a replay.
-
-App updates change overall read state only. They neither complete nor reset webhook delivery/read ACKs, and marking unread does not resend a completed hook's copy. A new valid read ACK for an unfinished copy or a later recipient view can set overall read true again. Repeating a completed hook's read ACK is a no-op and cannot undo an app's unread update. New hooks still backfill eligible retained overall-unread history. Actual state changes send the normal `inbox_changed` hint to affected recipients' browser watches.
-
-Retention still uses the original `created_at`: one calendar month when read or silent, three months while unread and non-silent. State changes do not restart either window or resurrect expired tings. Marking an older retained ting read may make it immediately eligible for expiry.
-
-## Notification preferences
-
-Ting session required; all operations affect only its recipient.
-
-| Method and path | Input | Success |
-| --- | --- | --- |
-| `GET /v1/orgs/{org}/preferences` | Optional `app_id`, and either `service` or `type`; pagination. | `200 {"items":[<preference>]}`; only explicit overrides. |
-| `PUT /v1/orgs/{org}/preferences` | Preference object below. | `200` saved override. |
-| `DELETE /v1/orgs/{org}/preferences` | Query `app_id`, optional `service` or `type`. | `200 {"app_id":"dm","service":null,"type":"dm.msg.received","reset":true}` |
-
-```json
-{
-  "app_id": "dm",
-  "service": null,
-  "type": "dm.msg.received",
-  "enabled": false
-}
-```
-
-Writes require `app_id`. Set neither service nor type for an app-wide override; never set both. A type must belong to the named app. `enabled` is a boolean. Repeated reset succeeds even if no override exists.
-
-Precedence: event override → service override → app override → enabled. New types inherit these settings; registering one never erases an opt-out. Muting stores future tings silently and pauses delivery of existing matching non-silent tings. Re-enabling can resume those non-silent pending tings. Historically silent ordinary tings remain silent throughout their retention window and never auto-replay. Muting does not revoke the app's grant.
-
-### Required automation delivery
-
-Notification preferences control attention; an application cannot override them.
-A recipient may separately opt in to required automation events for an existing
-active subscription:
-
-| Route | Result |
-| --- | --- |
-| `GET /v1/orgs/{org}/subscriptions/{id}/required-delivery` | Own Ting session; `{id, app_id, for, enabled}`, default `false`. |
-| `PUT /v1/orgs/{org}/subscriptions/{id}/required-delivery` | Own Ting session and `{"enabled":true}` or `false`; never creates/reactivates a grant. |
-
-The Ting website exposes this choice under Connections. CLI:
-`ting subscriptions required-delivery SUBSCRIPTION_ID --enabled true`.
-Subscription listings include `required_delivery`. Only the recipient can change
-this choice; ordinary app registration and notification preference changes cannot.
-Grant revocation clears it, and re-enrollment does not restore it. Shared clean
-also requires a fresh explicit opt-in.
-
-An application requests this path by signing a send body containing
-`"delivery":"required"`. Without an active grant and explicit opt-in, a new send
-returns `403 required_delivery_not_enabled` (or `recipient_not_registered`) instead
-of silently falling back to ordinary delivery. The mode is part of the immutable
-idempotency fingerprint. Accepted retries return the original result even if
-permission later changes; they create no new delivery.
-
-Required events create independent destination copies and remain eligible despite
-notification muting, while current grant and required-delivery permission still
-control every offer. Opting out pauses their pending automatic delivery; it cannot
-retract an already accepted callback. The usual batch ACK, destination recovery,
-retention and deduplication limits remain: silent/read records last one calendar
-month, unread non-silent records three. A required flag is not an unlimited
-retention or successful-processing guarantee. Ordinary notification behavior and
-its muted history are unchanged.
-
-## Webhook registrations
-
-A hook is a stable destination owned by one recipient. A receiver is one shared WebSocket connection, identified by a temporary `receiver_id`. URLs and secrets stay on the local system; the cloud stores IDs, owner and delivery progress only.
-
-Ting session required. For a new attachment, the receiver must already have authenticated that same session/recipient using WebSocket `subscribe`. Recovering an already accepted creation result uses the retry rule below.
-
-| Method and path | Input | Success |
-| --- | --- | --- |
-| `POST /v1/orgs/{org}/webhooks` | `{"receiver_id":"recv_123"}`; required `Idempotency-Key`. | `201` registration below; same creation retry returns `200`. |
-| `GET /v1/orgs/{org}/webhooks` | Pagination; owning recipient only. | `200 {"items":[<webhook>]}` including disconnected, paused and detached hooks. |
-| `PATCH /v1/orgs/{org}/webhooks/{id}` | `receiver_id`, optional `takeover` boolean, default false. | `200` attached registration. Explicitly reattaches a detached/paused hook. |
-| `DELETE /v1/orgs/{org}/webhooks/{id}` | No body. | `200 {"id":"hook_123","removed":true}`; repeated detach is harmless. |
-
-```json
-{
-  "id": "hook_123",
-  "receiver_id": "recv_123",
-  "for": "si:assistant",
-  "state": "connected",
-  "pending": 0
-}
-```
-
-`state` is `connected`, `disconnected`, `paused`, or `detached`. Connected means authenticated and subscribed, not that the local webhook is healthy. POST/PATCH attaches the registration and subscribes it on the already authenticated receiver; a following explicit subscribe is harmless. Persistent `paused` means the local retry cutoff; temporary auth/policy invalidations use `disconnected` until a permitted resubscription. A non-connected registration has `receiver_id: null`. `pending` counts this hook's unfinished copies, including ones temporarily held by preferences or permissions; it is not an overall unread count.
-
-One hook has one active receiver binding. A different live binding returns `409 hook_in_use` unless the owner explicitly requests `takeover: true`. Takeover atomically invalidates the old binding. ACKs from its old connection cannot change the new binding's progress. Normal reconnect may bind a disconnected hook, but may not revive a deliberately detached or paused hook.
-
-Creation uses a client-generated idempotency key retained for 14 days within recipient/org/context. Save the key and original body before the HTTP request so a lost response cannot create duplicate destinations. Commit the creation and cached result together. Same key with a changed request returns `409 idempotency_conflict`. After recipient authentication, look up an accepted creation before checking receiver liveness: an exact retry can recover the stable hook ID even after its original receiver disconnects. Then PATCH that ID onto the current receiver. If no creation exists and the original receiver is gone, return `409 receiver_gone` without creating a hook; the caller may start a fresh creation attempt. Repeating PATCH with the same binding is harmless. Use ownership checks before returning any cached result.
-
-New hooks get all eligible overall-unread history plus new tings. Existing hooks resume their own unfinished copies, even if another destination already made the ting globally read. Preserved hooks accumulate eligible copies during disconnection or detachment. Creating the initial backlog and assigning concurrent new sends must have no gap. Ordinary silent tings are excluded. Required events use their separate explicit opt-in; grants and the applicable delivery preference govern whether pending copies may currently be forwarded.
-
-Unhook detaches the route, retaining its ID and pending state. It invalidates any active binding and notifies its receiver with `reason: "hook_detached"`. That receiver stops forwarding and must not automatically resubscribe. Explicit PATCH reattaches it. After local disk loss, list existing hooks and reattach their IDs with newly supplied local URLs. Creating replacement IDs would not recover copies already globally read elsewhere.
-
-Flow: save the intended local URL, secret and creation key → open socket → `subscribe` with empty hook list to authenticate → create/attach hook over HTTP → save its returned ID → receive batches. Delivery can race the HTTP response; durably queue it by hook ID until the creation result links it to its local URL, and do not forward until that link is verified. The stable hook ID survives daemon restarts and URL changes.
-
-## WebSocket API
-
-The Rust client provides `ting_client::websocket::{WebSocket, Event, reconnect_delay}`. Connect with `WebSocket::connect(&client).await?` and publish a prepared send once with `socket.send(&prepared, &ata_access_token, &test_headers).await?`. It validates the original `Prepared.body` bytes, preserves their exact UTF-8 string, correlates request IDs, answers ping and enforces timeouts. Cancellation or an uncertain transport failure closes the in-flight connection; reconnect explicitly, obtain a valid endpoint access token, and retain the original event body/key.
-
-Receivers call `subscribe(org, session, hook_ids, test_headers)` or `watch_inbox(org, session)` and consume `next_event()`. `Event` distinguishes full `Tings` batches, `InboxChanged` hints and `Paused` controls. `receiver_id()` is the temporary connection ID for hook registration. `ack` and `unsubscribe` are explicit; the client does not acknowledge batches, reenroll recipients or refresh authority. Its bounded event queue closes the socket on overflow so consumers must recover through stable hooks or HTTP reconciliation. Use `reconnect_delay(failure_index)` starting at zero and reset after one healthy minute. `is_connected()` reports transport state only. This native Rust API does not change the browser's cookie-based wire protocol.
-
-### `GET /v1/ws?protocol=v1`
-
-Upgrade returns `101`. Unsupported versions return `400 unsupported_protocol` with `error.details.supported_protocols: ["v1"]`. Use one shared socket per system daemon; each identity authenticates separately. No authority is gained by opening the socket. The daemon serves one API origin while any subscriptions or requests are active. A conflicting WebSocket origin fails with `daemon_api_conflict` and cannot reconnect other identities to another server. When idle, it may close the old socket before connecting to another origin. HTTP calls may independently use another configured origin.
-
-Server greeting:
-
-```json
-{"op":"ready","receiver_id":"recv_123","protocol":"v1"}
-```
-
-Client requests include a nonempty `request_id` of at most 100 bytes; replies repeat it. Request IDs correlate replies, not business idempotency. Each subscription is scoped to verified context, org, recipient and hook. `subscribe` replaces the listed hooks' bindings on this receiver, leaving other identities and unlisted hooks alone.
-
-| Operation | Fields besides `op`, `request_id` | Success reply |
-| --- | --- | --- |
-| `subscribe` | `org_id`, `session_token`, `webhook_ids` (0–100); optional test `headers`. Empty list authenticates before registration. | `{"op":"subscribed","request_id":"req_1","for":"si:assistant","webhook_ids":["hook_123"]}` |
-| `unsubscribe` | `org_id`, `webhook_ids` (1–100); optional `pause`, default false. `pause: true` records the local retry cutoff until explicit reattachment. | `{"op":"unsubscribed","request_id":"req_2","webhook_ids":["hook_123"]}` |
-| `send` | `proof_token`, `body` (the exact prepared `/v1/tings` JSON as a string); optional test `headers`. | `{"op":"accepted","request_id":"req_3","id":"msg_123","created_at":"2026-09-22T10:00:00Z","status":"accepted","key":"dm-456","silent":false}` |
-| `ack` | `org_id`, `webhook_id`, `message_ids`, `kind`: `delivery` or `read`. | `{"op":"acked","request_id":"req_4","message_ids":["msg_123","msg_124"],"webhook_id":"hook_123","kind":"delivery"}` |
-| `watch_inbox` | `org_id`; browser uses its session cookie, other clients supply `session_token`. Replaces this socket's previous inbox watch. | `{"op":"watching_inbox","request_id":"req_5","org_id":"tos"}` |
-
-For `send`, parse the `body` string without changing its original UTF-8 bytes. Verify the ATA or supported OBO access token for the logical `POST /v1/tings` endpoint, then validate those request bytes and the existing resource ACLs. Use the same validation and database transaction as HTTP. This keeps proof-bound sends usable over the prewarmed socket; no extra connection is opened.
-
-Example subscription:
-
-```json
-{
-  "op": "subscribe",
-  "request_id": "req_1",
-  "org_id": "tos",
-  "session_token": "<Ting session credential>",
-  "webhook_ids": ["hook_123"]
-}
-```
-
-Unsubscribe/ACK require this connection's currently authorized hook binding; knowing its ID is insufficient. Validate the whole operation before changing state. Hook IDs must belong to the authenticated recipient and org. Repeating a successful ACK is harmless. Replacing a subscription resets unfinished receipt ACKs and replays unfinished copies; it never resets completed read ACKs.
-
-### Browser inbox updates
-
-The browser uses one WebSocket and `watch_inbox` for its selected org. Validate its Origin against the same explicit browser allowlist as HTTP and authenticate its HttpOnly session cookie; no JavaScript-readable session token is needed. A watch can only see its authenticated recipient's inbox and follows the same 30-second authority revalidation as other subscriptions.
-
-After an eligible non-silent arrival or a read-state change, send `{"op":"inbox_changed","org_id":"tos"}`. Silent arrivals do not trigger a notification; the carbon can fetch them explicitly in the drawer. This is a refresh hint, not a ting delivery or read ACK. Unsent hints may be combined. The browser refetches the visible inbox and acknowledges only tings the carbon actually views. It also refetches after starting a watch or reconnecting, so missed hints cannot hide unread history. Switching org replaces the watch. Closing the socket removes it.
-
-Session expiry, lost org permission or unavailable authorization stops the watch and sends `paused` with an empty webhook list. The browser retries `watch_inbox` after transient failures with the connection backoff below, refetching on success. A revoked session requires login; denied org access requires selecting an allowed org. A live socket alone must not leave a transiently paused watch stuck.
-
-This does not create a webhook registration or block new browser updates behind unread items. CLI users receive live tings through their registered webhooks and access the same drawer/read actions through inbox commands.
-
-A DM or Interface adapter may use the hint to fetch current DM state with its independently authenticated DM session. It must reconcile after connecting, reconnecting and periodically (silent events have no hint). Viewing DM must not acknowledge unrelated Ting inbox items. Ting read state and DM delivered/read receipts remain separate.
-
-### Incoming batches
-
-This is the server-to-daemon format, not the local webhook body. It retains its routing fields:
-
-```json
-{
-  "op": "tings",
-  "org_id": "tos",
-  "webhook_id": "hook_123",
-  "tings": [
-    {
-      "id": "msg_123",
-      "created_at": "2026-09-22T10:00:00Z",
-      "type": "dm.msg.received",
-      "data": {"message_id": "dm_456", "text": "Hello"},
-      "metadata": {},
-      "for": "si:assistant",
-      "key": "dm-456"
-    },
-    {
-      "id": "msg_124",
-      "created_at": "2026-09-22T10:00:01Z",
-      "type": "dm.msg.received",
-      "data": {"message_id": "dm_457", "text": "Are you there?"},
-      "metadata": {"isi": "planner"},
-      "for": "si:assistant",
-      "key": "dm-457"
-    }
-  ]
-}
-```
-
-A batch is nonempty and belongs to one recipient and hook. Only one batch is active per hook; hooks progress independently. Send a ready single ting immediately, without waiting to fill a batch. Keep the remaining backlog on the server. Reconnect may group the same IDs differently. No processing order is imposed.
-
-### The two ACKs
-
-| Kind | When sent | Effect |
-| --- | --- | --- |
-| `delivery` | Daemon has durably queued every listed ting. | Suppresses server retries for those IDs while that subscription stays active. They remain unfinished. |
-| `read` | Webhook returned `204` after accepting the whole local batch, and the daemon saved that result. | Permanently completes this hook's previously unfinished listed deliveries and sets their overall read true; already completed IDs are no-ops. |
-
-Before a delivery ACK, retry an unacknowledged batch after ten seconds. After it, the daemon owns local retry scheduling; a live socket alone is not a webhook acceptance. Only a read ACK completes delivery. ACKs may arrive out of order and affect only their listed IDs. A late delivery ACK cannot undo a read ACK. ACKs never delete tings; only the one-/three-month retention cleanup does.
-
-Validate every ACK against the current authorized receiver binding and the hook's delivery records. A delivery ACK needs an offer on the current subscription. A read ACK may settle an ID previously offered to this same hook, including a prior subscription or a ting now muted or blocked by a revoked app grant: it records past acceptance and does not authorize another delivery. Keep that offered history until the delivery is complete or the ting reaches its applicable one- or three-month retention cutoff. Completed IDs may be acknowledged again without changing overall read state, including after an app marks the ting unread. Unknown/unoffered IDs return `400 invalid_ack` with no partial update. Persist ACK state before replying. The daemon retains queued/accepted records until the server confirms the read ACK; a lost reply retries the ACK, not the already accepted webhook work. Old receiver bindings still cannot ACK after takeover.
-
-Disconnect, authorization loss or subscription replacement releases unfinished receipt state for replay. The server remains authoritative if local disk is lost. On local disk write failure, do not send a delivery ACK; stop forwarding for that hook until durable storage works.
-
-### Control and recovery
-
-WebSocket ping every 30 seconds; close the connection if no pong within ten seconds. Reconnect using delays of 1, 2, 4, 8, 16, then 30 seconds with up to 20% jitter, capped at 30 seconds; reset after one healthy minute. A transport reconnect restores all still-authorized attached subscriptions. A user's explicit reconnect command resumes only that identity's selected-org hooks.
-
-The daemon checks forwarding workers every five seconds. A due job more than 15 seconds late is restarted from its durable queue; scheduled retry waits do not count as a stall. A stalled hook cannot block other hooks or require resetting their socket. Replacing only its subscription can recover its server backlog if local state cannot be trusted. A process-level stall must fail the daemon health check and be restarted by the OS service manager.
-
-Control messages use `op: "paused"`, `org_id`, `webhook_ids`, and `reason` (`session_expired`, `authorization_unavailable`, `permission_changed`, `preference_changed`, `retry_cutoff`, `binding_replaced`, or `hook_detached`). Identity-wide pauses list all affected hook IDs, split into groups of at most 100. The daemon stops new local attempts for those hooks. Already dispatched requests may finish, but must not authorize new work. A replaced or detached binding never reconnects itself.
-
-Preference/grant changes invalidate affected active hook subscriptions and enqueue their control messages before the change operation returns. The daemon stops new attempts when it receives the invalidation, keeps completed acceptance results, drops other local offered batches, then resubscribes; the server re-evaluates eligibility. Other eligible tings on that hook continue. Revoked IAM sessions remain paused until login. If IAM revalidation is unavailable or the socket disconnects, pause local forwarding until authorization is restored. A request already handed to the webhook before the daemon observes the change cannot be recalled.
-
-## Local webhook call
-
-The daemon POSTs to the locally registered URL with `Content-Type: application/json` and `Ting-Webhook-Id: hook_123`. If configured, it also sends `Authorization: Bearer <webhook-secret>`. It never forwards Ting/IAM credentials. URLs and secrets never leave the machine.
-
-```json
-{
-  "tings": [
-    {
-      "id": "msg_123",
-      "created_at": "2026-09-22T10:00:00Z",
-      "type": "dm.msg.received",
-      "data": {"message_id": "dm_456", "text": "Hello"},
-      "metadata": {},
-      "key": "dm-456"
-    },
-    {
-      "id": "msg_124",
-      "created_at": "2026-09-22T10:00:01Z",
-      "type": "dm.msg.received",
-      "data": {"message_id": "dm_457", "text": "Are you there?"},
-      "metadata": {"isi": "planner"},
-      "key": "dm-457"
-    }
-  ]
-}
-```
-
-`204 No Content` means every ting in the batch was durably accepted. Processing may happen later. Any other status, timeout, lost response or partial acceptance leaves the batch retryable. A receiver that already accepted an ID must safely accept it again without repeating its effects. There is no per-item HTTP response or exactly-once guarantee.
-
-| Behavior | v1 rule |
-| --- | --- |
-| URL | Explicit user-supplied HTTP/HTTPS URL; no URL credentials or fragment. Localhost is the normal case. Do not follow redirects or forward secrets elsewhere. |
-| Request timeout | Ten seconds, including connection and response. |
-| Failed delivery | Retry after 60 seconds. Persist the first-failure time and next attempt; restart must not reset them. |
-| Retry cutoff | 12 hours of continuous failure for this hook; send unsubscribe with `pause: true`. A successful payload resets the failure window. Persist the pause locally before sending it; after an offline cutoff, register the pause before any automatic resubscription. Keep every ting recoverable. No failure alerts. |
-| Resume | Explicit webhook reattachment or `daemon reconnect`; resets that hook's failure window. A paused endpoint returning without registering cannot be detected after probes stop. |
-| Optional health probe | User supplies `--health-url`. HEAD every five seconds during active recovery, two-second timeout, same configured secret, no redirects. |
-| Probe results | Any 2xx permits a payload attempt once 60 seconds have elapsed since its last failure. Unhealthy probes replace payload retries with waiting. 405/501 disables probing and restores the 60-second payload schedule. A probe never ACKs a ting. |
-
-Without a health URL, use the normal 60-second payload retry. Health probing stops at the 12-hour cutoff. Pause only the failing hook, not all destinations of its recipient. Local worker supervision remains responsible while server retries are suppressed.
-
-## Bug reports
-
-### `POST /v1/bugs`
-
-Requires a Ting session; selected org is optional. Store an explicit `bug_report` event in Ting's backend Space Station table. Telemetry opt-out does not disable an explicitly requested report.
-
-```json
-{
-  "title": "Webhook stays disconnected after restart",
-  "body": "Steps to reproduce and the observed error.",
-  "pr_ref": null,
-  "attachments": [
-    {"name":"daemon.log","encoding":"utf-8","content":"Webhook request timed out.\n"}
-  ]
-}
-```
-
-Success — `201`:
-
-```json
-{"id":"bug_123","submitted":true,"pr_ref":null}
-```
-
-`title` is required, 1–200 UTF-8 bytes. `body` is required nonempty UTF-8 text. Optional `pr_ref` is an absolute HTTPS pull-request URL, maximum 2,048 bytes. Attachments default to `[]`, maximum eight. Each has a basename, encoding `utf-8` or `base64`, and its actual content. Validate base64 strictly. Maximum complete report JSON is 192 KiB; reject oversized reports with `413`, never truncate them. The CLI reads all supplied files before submitting anything.
-
-The backend adds verified reporter ID, context, app version if supplied in `Ting-Client-Version`, and a generated report ID. It must receive Space Station's durable ingest ACK for that record before returning `submitted: true`. Use the raw acknowledged ingest interface, not the telemetry helper that sanitizes/truncates values or merely queues them locally. Preserve report and attachment contents exactly within the limit. A Space Station rejection or uncertain result returns `503 report_storage_unconfirmed`; do not claim submission. Do not automatically retry a report with an uncertain result, since Space Station may already have stored it.
-
-Automatic diagnostics exclude tokens, secrets, ting data/metadata and attachments. Profile telemetry opt-out controls that profile's CLI and attributed daemon diagnostics. Backend operational diagnostics are service-controlled; the CLI does not expose an org-wide telemetry switch in v1. Explicit bug contents are included only because the user supplied them.
-
-## Errors
-
-HTTP errors use the status below and one JSON body:
-
-```json
-{
-  "error": {
-    "code": "recipient_not_registered",
-    "message": "dm does not have permission to notify si:assistant in tos.",
-    "hint": "Register this recipient with an IAM OBO proof before sending.",
-    "retryable": false
+  "session_token": "opaque-private-session",
+  "expires_at": "2026-11-09T00:00:00Z",
+  "identity": {
+    "id": "si:assistant",
+    "uuid": "account-uuid",
+    "kind": "silicon"
   }
 }
 ```
 
-`code`, `message`, `hint` and `retryable` are always present. Optional `details` carries machine-readable context such as `webhook_id` when registration succeeded but local setup failed, or `supported_protocols` for a version mismatch. A retry uses the same operation key and a currently valid token authorized for that endpoint. HTTP responses include a non-secret `Ting-Request-Id` for support. Errors must not expose credentials or another recipient's data.
+The native CLI stores only the opaque Ting token and account metadata. The Accounts refresh credential stays encrypted on the backend and is checked with Accounts introspection. This preserves the same Ting session up to its actual expiry without rotating credentials; closing a browser, CLI or daemon does not end it. Explicit logout or revoked authority ends it earlier.
 
-WebSocket request errors use `{"op":"error","request_id":"req_1","error":{...}}`. Malformed frames without a usable request ID use `request_id: null`. Frame errors do not close other identities' valid subscriptions; oversized/non-JSON transport messages may close the connection with the standard WebSocket error code. Subscription pauses use the separate `paused` control frame above.
+Send a durable `Idempotency-Key` when exchanging a short-lived token. Retrying the same completed login with the same key and token returns its original receipt. Preserve an uncertain attempt for recovery. If the server reports `login_outcome_unknown`, the upstream single-use exchange had no saved result; obtain a fresh short-lived token instead of replaying it. Never log credentials or secret-bearing session responses.
 
-| HTTP | Codes / action |
-| --- | --- |
-| `400` | `invalid_input`, `invalid_cursor`, `invalid_ack`, `test_context_required`, `unsupported_protocol`. Correct the request. |
-| `401` | `authentication_required`, `session_expired`, `invalid_proof`, `invalid_obo_token`, `invalid_ata_token`. Refresh the dedicated credential, or request separate approval again when revoked. |
-| `403` | `permission_denied`, `recipient_not_registered`, `test_context_mismatch`. No side effect. |
-| `404` | `not_found`. Missing or inaccessible resource. |
-| `409` | `idempotency_conflict`, `type_exists`, `hook_in_use`, `receiver_gone`. Resolve the stated conflict. |
-| `413` | `payload_too_large`. The operation was not accepted. |
-| `429` | `temporarily_rate_limited`. Include `Retry-After` in seconds. |
-| `503` | `dependency_unavailable`, `storage_unavailable`, `obo_verification_uncertain`, `ata_verification_uncertain`, `report_storage_unconfirmed`. Do not report success; follow the operation's retry rule. |
+`GET /v1/me` returns `authenticated`, `id`, `uuid`, `kind` and `expires_at`. `DELETE /v1/session` revokes the current session. Browser mutations require an allowed Origin and the browser CSRF protocol. Cookies must be sent with credentials; native requests use bearer authentication. Network failure is not evidence that the account has signed out.
 
-## Implementation and release checks
+## App authorization
 
-Use a stateless Rust client for the API, a CLI backed by one system daemon, and a SolidJS browser app. Browser actions must also be available through the CLI. Identity-scoped local IPC requires that profile's session credential and validates the OS caller's profile access; a directory or identity name alone is not authorization. Do not create one daemon or network socket per `SILICON_HOME`.
+App calls use a scoped Accounts app token targeted at Ting. Registration also requires delegation from the recipient. A source app's send authority does not create a recipient subscription or enable required delivery.
 
-The latency target is p95 below 100 ms from a proof-ready app's WebSocket send to the start of the local webhook call, with healthy prewarmed connections and no queued backlog. Include proof verification and durable acceptance in that measurement. The corresponding HTTP-send target is p95 below three seconds. Consumer processing time and disconnected recovery are separate. Record the reference deployment/network conditions when measuring these targets.
+| Route | Method | Required scope |
+| --- | --- | --- |
+| `/v1/tings` | POST | `tings.send` |
+| `/v1/subscriptions` | POST | `subscriptions.register`, with recipient delegation |
+| `/v1/subscriptions/query` | POST | `subscriptions.read` |
+| `/v1/subscriptions/revoke` | POST | `subscriptions.revoke` |
+| `/v1/sent/query` | POST | `tings.read` |
+| `/v1/sent/read` | POST | `tings.read.update` |
 
-Additive response fields are compatible within v1. Removed fields, changed meanings or incompatible request shapes require a new major API/protocol version and a documented migration. Published CLI/client/server versions must have a tested compatibility matrix before Honeycomb rolls out an update.
+Ting verifies these tokens with Silicon Accounts. It checks the source application against the type prefix or `app_id`, checks the target audience and required scope, and checks the delegated account when one is needed. Recipient ownership and active grants are enforced independently of app-token authority.
 
-Use the official IAM client for SLT exchange, refresh, introspection, OBO and ATA verification, and test-context verification. The concrete contracts above were checked against installed IAM documentation (`iam docs client/login`, `iam docs api/obo`, `iam docs api/testing-environments`). Honeycomb supplies app visibility/management permission. When a dependency is unavailable, deny the dependent operation with a recoverable error; never assume authority. Configure Space Station's backend, CLI/daemon, browser analytics and browser events tables separately. Its current raw ingest ACK is required for explicit bug reports.
+Register a recipient:
 
-Release configuration must supply the real API/frontend origins, IAM app registration and approved scopes and OBO/ATA catalogs, backend-held app credentials, Honeycomb integration, Space Station tables/keys, database and encryption keys, repository/docs URLs and published Rust package. Serve the browser and API on the same site, using custom domains or a same-origin proxy, so the SameSite=Lax session cookie works; CORS does not make cross-site cookies available. The installer and Honeycomb package must start the one system daemon and publish supported platform instructions. These are deployment bindings; no placeholder may silently point at a live service.
+```http
+POST /v1/subscriptions
+Authorization: Bearer <delegated-app-token>
+Content-Type: application/json
 
-Before release, demonstrate:
+{"app_id":"dm","for":"si:assistant"}
+```
 
-1. Every send rejects missing, unsupported, wrong-app, wrong-endpoint, expired or revoked credentials over both transports; test credentials cannot access production records. ATA never authorizes recipient registration or receiver bootstrap, and sends require a stored recipient subscription.
-2. Concurrent same-key sends and a crash during commit produce one accepted ting within 14 days; expiry permits a new ID without deleting the old ting.
-3. Disconnects before either ACK, lost ACK replies, daemon restart, worker stall, disk loss and the 12-hour cutoff all preserve unfinished copies. One failed hook cannot block another.
-4. A new hook gets unread history; an old hook also gets its own copies read elsewhere. No gap occurs during registration or concurrent sends.
-5. Muting/revocation pauses queued forwarding, silent tings never replay, browser preload never marks read, actual viewing does, and one destination's read never erases another's pending copy. App read/unread changes are atomic and limited to the issuing app/org/environment; replaying an accepted operation or completed hook ACK never undoes a later app update or resurrects an expired ting.
-6. Local payloads contain only `tings`; timestamps and IDs survive rebatching; limits reject oversized requests before acceptance without imposing storage quotas.
-7. CLI/API schemas, pagination and errors agree, and a bug report returns success only after Space Station acknowledges the unmodified report and attachment contents.
+The optional `for` assertion must resolve to the token's delegated account. Retain the subscription ID from the response. Query grants with `{ "app_id": "dm", "for": "si:assistant", "limit": 50 }`; `for` is optional. Revoke with `{ "app_id": "dm", "id": "subscription-id" }`.
 
-See [catalog authorization migration](https://ting.teamofsilicons.com/docs/catalog-authorization.md) for consent, durable token refresh and release requirements.
+All authorization failure paths must fail closed. App tokens are sent only to the configured HTTPS API and never in URL parameters, prepared request files, logs or notification data.
+
+## Send and idempotency
+
+```http
+POST /v1/tings
+Authorization: Bearer <app-token>
+Content-Type: application/json
+
+{"type":"dm.msg.received","for":"si:assistant","key":"message-456","data":{"message_id":"dm_456"},"metadata":{}}
+```
+
+A type is `app.service.event`, with a bare Silicon Apps ID and lowercase service and event names. The recipient may be a canonical Carbon/Silicon ID or immutable account UUID. `data` and `metadata` must be JSON objects; metadata defaults to `{}`. A key is nonempty and at most 200 bytes. The complete send request is at most 256 KiB. Duplicate object keys and unknown fields are rejected.
+
+An active recipient subscription and registered type are required. Preferences determine whether an ordinary notification is silent. `"delivery":"required"` is available only after the recipient explicitly opts that subscription in to required delivery.
+
+Persist the notification, initial delivery state and idempotency response together. Within the 14-day key window, retrying the same request preserves its original response, ID and `created_at`; changed content under the same key returns `idempotency_conflict`. Keep original bytes and use a currently valid token after a timeout. A lost response may follow acceptance, so the client never retries with a new key automatically.
+
+Notifications include `id`, immutable UTC `created_at`, `type`, `for`, `key`, `data`, `metadata`, `silent` and `read`. Internal ownership uses account UUIDs and survives canonical ID changes.
+
+## Catalog and types
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/v1/apps` | GET | Discover available Silicon Apps entries. |
+| `/v1/apps/{app_id}/types` | GET | List the app's notification types. |
+| `/v1/apps/{app_id}/types` | POST | Register `{ "type": "dm.msg.received", "description": "..." }`. |
+| `/v1/apps/{app_id}/types/{type}` | PATCH | Replace `{ "description": "..." }`. |
+
+Use a Ting account session. Type writes require the account's verified application authorship. A visible catalog entry alone gives no management or send authority. Type names are immutable and descriptions contain 1 to 1000 UTF-8 bytes. Carbon and Silicon defaults are enabled; recipient preferences are independent.
+
+## Recipient subscriptions and preferences
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/v1/subscriptions` | GET | List the signed-in account's sender grants. |
+| `/v1/subscriptions/{id}` | DELETE | Revoke an owned grant. |
+| `/v1/subscriptions/{id}/required-delivery` | GET | Inspect required-delivery opt-in. |
+| `/v1/subscriptions/{id}/required-delivery` | PUT | Set `{ "enabled": true }` or false. |
+| `/v1/preferences` | GET | List explicit preference overrides. |
+| `/v1/preferences` | PUT | Set `{ "app_id", "service"?, "type"?, "enabled" }`. |
+| `/v1/preferences` | DELETE | Remove exactly the identified app/service/event override. |
+
+Preference precedence is event, then service, then app, then enabled. Service and type selectors cannot both be supplied. A mute does not revoke the app's grant. Muting makes future ordinary notifications silent and pauses matching pending delivery; historically silent ordinary records do not become automatic backlog when unmuted.
+
+Only the recipient can opt into required delivery. The sender uses `delivery: "required"` after that opt-in, allowing automation delivery despite ordinary notification mute. No opt-in means rejection, not silent conversion.
+
+## Inbox and sent history
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/v1/inbox` | GET | Recipient history; filters `app_id`, `type`, `read`, `silent`, `limit`, `cursor`. |
+| `/v1/inbox/{id}` | GET | Full owned notification without changing read state. |
+| `/v1/inbox/read` | POST | Mark explicit `message_ids` read. |
+| `/v1/sent/query` | POST | App-owned sent list or full record. |
+| `/v1/sent/read` | POST | App-owned read-state mutation. |
+
+List limits default to 50 and accept 1 to 100. Continue with `next_cursor` using the same identity and filters. Cursors expire after 24 hours; an invalid cursor does not restart a listing. Notification history sorts by creation time and ID descending. Empty lists have `items: []`.
+
+Sent-list bodies require `app_id` and optionally `for`, `type`, `read`, `limit` and `cursor`. Full-record bodies require `app_id` and `id`, with optional `deliveries_cursor`. Lists omit full `data` and `metadata`; use get for the content.
+
+Sent-read bodies contain `app_id`, 1 to 100 unique `message_ids`, boolean `read` and an operation `key`. An app may update only its own notifications. Idempotent replay returns its original result and never reapplies a state mutation after a later operation. Read-state changes preserve creation time and do not resurrect expired records.
+
+## Hooks and durable delivery
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/v1/webhooks` | GET | List the account's stable hooks and pending counts. |
+| `/v1/webhooks` | POST | Create a hook for an authenticated `receiver_id`, with an `Idempotency-Key`. |
+| `/v1/webhooks/{id}` | PATCH | Reattach with `receiver_id` and optional explicit `takeover`. |
+| `/v1/webhooks/{id}` | DELETE | Detach while retaining identity and unfinished history. |
+
+Authenticate the receiving account on a WebSocket before hook creation. Persist creation intent, original body and key locally before the request. Recover uncertain creation with that exact request; rebind the resulting stable hook if the socket changed. A confirmed `receiver_gone` response means no hook was created by that attempt and permits a fresh attempt.
+
+Ting never stores a local destination URL or local secret. The native daemon persists those beside its private durable queue. It forwards `{"tings":[...]}` with `Ting-Webhook-Id` and an optional bearer secret. The destination returns exactly HTTP 204 after durable acceptance. Processing is at least once; consumers deduplicate by notification ID.
+
+A new hook gets eligible unread history and new notifications without a backlog/live gap. Existing hooks resume their own unfinished copies even when another hook has marked the notification globally read. A delivery ACK means durably queued; a read ACK means the local destination accepted it. Neither is a source application's semantic receipt.
+
+The daemon retries failures with bounded backoff and optionally probes local health first. Twelve hours of repeated failure pauses the hook until explicit reconnect. Unhooking preserves pending history. Expired or revoked sessions stop forwarding, and changing the stored account/session requires explicit reattachment.
+
+## WebSocket protocol
+
+Connect to `/v1/ws?protocol=v1`. Credentials are never supplied in the URL. The greeting is:
+
+```json
+{"op":"ready","receiver_id":"temporary-connection-id","protocol":"v1"}
+```
+
+Each command has a unique `request_id`; the server echoes it on the response. A send uses the prepared UTF-8 JSON string as its `body`:
+
+```json
+{"op":"send","request_id":"send-1","proof_token":"<app-token>","body":"{\"type\":\"dm.msg.received\",\"for\":\"si:assistant\",\"key\":\"message-456\",\"data\":{}}"}
+```
+
+Recipient operations are account scoped:
+
+```json
+{"op":"subscribe","request_id":"sub-1","session_token":"<ting-session>","webhook_ids":[]}
+{"op":"subscribe","request_id":"sub-2","session_token":"<ting-session>","webhook_ids":["hook-1"]}
+{"op":"watch_inbox","request_id":"watch-1","session_token":"<ting-session>"}
+{"op":"ack","request_id":"ack-1","webhook_id":"hook-1","message_ids":["message-1"],"kind":"delivery"}
+{"op":"unsubscribe","request_id":"unsub-1","webhook_ids":["hook-1"],"pause":true}
+```
+
+An empty subscription authenticates the session before hook registration. ACK `kind` is `delivery` or `read`. Browser inbox watches authenticate with the HttpOnly cookie and allowed Origin; JavaScript never needs the session credential.
+
+Unsolicited messages are `tings` with `webhook_id` and `tings`, `inbox_changed` as a content-free refresh hint, or `paused` with `webhook_ids` and `reason`. Refetch after starting or reconnecting a watch because hints can be lost. Silent ordinary arrivals do not produce a delivery hint.
+
+Use protocol ping/pong and bounded reconnect backoff: 1, 2, 4, 8, 16, then 30 seconds, with jitter capped at 30 seconds. Reset the failure count after a healthy minute. Restore only still-authorized attached hooks; a connected transport never extends session authority. The server revalidates account authority during long-lived connections.
+
+## Rust client
+
+The package is `silicon-ting-client`; its library name is `ting_client`.
+
+```rust,no_run
+use ting_client::{Client, Prepared, ProofOperation, Result};
+use ting_client::websocket::WebSocket;
+
+async fn publish(token: &str, original: Vec<u8>) -> Result<()> {
+    let client = Client::new("https://backend.ting.teamofsilicons.com")?;
+    let request = Prepared::new(ProofOperation::Send, original)?;
+    let accepted = request.execute(&client, token).await?;
+    println!("{accepted}");
+    Ok(())
+}
+
+async fn receive(session: &str, hook: String) -> Result<()> {
+    let client = Client::new("https://backend.ting.teamofsilicons.com")?;
+    let mut socket = WebSocket::connect(&client).await?;
+    socket.subscribe(session, &[hook]).await?;
+    let event = socket.next_event().await?;
+    println!("{event:?}");
+    Ok(())
+}
+```
+
+`Prepared::new` validates exact bytes and `Prepared::write` creates a private request file. `execute` sends those bytes once. `WebSocket::send(&request, token)` uses the same authorization and body. `watch_inbox(session)`, `unsubscribe(hooks, pause)` and `ack(hook, messages, kind)` are explicit operations. The client does not auto-acknowledge, auto-register recipients or retry uncertain mutations. It preserves events in a bounded queue and closes rather than dropping events on overflow.
+
+## Retention, errors and observability
+
+Read or silent notifications live for one calendar month; unread non-silent notifications live for three calendar months from immutable `created_at`. Retries and read changes do not extend retention. Local queues prune expired copies and verify older queued records before forwarding.
+
+Errors use `{ "error": { "code", "message", "hint", "retryable", "details" } }`. Invalid input is rejected before mutation; auth and resource ownership are checked for every operation. A timeout may follow acceptance, so clients preserve original request bytes and keys. Temporary overload may return 429 or 503, and clients honor retry guidance without assuming acceptance.
+
+`POST /v1/bugs` submits explicitly supplied report fields and attachments. Telemetry contains operational counters and timing, never tokens, secrets or notification payloads. Accounts refresh credentials and browser session tokens remain private server state.

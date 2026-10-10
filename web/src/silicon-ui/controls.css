@@ -1,0 +1,55 @@
+/* Native Solid controls adapted from Silicon UI button/input styles.
+   https://ui.teamofsilicons.com/button · https://ui.teamofsilicons.com/input
+   MIT; see LICENSE. Shared visual values come from the official foundation. */
+.button { position:relative;display:inline-flex;min-height:var(--control-height-md);align-items:center;justify-content:center;gap:var(--space-related);border:1px solid var(--border);border-radius:var(--radius-control);corner-shape:var(--corner-shape);padding:0 var(--space-inset);font:inherit;font-size:var(--text-sm);font-weight:500;line-height:var(--leading-body);white-space:nowrap;cursor:pointer;color:var(--foreground);background:var(--surface);-webkit-tap-highlight-color:transparent;transition:color var(--duration-fast) var(--ease-standard),background var(--duration-fast) var(--ease-standard),border-color var(--duration-fast) var(--ease-standard),opacity var(--duration-fast) var(--ease-standard),box-shadow var(--duration-fast) var(--ease-standard); }
+.button:disabled { cursor:not-allowed;opacity:.52; }
+.button[aria-busy="true"] { cursor:progress; }
+.button.primary { color:var(--background);background:var(--foreground);border-color:var(--foreground); }
+.button.danger { color:var(--danger);background:var(--surface);border-color:var(--border); }
+.button:not(.primary):disabled { opacity:1;color:var(--text-muted);background:var(--surface-muted);border-color:var(--border); }
+.button.small { min-height:var(--control-height-sm);padding-inline:var(--space-group);font-size:var(--text-xs); }
+.button.large { min-height:var(--control-height-lg);padding-inline:var(--space-comfort);font-size:var(--text-sm); }
+.button.primary:active:not(:disabled) { opacity:.84; }
+.button:not(.primary):active:not(:disabled) { background:var(--surface-muted); }
+input:not([type="checkbox"]),select,textarea { min-height:var(--control-height-md);padding:var(--space-related) var(--space-group);border:1px solid var(--border-strong);border-radius:var(--radius-control);corner-shape:var(--corner-shape);background-color:var(--surface);color:var(--foreground);font-size:var(--text-sm);line-height:var(--leading-body);letter-spacing:var(--tracking-body);transition:border-color var(--duration-fast) var(--ease-standard),background-color var(--duration-fast) var(--ease-standard); }
+input::placeholder,textarea::placeholder { color:var(--text-muted); }
+input:focus-visible,select:focus-visible,textarea:focus-visible { border-color:var(--foreground); }
+input[aria-invalid="true"],textarea[aria-invalid="true"] { border-color:var(--danger); }
+input:disabled,select:disabled,textarea:disabled { cursor:not-allowed;opacity:.5;background-color:var(--surface-muted); }
+input[type="checkbox"] { accent-color:var(--control-on); }
+h1,h2,h3 { font-family:var(--font-display); }
+.app-shell :is(.page-heading h1,.welcome-intro h1,.panel-heading h2,.docs-section h2,.dialog-heading h2,.feature-card h3,.empty-state h3,.setting-row h3) { color:var(--foreground); }
+.app-shell :is(.page-heading p,.welcome-intro>p,.feature-card p,.empty-state>p,.docs-section>p,.docs-tip p,.panel-heading p,.setting-row p,.form-note,.footnote,.gate-note,.login-note,.ting-meta,.connection-row p,.preference-row p) { color:var(--text-secondary); }
+.app-shell :is(.panel,.inbox-card,.feature-card,.app-detail,.detail-dialog,.form-dialog,.dialog-heading,.ting-row) { background:var(--surface);border-color:var(--border);border-radius:var(--radius-container);corner-shape:var(--corner-shape); }
+.app-shell :is(.detail-dialog,.form-dialog) { border-radius:var(--radius-overlay);box-shadow:var(--shadow-floating); }
+.app-shell :is(.info-line,.docs-tip,.message-content,.gate-panel,.developer-banner) { background:var(--silicon-gradient-soft);border-color:var(--border);color:var(--text-secondary);border-radius:var(--radius-container); }
+.app-shell :is(.eyebrow,.list-label,.step-number,.docs-tip h3,.text-link,.type-row h3,.ting-type,.preference-row strong,.connection-row strong,.app-selector strong,.form-stack label,.about-grid strong) { color:var(--text-secondary); }
+.app-shell :is(.app-avatar,.feature-icon,.status-icon,.empty-symbol,.terminal-symbol,.top-avatar) { background:var(--surface-muted);border-color:var(--border);color:var(--text-secondary);border-radius:var(--radius-control); }
+.app-shell :is(.tag,.feature-tag) { color:var(--text-secondary);background:var(--surface-muted);border-color:var(--border); }
+.app-shell .tag.green { color:var(--success);background:color-mix(in oklab,var(--success) 7%,var(--surface)); }
+.app-shell .ting-row.unread { background:var(--silicon-gradient-soft); }
+.app-shell .ting-row:hover,.app-shell .app-selector>button.selected { background:var(--surface-muted);border-color:var(--border); }
+.app-shell .type-row p,.app-shell .app-selector small,.app-shell .form-stack label,.app-shell .detail-info,.app-shell .detail-body time { color:var(--text-secondary); }
+.app-shell .serif-word { font-family:var(--font-display);color:var(--foreground);font-style:normal; }
+.app-shell .switch { background:var(--control-track);border-color:transparent; }
+.app-shell .switch.enabled { background:var(--control-on); }
+.app-shell .tabs button { color:var(--text-secondary); }
+.app-shell .tabs button.active { color:var(--foreground);border-color:var(--foreground); }
+.app-shell .type-search { border-color:var(--border-strong); }
+.app-shell .type-search input { border:0; }
+.account-summary { min-width:0;display:flex;flex-direction:column;gap:4px; }
+.account-summary strong { overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:500;color:#eee; }
+.account-summary small { font-size:10px;color:#aaa; }
+.workspace-picker { gap:10px; }
+.form-dialog .form-stack { margin:20px 0; }
+.form-dialog .panel-body>.button:last-child { margin-top:20px; }
+.app-shell .error-box { background:color-mix(in oklab,var(--warning) 7%,var(--surface));border-color:color-mix(in oklab,var(--warning) 24%,var(--surface));color:var(--foreground); }
+.app-shell .error-box p { color:var(--text-secondary); }
+.app-shell .toast { color:var(--success);background:var(--surface);border-color:var(--border);box-shadow:var(--shadow-raised); }
+@media (hover:hover) and (pointer:fine) {
+  .button.primary:hover:not(:disabled) { color:var(--background);background:var(--foreground);border-color:var(--foreground);opacity:.91;box-shadow:var(--shadow-resting); }
+  .button:not(.primary):hover:not(:disabled) { color:var(--foreground);background:var(--surface-muted);border-color:var(--border);box-shadow:var(--shadow-resting); }
+  .button.danger:hover:not(:disabled) { color:var(--danger);border-color:var(--danger); }
+  input:hover:not(:disabled,[aria-invalid="true"]),select:hover:not(:disabled),textarea:hover:not(:disabled,[aria-invalid="true"]) { border-color:var(--foreground); }
+}
+@media (prefers-reduced-motion:reduce) { .button,input,select,textarea { transition:none; } }

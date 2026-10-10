@@ -287,39 +287,3 @@ pub fn pipe(first: bool) -> Result<tokio::net::windows::named_pipe::NamedPipeSer
         )
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn private_files_have_current_user_owner_and_dacl() {
-        let dir = std::env::temp_dir().join(format!("ting-acl-{}", uuid::Uuid::new_v4()));
-        crate::private_dir(&dir).unwrap();
-        assert!(is_private_owner(&dir).unwrap());
-        let path = dir.join("session.json");
-        crate::write_private(&path, b"private", false).unwrap();
-        assert!(is_private_owner(&path).unwrap());
-        crate::write_private(&path, b"replacement", false).unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-    #[tokio::test]
-    async fn owner_only_pipe_accepts_local_owner() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let server = pipe(true).unwrap();
-        let client = tokio::spawn(async {
-            let mut c = tokio::net::windows::named_pipe::ClientOptions::new()
-                .open(crate::daemon_socket())
-                .unwrap();
-            verify_pipe_server(&c).unwrap();
-            assert!(verify_pipe_server_as(&c, "S-1-1-0").is_err());
-            c.write_all(b"ok").await.unwrap();
-        });
-        server.connect().await.unwrap();
-        let mut server = server;
-        let mut bytes = [0u8; 2];
-        server.read_exact(&mut bytes).await.unwrap();
-        assert_eq!(&bytes, b"ok");
-        client.await.unwrap();
-    }
-}

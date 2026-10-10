@@ -1,8 +1,6 @@
 mod auth;
 mod error;
-mod lifecycle;
 mod migration;
-mod receiver;
 mod store;
 mod telemetry;
 mod validation;
@@ -27,10 +25,10 @@ use validation as v;
 pub struct Config {
     pub database_path: String,
     pub encryption_key: String,
-    pub iam_url: String,
-    pub iam_app_id: String,
-    pub iam_app_secret: String,
-    pub honeycomb_url: String,
+    pub accounts_url: String,
+    pub accounts_app_id: String,
+    pub accounts_app_secret: String,
+    pub apps_url: String,
     pub spacestation_url: String,
     pub spacestation_key: String,
     pub spacestation_table: String,
@@ -57,10 +55,12 @@ impl Config {
         Ok(Self {
             database_path: env::var("TING_DATABASE_PATH").unwrap_or("ting.sqlite".into()),
             encryption_key: required("TING_ENCRYPTION_KEY")?,
-            iam_url: required("TING_IAM_URL")?,
-            iam_app_id: "ting".into(),
-            iam_app_secret: required("TING_IAM_APP_SECRET")?,
-            honeycomb_url: required("TING_HONEYCOMB_URL")?,
+            accounts_url: env::var("TING_ACCOUNTS_URL")
+                .unwrap_or_else(|_| "https://accounts.teamofsilicons.com".into()),
+            accounts_app_id: "ting".into(),
+            accounts_app_secret: required("TING_ACCOUNTS_APP_SECRET")?,
+            apps_url: env::var("TING_APPS_URL")
+                .unwrap_or_else(|_| "https://apps.teamofsilicons.com".into()),
             spacestation_url: required("TING_SPACESTATION_URL")?,
             spacestation_key: required("TING_SPACESTATION_KEY")?,
             spacestation_table: required("TING_SPACESTATION_TABLE")?,
@@ -107,22 +107,6 @@ pub type Shared = Arc<App>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args: Vec<_> = env::args().skip(1).collect();
-    if !args.is_empty() {
-        anyhow::ensure!(
-            (args.len() == 2 || (args.len() == 3 && args[2] == "--apply"))
-                && args[0] == "--migrate-public-identifiers",
-            "Usage: ting-server [--migrate-public-identifiers MAP.json [--apply]]"
-        );
-        let report = migration::run(
-            &env::var("TING_DATABASE_PATH")?,
-            &env::var("TING_ENCRYPTION_KEY")?,
-            &args[1],
-            args.len() == 3,
-        )?;
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
-    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .json()
@@ -153,10 +137,10 @@ async fn main() -> anyhow::Result<()> {
             interval.tick().await;
             let _gate = retention.mutations.lock().await;
             let result: Result<()> = async {
-                for (ctx, org, recipient) in retention.store.expired_owners()? {
+                for (ctx, recipient) in retention.store.expired_owners()? {
                     retention
                         .hub
-                        .invalidate(&retention, &ctx, &org, &recipient, "preference_changed")
+                        .invalidate(&retention, &ctx, &recipient, "preference_changed")
                         .await?;
                 }
                 let removed = retention.store.prune()?;
@@ -191,8 +175,6 @@ fn router(app: Shared) -> Router {
             }),
         )
         .route("/v1/ws", get(upgrade))
-        .route("/v1/receivers/ws", get(receiver::upgrade))
-        .route("/internal/honeycomb/organizations/{org}/testing-environments/{environment}/operations/{operation}", axum::routing::put(lifecycle::handle))
         .route("/v1/{*path}", any(http))
         .fallback(|| async { Error::not_found() })
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
@@ -214,6 +196,9 @@ async fn request_id(
         Ok(()) => next.run(request).await,
         Err(error) => error.into_response(),
     };
+    response
+        .headers_mut()
+        .insert("Cache-Control", HeaderValue::from_static("no-store"));
     response
         .headers_mut()
         .append("Vary", HeaderValue::from_static("Origin"));
@@ -269,7 +254,7 @@ fn unauth() -> Error {
         401,
         "authentication_required",
         "A valid Ting session is required.",
-        "Sign in through IAM or run ting login with a Ting-bound short-lived token.",
+        "Sign in through Silicon Accounts or run ting login with a Ting-bound short-lived token.",
     )
 }
 fn query(raw: Option<String>) -> Result<Value> {
@@ -354,7 +339,7 @@ async fn http(
             "Send a complete request no larger than 1 MiB.",
         )
     })?;
-    if path == "iam/webhook" && method == Method::POST {
+    if path == "accounts/webhook" && method == Method::POST {
         return Ok(response(200, app.auth.webhook(&headers, &bytes)?));
     }
     if method == Method::OPTIONS {
@@ -364,7 +349,12 @@ async fn http(
                 "Access-Control-Allow-Methods",
                 HeaderValue::from_static("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
             );
-            r.headers_mut().insert("Access-Control-Allow-Headers",HeaderValue::from_static("Content-Type,Authorization,Idempotency-Key,IAM_TEST_APP_SECRET,X-Testing-Environment-Key,Ting-Client-Version"));
+            r.headers_mut().insert(
+                "Access-Control-Allow-Headers",
+                HeaderValue::from_static(
+                    "Content-Type,Authorization,Idempotency-Key,Ting-Client-Version",
+                ),
+            );
         }
         return Ok(r);
     }
@@ -406,10 +396,10 @@ async fn http(
             },
         )?
     };
-    if path == "iam" && method == Method::GET {
+    if path == "accounts" && method == Method::GET {
         return Ok(response(
             200,
-            json!({"app_id":app.config.iam_app_id,"api_version":"v1","repository_url":app.config.repository_url,"docs_url":app.config.docs_url,"rust_package":app.config.rust_package}),
+            json!({"app_id":app.config.accounts_app_id,"api_version":"v1","repository_url":app.config.repository_url,"docs_url":app.config.docs_url,"rust_package":app.config.rust_package}),
         ));
     }
     if path == "session/login" && method == Method::GET {
@@ -428,14 +418,12 @@ async fn http(
                 &headers,
             )
             .await?;
-        return Ok(response(status, result));
-    }
-    if path == "receivers/bootstrap" && method == Method::POST {
-        let (status, result) = receiver::bootstrap(&app, &headers, &bytes, &b).await?;
-        return Ok(response(status, result));
-    }
-    if path.starts_with("receivers/") {
-        return receiver::http(&app, &method, &path, &headers, &f).await;
+        let mut r = response(status, result.clone());
+        r.headers_mut()
+            .insert("Set-Cookie", session_cookie(&result)?);
+        r.headers_mut()
+            .insert("Cache-Control", HeaderValue::from_static("no-store"));
+        return Ok(r);
     }
     if method == Method::POST
         && [
@@ -464,7 +452,7 @@ async fn http(
         return Ok(response(202, telemetry::ingest(&app, b).await?));
     }
     if path == "session" && method == Method::DELETE {
-        // Possession can revoke this exact opaque session even when IAM access is
+        // Possession can revoke this exact opaque session even when Silicon Accounts access is
         // inactive; durable cleanup must not depend on live login authority.
         let id = auth::Auth::session_id(&token(&headers)?)?;
         let result = app.auth.logout_by_id(&id).await;
@@ -484,9 +472,6 @@ async fn http(
     if path == "me" && method == Method::GET {
         return Ok(response(200, app.auth.me(&p)?));
     }
-    if path == "orgs" && method == Method::GET {
-        return Ok(response(200, app.auth.orgs(&p).await?));
-    }
     if path == "bugs" && method == Method::POST {
         return Ok(response(
             201,
@@ -501,119 +486,23 @@ async fn http(
                 .await?,
         ));
     }
-    if path == "session/catalog/callback" && method == Method::GET {
-        v::fields(
-            &f,
-            &[
-                "org_id",
-                "request_id",
-                "authorization_id",
-                "state",
-                "code",
-                "error",
-            ],
-            &["org_id", "request_id", "state"],
-        )?;
-        let org = v::string(&f, "org_id", 128)?;
-        let request = v::string(&f, "request_id", 128)?;
-        let state = v::string(&f, "state", 128)?;
-        let (nonce, success) = app
-            .auth
-            .catalog_browser_callback(
-                &p,
-                org,
-                request,
-                f.get("code")
-                    .and_then(Value::as_str)
-                    .filter(|_| f.get("error").is_none()),
-                state,
-                v::string(&f, "authorization_id", 36)?,
-            )
-            .await?;
-        return popup_login_response(&app, &nonce, success);
-    }
-    if parts.len() < 3 || parts[0] != "orgs" {
-        return Err(Error::not_found());
-    }
-    let org = app.auth.org(&p, parts[1]).await?;
-    match (method.as_str(), parts[2..].as_ref()) {
-        ("POST", ["catalog-authorizations"]) => {
-            v::fields(
-                &b,
-                &["idempotency_key", "popup_nonce"],
-                &["idempotency_key"],
-            )?;
-            let key = b["idempotency_key"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("idempotency_key must be a string"))?;
-            if let Some(nonce) = b.get("popup_nonce") {
-                let nonce = nonce
-                    .as_str()
-                    .filter(|n| {
-                        n.len() == 64
-                            && n.bytes()
-                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    })
-                    .ok_or_else(|| Error::invalid("Invalid popup nonce."))?;
-                let callback = format!("{}/v1/session/catalog/callback", app.config.public_origin);
-                let value = app
-                    .auth
-                    .catalog_start_browser(&p, &org, key, &callback, nonce)
-                    .await?;
-                let redirect = if value["status"] == "completed" {
-                    popup_login_response(&app, nonce, true)?.headers()["Location"]
-                        .to_str()
-                        .map_err(|_| Error::unavailable("Invalid completion URL."))?
-                        .to_owned()
-                } else {
-                    let mut url = url::Url::parse(
-                        value["consent_url"]
-                            .as_str()
-                            .ok_or_else(|| Error::unavailable("Missing consent address."))?,
-                    )
-                    .map_err(|_| Error::unavailable("Invalid consent address."))?;
-                    url.query_pairs_mut().append_pair("display", "popup");
-                    url.to_string()
-                };
-                return Ok(response(200, json!({"redirect_url":redirect})));
-            }
-            return Ok(response(200, app.auth.catalog_start(&p, &org, key).await?));
-        }
-        ("GET", ["catalog-authorizations", id]) => {
-            return Ok(response(200, app.auth.catalog_status(&p, &org, id).await?));
-        }
-        ("POST", ["catalog-authorizations", id, "complete"]) => {
-            v::fields(&b, &["code", "state"], &["code", "state"])?;
-            let code = b["code"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("code must be a string"))?;
-            let state = b["state"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("state must be a string"))?;
-            return Ok(response(
-                200,
-                app.auth.catalog_complete(&p, &org, id, code, state).await?,
-            ));
-        }
-        _ => {}
-    }
-    let apps = match (method.as_str(), parts[2..].as_ref()) {
-        ("GET", ["apps"]) => Some(app.auth.apps(&p, &org).await?),
+    let apps = match (method.as_str(), parts.as_slice()) {
+        ("GET", ["apps"]) => Some(app.auth.apps(&p).await?),
         ("GET", ["apps", aid, "types"]) => {
-            app.auth.permission(&p, &org, aid, false).await?;
+            app.auth.permission(&p, aid, false).await?;
             None
         }
         ("POST", ["apps", aid, "types"]) | ("PATCH", ["apps", aid, "types", _]) => {
-            app.auth.permission(&p, &org, aid, true).await?;
+            app.auth.permission(&p, aid, true).await?;
             None
         }
         _ => None,
     };
-    // ponytail: one lifecycle gate serializes store access; use per-environment gates if throughput requires it.
+    // Serialize durable notification mutations on the single SQLite writer.
     let _gate = app.mutations.lock().await;
     app.auth.check_session(&p)?;
-    let binding = format!("{}:{}:{}:{}", p.context, p.id, org, path);
-    match (method.as_str(), parts[2..].as_ref()) {
+    let binding = format!("{}:{}:{}", p.context, p.id, path);
+    match (method.as_str(), parts.as_slice()) {
         ("GET", ["apps"]) => {
             v::fields(&f, &["limit", "cursor"], &[])?;
             let value = apps.unwrap();
@@ -625,30 +514,32 @@ async fn http(
             Ok(response(
                 200,
                 app.store
-                    .page(app.store.types(&p, &org, aid)?, &binding, &f, false)?,
+                    .page(app.store.types(&p, aid)?, &binding, &f, false)?,
             ))
         }
         ("POST", ["apps", aid, "types"]) => {
-            let (s, b) = app.store.register_type(&p, &org, aid, &b, false)?;
+            let (s, b) = app.store.register_type(&p, aid, &b, false)?;
             Ok(response(s, b))
         }
         ("PATCH", ["apps", aid, "types", typ]) => {
             if v::type_parts(typ)?.0 != *aid {
                 return Err(Error::not_found());
             }
-            let (s, b) = app.store.register_type(&p, &org, typ, &b, true)?;
+            let (s, b) = app.store.register_type(&p, typ, &b, true)?;
             Ok(response(s, b))
         }
         ("GET", ["subscriptions"]) => {
             v::fields(&f, &["app_id", "for", "limit", "cursor"], &[])?;
-            if f.get("for").is_some_and(|x| x.as_str() != Some(&p.id)) {
+            if let Some(recipient) = f.get("for").and_then(Value::as_str)
+                && app.auth.resolve_account(recipient).await? != p.id
+            {
                 return Err(Error::not_found());
             }
             Ok(response(
                 200,
                 app.store.page(
                     app.store
-                        .grants(&p.context, &org, Some(&p.id), f["app_id"].as_str())?,
+                        .grants(&p.context, Some(&p.id), f["app_id"].as_str())?,
                     &binding,
                     &f,
                     false,
@@ -656,9 +547,9 @@ async fn http(
             ))
         }
         ("DELETE", ["subscriptions", sid]) => {
-            let (out, recipient) = app.store.revoke(&p.context, &org, sid, Some(&p.id), None)?;
+            let (out, recipient) = app.store.revoke(&p.context, sid, Some(&p.id), None)?;
             app.hub
-                .invalidate(&app, &p.context, &org, &recipient, "permission_changed")
+                .invalidate(&app, &p.context, &recipient, "permission_changed")
                 .await?;
             Ok(response(200, out))
         }
@@ -674,10 +565,10 @@ async fn http(
                 v::fields(&f, &[], &[])?;
                 None
             };
-            let out = app.store.required_delivery(&p, &org, sid, enabled)?;
+            let out = app.store.required_delivery(&p, sid, enabled)?;
             if enabled.is_some() {
                 app.hub
-                    .invalidate(&app, &p.context, &org, &p.id, "preference_changed")
+                    .invalidate(&app, &p.context, &p.id, "preference_changed")
                     .await?;
                 app.changed.notify_waiters();
             }
@@ -691,24 +582,22 @@ async fn http(
             )?;
             let rows = app
                 .store
-                .tings(&p.context, &org, Some(&p.id), f["app_id"].as_str(), &f)?;
+                .tings(&p.context, Some(&p.id), f["app_id"].as_str(), &f)?;
             Ok(response(200, app.store.page(rows, &binding, &f, true)?))
         }
         ("GET", ["inbox", mid]) => Ok(response(
             200,
-            app.store.ting(&p.context, &org, mid, Some(&p.id), None)?,
+            app.store.ting(&p.context, mid, Some(&p.id), None)?,
         )),
         ("POST", ["inbox", "read"]) => {
             v::fields(&b, &["message_ids"], &["message_ids"])?;
-            let (out, expired) = app
-                .store
-                .read(&p, &org, &v::ids(&b, "message_ids", false)?)?;
+            let (out, expired) = app.store.read(&p, &v::ids(&b, "message_ids", false)?)?;
             if expired {
                 app.hub
-                    .invalidate(&app, &p.context, &org, &p.id, "preference_changed")
+                    .invalidate(&app, &p.context, &p.id, "preference_changed")
                     .await?;
             }
-            app.hub.inbox_changed(&p.context, &org, &p.id).await;
+            app.hub.inbox_changed(&p.context, &p.id).await;
             Ok(response(200, out))
         }
         ("GET", ["preferences"]) => {
@@ -719,18 +608,17 @@ async fn http(
             Ok(response(
                 200,
                 app.store
-                    .page(app.store.preferences(&p, &org, &f)?, &binding, &f, false)?,
+                    .page(app.store.preferences(&p, &f)?, &binding, &f, false)?,
             ))
         }
         ("PUT", ["preferences"]) | ("DELETE", ["preferences"]) => {
             let out = app.store.preference(
                 &p,
-                &org,
                 if method == Method::DELETE { &f } else { &b },
                 method == Method::DELETE,
             )?;
             app.hub
-                .invalidate(&app, &p.context, &org, &p.id, "preference_changed")
+                .invalidate(&app, &p.context, &p.id, "preference_changed")
                 .await?;
             Ok(response(200, out))
         }
@@ -738,19 +626,18 @@ async fn http(
             v::fields(&f, &["limit", "cursor"], &[])?;
             Ok(response(
                 200,
-                app.store
-                    .page(app.store.hooks(&p, &org)?, &binding, &f, false)?,
+                app.store.page(app.store.hooks(&p)?, &binding, &f, false)?,
             ))
         }
         ("POST", ["webhooks"]) => {
             v::fields(&b, &["receiver_id"], &["receiver_id"])?;
             let recv = v::string(&b, "receiver_id", 255)?;
             let key = header(&headers, "Idempotency-Key")?;
-            if let Some(old) = app.store.hook_retry(&p, &org, key, &b)? {
+            if let Some(old) = app.store.hook_retry(&p, key, &b)? {
                 return Ok(response(200, old));
             }
-            app.hub.authorized(recv, &p, &org).await?;
-            let out = app.store.create_hook(&p, &org, recv, key, &b)?;
+            app.hub.authorized(recv, &p).await?;
+            let out = app.store.create_hook(&p, recv, key, &b)?;
             app.changed.notify_waiters();
             Ok(response(201, out))
         }
@@ -758,26 +645,24 @@ async fn http(
             v::fields(&b, &["receiver_id", "takeover"], &["receiver_id"])?;
             let recv = v::string(&b, "receiver_id", 255)?;
             let takeover = v::optional_bool(&b, "takeover")?.unwrap_or(false);
-            app.hub.authorized(recv, &p, &org).await?;
+            app.hub.authorized(recv, &p).await?;
             let replaced = app
                 .store
-                .bind(&p, &org, recv, &[hid.to_string()], true, takeover)?;
-            app.hub
-                .pause_replaced(replaced, &org, "binding_replaced")
-                .await;
+                .bind(&p, recv, &[hid.to_string()], true, takeover)?;
+            app.hub.pause_replaced(replaced, "binding_replaced").await;
             app.changed.notify_waiters();
             let out = app
                 .store
-                .hooks(&p, &org)?
+                .hooks(&p)?
                 .into_iter()
                 .find(|x| x["id"] == *hid)
                 .ok_or_else(Error::not_found)?;
             Ok(response(200, out))
         }
         ("DELETE", ["webhooks", hid]) => {
-            if let Some(recv) = app.store.detach(&p, &org, hid)? {
+            if let Some(recv) = app.store.detach(&p, hid)? {
                 app.hub
-                    .pause_replaced(vec![(recv, hid.to_string())], &org, "hook_detached")
+                    .pause_replaced(vec![(recv, hid.to_string())], "hook_detached")
                     .await;
             }
             Ok(response(200, json!({"id":hid,"removed":true})))
@@ -793,7 +678,11 @@ pub async fn app_call(
     b: &Value,
 ) -> Result<(u16, Value)> {
     v::filters(b)?;
-    v::string(b, "org_id", 255)?;
+    let mut body = b.clone();
+    if let Some(recipient) = b.get("for").and_then(Value::as_str) {
+        body["for"] = app.auth.resolve_account(recipient).await?.into();
+    }
+    let b = &body;
     if path == "/v1/subscriptions" {
         let proof = app.auth.proof(headers, path, bytes).await?;
         let _gate = app.mutations.lock().await;
@@ -810,46 +699,38 @@ pub async fn app_call(
             let result = app.store.send(&p, b)?;
             if result.0 == 202 && !result.1["silent"].as_bool().unwrap_or(true) {
                 app.hub
-                    .inbox_changed(&p.context, &p.org_id, v::string(b, "for", 255)?)
+                    .inbox_changed(&p.context, v::string(b, "for", 255)?)
                     .await;
             }
             app.changed.notify_waiters();
             Ok(result)
         }
         "/v1/subscriptions/query" => {
-            v::fields(
-                b,
-                &["org_id", "app_id", "for", "limit", "cursor"],
-                &["org_id", "app_id"],
-            )?;
+            v::fields(b, &["app_id", "for", "limit", "cursor"], &["app_id"])?;
             proof_app(&p, b)?;
-            let rows =
-                app.store
-                    .grants(&p.context, &p.org_id, b["for"].as_str(), Some(&p.app_id))?;
+            let rows = app
+                .store
+                .grants(&p.context, b["for"].as_str(), Some(&p.app_id))?;
             Ok((
                 200,
                 app.store.page(
                     rows,
-                    &format!("{}:{}:{}:subscriptions", p.context, p.org_id, p.app_id),
+                    &format!("{}:{}:subscriptions", p.context, p.app_id),
                     b,
                     false,
                 )?,
             ))
         }
         "/v1/subscriptions/revoke" => {
-            v::fields(b, &["org_id", "app_id", "id"], &["org_id", "id"])?;
+            v::fields(b, &["app_id", "id"], &["id"])?;
             if b.get("app_id").is_some() {
                 proof_app(&p, b)?;
             }
-            let (out, recipient) = app.store.revoke(
-                &p.context,
-                &p.org_id,
-                v::string(b, "id", 255)?,
-                None,
-                Some(&p.app_id),
-            )?;
+            let (out, recipient) =
+                app.store
+                    .revoke(&p.context, v::string(b, "id", 255)?, None, Some(&p.app_id))?;
             app.hub
-                .invalidate(app, &p.context, &p.org_id, &recipient, "permission_changed")
+                .invalidate(app, &p.context, &recipient, "permission_changed")
                 .await?;
             Ok((200, out))
         }
@@ -858,29 +739,21 @@ pub async fn app_call(
             for (recipient, expired) in owners {
                 if expired {
                     app.hub
-                        .invalidate(app, &p.context, &p.org_id, &recipient, "preference_changed")
+                        .invalidate(app, &p.context, &recipient, "preference_changed")
                         .await?;
                 }
-                app.hub
-                    .inbox_changed(&p.context, &p.org_id, &recipient)
-                    .await;
+                app.hub.inbox_changed(&p.context, &recipient).await;
             }
             app.changed.notify_waiters();
             Ok((200, out))
         }
         "/v1/sent/query" => {
             proof_app(&p, b)?;
-            let binding = format!("{}:{}:{}:sent", p.context, p.org_id, p.app_id);
+            let binding = format!("{}:{}:sent", p.context, p.app_id);
             if b.get("id").is_some() {
-                v::fields(
-                    b,
-                    &["org_id", "app_id", "id", "deliveries_cursor"],
-                    &["org_id", "app_id", "id"],
-                )?;
+                v::fields(b, &["app_id", "id", "deliveries_cursor"], &["app_id", "id"])?;
                 let mid = v::string(b, "id", 255)?;
-                let mut t = app
-                    .store
-                    .ting(&p.context, &p.org_id, mid, None, Some(&p.app_id))?;
+                let mut t = app.store.ting(&p.context, mid, None, Some(&p.app_id))?;
                 let mut f = json!({"limit":100});
                 if let Some(c) = b.get("deliveries_cursor") {
                     f["cursor"] = c.clone()
@@ -899,17 +772,13 @@ pub async fn app_call(
             } else {
                 v::fields(
                     b,
-                    &["org_id", "app_id", "for", "type", "read", "limit", "cursor"],
-                    &["org_id", "app_id"],
+                    &["app_id", "for", "type", "read", "limit", "cursor"],
+                    &["app_id"],
                 )?;
                 v::optional_bool(b, "read")?;
-                let rows = app.store.tings(
-                    &p.context,
-                    &p.org_id,
-                    b["for"].as_str(),
-                    Some(&p.app_id),
-                    b,
-                )?;
+                let rows = app
+                    .store
+                    .tings(&p.context, b["for"].as_str(), Some(&p.app_id), b)?;
                 Ok((200, app.store.page(rows, &binding, b, true)?))
             }
         }
@@ -930,23 +799,33 @@ fn proof_app(p: &auth::AppAuthority, b: &Value) -> Result<()> {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BrowserLoginAttempt {
     next: String,
-    identity_kind: Option<String>,
+    verifier: String,
     popup_nonce: Option<String>,
 }
+fn session_cookie(session: &Value) -> Result<HeaderValue> {
+    let token = session["session_token"]
+        .as_str()
+        .ok_or_else(|| Error::unavailable("Missing session token."))?;
+    let expiry = session["expires_at"]
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .ok_or_else(|| Error::unavailable("Missing session expiry."))?;
+    let remaining = (expiry.timestamp() - store::now()).max(0);
+    HeaderValue::from_str(&format!("ting_session={token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={remaining}; Expires={}",expiry.with_timezone(&chrono::Utc).format("%a, %d %b %Y %H:%M:%S GMT")))
+        .map_err(|_| Error::unavailable("Invalid session cookie."))
+}
 fn browser_login(app: &App, f: &Value) -> Result<Response> {
+    use base64::Engine;
+    use sha2::Digest;
     v::fields(f, &["next", "identity_kind", "popup_nonce"], &[])?;
-    let kind = f.get("identity_kind").and_then(Value::as_str);
+    if f.get("identity_kind").is_some_and(|v| v != "carbon") {
+        return Err(Error::invalid(
+            "Silicons sign in with a short-lived token from the Silicon Accounts CLI.",
+        ));
+    }
     let popup_nonce = f.get("popup_nonce").and_then(Value::as_str);
-    if kind.is_some_and(|k| !matches!(k, "carbon" | "silicon"))
-        || popup_nonce.is_some_and(|n| {
-            kind.is_none()
-                || n.len() != 64
-                || !n
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        })
-    {
-        return Err(Error::invalid("Choose Carbon or Silicon to sign in."));
+    if popup_nonce.is_some_and(|n| n.len() != 64 || !n.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err(Error::invalid("Invalid popup nonce."));
     }
     let next = f.get("next").and_then(Value::as_str).unwrap_or("/");
     if !next.starts_with('/')
@@ -957,38 +836,32 @@ fn browser_login(app: &App, f: &Value) -> Result<Response> {
         return Err(Error::invalid("next must be a local absolute path."));
     }
     let attempt = BrowserLoginAttempt {
-        next: next.to_owned(),
-        identity_kind: kind.map(str::to_owned),
+        next: next.into(),
+        verifier: auth::secret(),
         popup_nonce: popup_nonce.map(str::to_owned),
     };
-    let state = app.store.login_attempt(
-        &serde_json::to_string(&attempt)
-            .map_err(|_| Error::unavailable("Cannot save sign-in attempt."))?,
-    )?;
-    let mut callback =
-        url::Url::parse(&format!("{}/v1/session/callback", app.config.public_origin))
-            .map_err(|_| Error::unavailable("Invalid callback configuration."))?;
-    callback.query_pairs_mut().append_pair("state", &state);
-    let mut target = url::Url::parse(
-        &env::var("TING_IAM_CONSENT_URL")
-            .unwrap_or_else(|_| "https://auth.iam.teamofsilicons.com/login".into()),
-    )
-    .map_err(|_| Error::unavailable("Invalid IAM consent configuration."))?;
+    let state = app.store.login_attempt(&serde_json::to_string(&attempt)?)?;
+    let callback = format!("{}/v1/session/callback", app.config.public_origin);
+    let mut target = url::Url::parse(&format!(
+        "{}/authorize",
+        app.config.accounts_url.trim_end_matches('/')
+    ))
+    .map_err(|_| Error::unavailable("Invalid Accounts configuration."))?;
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(sha2::Sha256::digest(attempt.verifier.as_bytes()));
     target
         .query_pairs_mut()
-        .append_pair("app_id", &app.config.iam_app_id)
-        .append_pair("redirect_uri", callback.as_str());
-    if let Some(kind) = kind {
-        target.query_pairs_mut().append_pair("identity_kind", kind);
-    }
-    if popup_nonce.is_some() {
-        target.query_pairs_mut().append_pair("display", "popup");
-    }
+        .append_pair("app_id", &app.config.accounts_app_id)
+        .append_pair("redirect_uri", &callback)
+        .append_pair("response_type", "code")
+        .append_pair("scope", "profile")
+        .append_pair("state", &state)
+        .append_pair("code_challenge", &challenge)
+        .append_pair("code_challenge_method", "S256");
     let mut r = StatusCode::FOUND.into_response();
     r.headers_mut().insert(
         "Location",
-        HeaderValue::from_str(target.as_str())
-            .map_err(|_| Error::invalid("Invalid login redirect."))?,
+        HeaderValue::from_str(target.as_str()).map_err(|_| Error::invalid("Invalid redirect."))?,
     );
     r.headers_mut().insert(
         "Set-Cookie",
@@ -997,78 +870,65 @@ fn browser_login(app: &App, f: &Value) -> Result<Response> {
         ))
         .unwrap(),
     );
+    r.headers_mut()
+        .insert("Cache-Control", HeaderValue::from_static("no-store"));
+    r.headers_mut()
+        .insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
     Ok(r)
 }
 async fn browser_callback(app: &App, h: &HeaderMap, f: &Value) -> Result<Response> {
-    v::fields(f, &["slt", "state"], &["slt", "state"])?;
-    let state = v::string(f, "state", 255)?;
+    v::fields(
+        f,
+        &["code", "state", "error", "error_description"],
+        &["state"],
+    )?;
+    let state = v::string(f, "state", 128)?;
     if cookie(h, "ting_login").as_deref() != Some(state) {
-        return Err(Error::new(
-            403,
-            "permission_denied",
-            "The login callback does not belong to this browser.",
-            "Start a new login from Ting.",
+        return Err(Error::invalid(
+            "The sign-in state does not match this browser.",
         ));
     }
-    let saved = app.store.read_login_attempt(state)?;
-    let attempt: BrowserLoginAttempt = if saved.starts_with('/') {
-        BrowserLoginAttempt {
-            next: saved,
-            identity_kind: None,
-            popup_nonce: None,
+    let attempt: BrowserLoginAttempt = serde_json::from_str(&app.store.read_login_attempt(state)?)?;
+    if f.get("error").is_some() {
+        if let Some(nonce) = attempt.popup_nonce.as_deref() {
+            return popup_login_response(app, nonce, false);
         }
-    } else {
-        serde_json::from_str(&saved).map_err(|_| Error::invalid("Invalid sign-in attempt."))?
-    };
-    let exchanged = app
+        return Err(Error::invalid(
+            "Accounts sign-in was not completed. Start sign-in again.",
+        ));
+    }
+    let (_, session) = app
         .auth
-        .login_as(
-            v::string(f, "slt", 16384)?,
+        .login_code(
+            v::string(f, "code", 8192)?,
             state,
-            &HeaderMap::new(),
-            attempt.identity_kind.as_deref(),
+            &format!("{}/v1/session/callback", app.config.public_origin),
+            &attempt.verifier,
         )
-        .await;
-    let (_, session) = match exchanged {
-        Ok(value) => value,
-        Err(error) => {
-            if error.status >= 500 || error.status == 429 {
-                return Ok((StatusCode::SERVICE_UNAVAILABLE, [("Content-Type", "text/html; charset=utf-8"), ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer")],
-                    r#"<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Retry Ting sign-in</title><main><h1>Sign-in was interrupted</h1><p>Your original sign-in is still saved. Try again to finish it safely.</p><a href="">Retry sign-in</a></main></html>"#).into_response());
-            }
-            if let Some(nonce) = attempt.popup_nonce.as_deref() {
-                return popup_login_response(app, nonce, false);
-            }
-            return Err(error);
-        }
-    };
-    let token = session["session_token"]
-        .as_str()
-        .ok_or_else(|| Error::unavailable("IAM session exchange returned no session."))?;
+        .await?;
     let mut r = if let Some(nonce) = attempt.popup_nonce.as_deref() {
         popup_login_response(app, nonce, true)?
     } else {
-        let mut response = StatusCode::SEE_OTHER.into_response();
-        response.headers_mut().insert(
+        let mut r = StatusCode::SEE_OTHER.into_response();
+        r.headers_mut().insert(
             "Location",
             HeaderValue::from_str(&attempt.next)
-                .map_err(|_| Error::invalid("Invalid redirect path."))?,
+                .map_err(|_| Error::invalid("Invalid redirect."))?,
         );
-        response
+        r
     };
-    r.headers_mut().append(
-        "Set-Cookie",
-        HeaderValue::from_str(&format!(
-            "ting_session={token}; Path=/; HttpOnly; Secure; SameSite=Lax"
-        ))
-        .map_err(|_| Error::unavailable("Invalid session response."))?,
-    );
+    r.headers_mut()
+        .append("Set-Cookie", session_cookie(&session)?);
     r.headers_mut().append(
         "Set-Cookie",
         HeaderValue::from_static(
             "ting_login=; Path=/v1/session; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
         ),
     );
+    r.headers_mut()
+        .insert("Cache-Control", HeaderValue::from_static("no-store"));
+    r.headers_mut()
+        .insert("Referrer-Policy", HeaderValue::from_static("no-referrer"));
     Ok(r)
 }
 fn popup_login_response(app: &App, nonce: &str, success: bool) -> Result<Response> {
@@ -1076,7 +936,7 @@ fn popup_login_response(app: &App, nonce: &str, success: bool) -> Result<Respons
         .map_err(|_| Error::unavailable("Invalid frontend configuration."))?;
     target
         .query_pairs_mut()
-        .append_pair("iam_popup", "complete")
+        .append_pair("accounts_popup", "complete")
         .append_pair("nonce", nonce)
         .append_pair("result", if success { "ok" } else { "error" });
     let mut response = StatusCode::SEE_OTHER.into_response();
@@ -1119,239 +979,4 @@ async fn upgrade(
         .max_message_size(1024 * 1024)
         .max_frame_size(1024 * 1024)
         .on_upgrade(move |socket| ws::connection(app, socket, browser)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{body::Body, http::Request};
-    use tower::ServiceExt;
-
-    #[test]
-    fn browser_origins_require_explicit_secure_hosts() {
-        assert_eq!(browser_origins("").unwrap(), Vec::<String>::new());
-        assert_eq!(
-            browser_origins(" https://dm.example:443/, http://[::1]:5173 ").unwrap(),
-            ["https://dm.example", "http://[::1]:5173"]
-        );
-        for invalid in [
-            "*",
-            "https://*.example",
-            "null",
-            "https://",
-            "http://dm.example",
-            "https://dm.example/path",
-            "https://user@dm.example",
-            "https://dm.example?x",
-            "https://dm.example#x",
-            "https://dm.example,",
-        ] {
-            assert!(browser_origins(invalid).is_err(), "{invalid}");
-        }
-    }
-
-    #[tokio::test]
-    async fn browser_http_and_websocket_share_origin_policy() {
-        let directory = tempfile::tempdir().unwrap();
-        let config = Config {
-            database_path: directory
-                .path()
-                .join("ting.sqlite")
-                .to_string_lossy()
-                .into_owned(),
-            encryption_key: "ab".repeat(32),
-            iam_url: "http://127.0.0.1:1".into(),
-            iam_app_id: "ting".into(),
-            iam_app_secret: "fixture-secret".into(),
-            honeycomb_url: "http://127.0.0.1:1".into(),
-            spacestation_url: "http://127.0.0.1:1".into(),
-            spacestation_key: String::new(),
-            spacestation_table: String::new(),
-            frontend_origin: "https://ting.example".into(),
-            public_origin: "https://backend.ting.example".into(),
-            browser_origins: browser_origins("https://dm.example,https://interface.example")
-                .unwrap(),
-            repository_url: String::new(),
-            docs_url: String::new(),
-            rust_package: String::new(),
-        };
-        let app = Arc::new(App {
-            auth: auth::Auth::new(&config).unwrap(),
-            store: store::Store::open(&config.database_path).unwrap(),
-            config,
-            hub: ws::Hub::default(),
-            changed: Notify::new(),
-            mutations: Mutex::new(()),
-        });
-        let router = router(app);
-        for origin in [
-            "https://ting.example",
-            "https://backend.ting.example",
-            "https://dm.example",
-            "https://interface.example",
-        ] {
-            for (method, path, cookie, body, status) in [
-                ("GET", "/v1/iam", false, "", 200),
-                ("OPTIONS", "/v1/me", false, "", 204),
-                ("GET", "/v1/me", false, "", 401),
-                ("DELETE", "/v1/session", true, "", 401),
-                ("POST", "/v1/session", false, "{", 400),
-                ("GET", "/missing", false, "", 404),
-            ] {
-                let mut request = Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .header("Origin", origin)
-                    .header("Content-Type", "application/json");
-                if cookie {
-                    request = request.header("Cookie", "ting_session=invalid");
-                }
-                let response = router
-                    .clone()
-                    .oneshot(request.body(Body::from(body)).unwrap())
-                    .await
-                    .unwrap();
-                assert_eq!(response.status().as_u16(), status, "{method} {path}");
-                assert_eq!(response.headers()["Access-Control-Allow-Origin"], origin);
-                assert_eq!(
-                    response.headers()["Access-Control-Allow-Credentials"],
-                    "true"
-                );
-                assert_eq!(
-                    response.headers()["Access-Control-Expose-Headers"],
-                    "Ting-Request-Id"
-                );
-                assert_eq!(response.headers()["Vary"], "Origin");
-                assert!(response.headers().contains_key("Ting-Request-Id"));
-                if method == "OPTIONS" {
-                    assert!(
-                        response.headers()["Access-Control-Allow-Methods"]
-                            .to_str()
-                            .unwrap()
-                            .contains("DELETE")
-                    );
-                    assert!(
-                        response.headers()["Access-Control-Allow-Headers"]
-                            .to_str()
-                            .unwrap()
-                            .contains("Authorization")
-                    );
-                }
-            }
-        }
-        let response = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/session")
-                    .header("Origin", "https://dm.example")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(vec![b'x'; 1024 * 1024 + 1]))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            response.headers()["Access-Control-Allow-Origin"],
-            "https://dm.example"
-        );
-        for origin in [
-            "https://dm.example.attacker.test",
-            "null",
-            "https://dm.example/",
-        ] {
-            for method in ["GET", "OPTIONS"] {
-                let response = router
-                    .clone()
-                    .oneshot(
-                        Request::builder()
-                            .method(method)
-                            .uri("/v1/iam")
-                            .header("Origin", origin)
-                            .body(Body::empty())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap();
-                assert_eq!(response.status(), StatusCode::FORBIDDEN);
-                assert!(
-                    !response
-                        .headers()
-                        .contains_key("Access-Control-Allow-Origin")
-                );
-            }
-        }
-        let response = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/iam")
-                    .header("Origin", "https://dm.example")
-                    .header("Origin", "https://dm.example")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        let response = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/v1/session")
-                    .header("Cookie", "ting_session=invalid")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert!(
-            !response
-                .headers()
-                .contains_key("Access-Control-Allow-Origin")
-        );
-        let response = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/iam")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            !response
-                .headers()
-                .contains_key("Access-Control-Allow-Origin")
-        );
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("ws://{}/v1/ws?protocol=v1", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        use tokio_tungstenite::tungstenite::{Error as WsError, client::IntoClientRequest};
-        for (origin, status) in [
-            ("https://dm.example", 401),
-            ("https://interface.example", 401),
-            ("https://attacker.test", 403),
-        ] {
-            let mut request = url.clone().into_client_request().unwrap();
-            request
-                .headers_mut()
-                .insert("Origin", HeaderValue::from_static(origin));
-            let error = tokio_tungstenite::connect_async(request).await.unwrap_err();
-            let WsError::Http(response) = error else {
-                panic!("expected HTTP rejection: {error}")
-            };
-            assert_eq!(response.status().as_u16(), status);
-        }
-        server.abort();
-    }
 }

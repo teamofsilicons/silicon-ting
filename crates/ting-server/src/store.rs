@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
-/// Stored hook ID, context, organization, recipient, and session.
-pub type ActiveHookRow = (String, String, String, String, String);
+/// Stored hook ID, account namespace, recipient UUID, and session.
+pub type ActiveHookRow = (String, String, String, String);
 
 pub fn id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
@@ -53,23 +53,23 @@ impl Store {
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         crate::migration::ensure_current(&c)?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
- CREATE TABLE IF NOT EXISTS types(ctx TEXT,org TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,org,name));
- CREATE INDEX IF NOT EXISTS types_app ON types(ctx,app,name);
- CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,ctx TEXT,org TEXT,app TEXT,recipient TEXT,active INTEGER,UNIQUE(ctx,org,app,recipient));
- CREATE TABLE IF NOT EXISTS preferences(ctx TEXT,org TEXT,recipient TEXT,app TEXT,scope TEXT,enabled INTEGER,PRIMARY KEY(ctx,org,recipient,app,scope));
- CREATE TABLE IF NOT EXISTS tings(id TEXT PRIMARY KEY,ctx TEXT,org TEXT,app TEXT,recipient TEXT,type TEXT,created TEXT,body TEXT,silent INTEGER,read INTEGER DEFAULT 0);
- CREATE INDEX IF NOT EXISTS inbox ON tings(ctx,org,recipient,created,id);
- CREATE INDEX IF NOT EXISTS ting_age ON tings(created);
- CREATE INDEX IF NOT EXISTS sent ON tings(ctx,org,app,created,id);
- CREATE TABLE IF NOT EXISTS keys(ctx TEXT,org TEXT,owner TEXT,kind TEXT,key TEXT,fingerprint TEXT,response TEXT,expires INTEGER,PRIMARY KEY(ctx,org,owner,kind,key));
- CREATE TABLE IF NOT EXISTS hooks(id TEXT PRIMARY KEY,ctx TEXT,org TEXT,recipient TEXT,state TEXT,receiver TEXT,session TEXT);
- CREATE INDEX IF NOT EXISTS hooks_owner ON hooks(ctx,org,recipient);
+ CREATE TABLE IF NOT EXISTS types(ctx TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,name));
+ CREATE INDEX IF NOT EXISTS accounts_types_app ON types(ctx,app,name);
+ CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,active INTEGER,UNIQUE(ctx,app,recipient));
+ CREATE TABLE IF NOT EXISTS preferences(ctx TEXT,recipient TEXT,app TEXT,scope TEXT,enabled INTEGER,PRIMARY KEY(ctx,recipient,app,scope));
+ CREATE TABLE IF NOT EXISTS tings(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,type TEXT,created TEXT,body TEXT,silent INTEGER,read INTEGER DEFAULT 0);
+ CREATE INDEX IF NOT EXISTS accounts_inbox ON tings(ctx,recipient,created,id);
+ CREATE INDEX IF NOT EXISTS accounts_ting_age ON tings(created);
+ CREATE INDEX IF NOT EXISTS accounts_sent ON tings(ctx,app,created,id);
+ CREATE TABLE IF NOT EXISTS keys(ctx TEXT,owner TEXT,kind TEXT,key TEXT,fingerprint TEXT,response TEXT,expires INTEGER,PRIMARY KEY(ctx,owner,kind,key));
+ CREATE TABLE IF NOT EXISTS hooks(id TEXT PRIMARY KEY,ctx TEXT,recipient TEXT,state TEXT,receiver TEXT,session TEXT);
+ CREATE INDEX IF NOT EXISTS accounts_hooks_owner ON hooks(ctx,recipient);
  CREATE TABLE IF NOT EXISTS deliveries(hook TEXT,message TEXT,offered INTEGER DEFAULT 0,offer_receiver TEXT,delivery INTEGER DEFAULT 0,read INTEGER DEFAULT 0,last_offer INTEGER DEFAULT 0,PRIMARY KEY(hook,message),FOREIGN KEY(hook) REFERENCES hooks(id),FOREIGN KEY(message) REFERENCES tings(id));
  CREATE TABLE IF NOT EXISTS cursors(id TEXT PRIMARY KEY,binding TEXT,position INTEGER,boundary TEXT,expires INTEGER);
- CREATE TABLE IF NOT EXISTS lifecycle_environments(id TEXT PRIMARY KEY,revision INTEGER NOT NULL,generation INTEGER NOT NULL,key_version INTEGER NOT NULL,key_hash TEXT NOT NULL,state TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS login_attempts(id TEXT PRIMARY KEY,next TEXT,expires INTEGER);
  UPDATE hooks SET receiver=NULL,session=NULL,state=CASE WHEN state='connected' THEN 'disconnected' ELSE state END;
  UPDATE deliveries SET delivery=0,offer_receiver=NULL,last_offer=0 WHERE read=0;")?;
+        crate::migration::copy_types(&c)?;
         let store = Self { db: Mutex::new(c) };
         store.prune()?;
         Ok(store)
@@ -80,25 +80,25 @@ impl Store {
             .lock()
             .map_err(|_| Error::unavailable("Database writer lock is unavailable."))
     }
-    fn enabled(db: &Connection, ctx: &str, org: &str, recipient: &str, typ: &str) -> Result<bool> {
+    fn enabled(db: &Connection, ctx: &str, recipient: &str, typ: &str) -> Result<bool> {
         let (app, service, _) = v::type_parts(typ)?;
         for scope in [
             format!("type:{typ}"),
             format!("service:{service}"),
             "app".into(),
         ] {
-            let b=db.query_row("SELECT enabled FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope=?",params![ctx,org,recipient,app,scope],|r|r.get(0)).optional()?;
+            let b=db.query_row("SELECT enabled FROM preferences WHERE ctx=? AND recipient=? AND app=? AND scope=?",params![ctx,recipient,app,scope],|r|r.get(0)).optional()?;
             if let Some(b) = b {
                 return Ok(b);
             }
         }
         Ok(true)
     }
-    fn grant(db: &Connection, ctx: &str, org: &str, app: &str, recipient: &str) -> Result<bool> {
+    fn grant(db: &Connection, ctx: &str, app: &str, recipient: &str) -> Result<bool> {
         Ok(db
             .query_row(
-                "SELECT active FROM grants WHERE ctx=? AND org=? AND app=? AND recipient=?",
-                params![ctx, org, app, recipient],
+                "SELECT active FROM grants WHERE ctx=? AND app=? AND recipient=?",
+                params![ctx, app, recipient],
                 |r| r.get(0),
             )
             .optional()?
@@ -107,20 +107,18 @@ impl Store {
     fn required_delivery_enabled(
         db: &Connection,
         ctx: &str,
-        org: &str,
         app: &str,
         recipient: &str,
     ) -> Result<bool> {
         Ok(db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM preferences WHERE ctx=? AND org=? AND app=? AND recipient=? AND scope='delivery:required' AND enabled=1)",
-            params![ctx, org, app, recipient],
+            "SELECT EXISTS(SELECT 1 FROM preferences WHERE ctx=? AND app=? AND recipient=? AND scope='delivery:required' AND enabled=1)",
+            params![ctx, app, recipient],
             |r| r.get(0),
         )?)
     }
     pub fn register_type(
         &self,
         p: &Principal,
-        org: &str,
         app: &str,
         b: &Value,
         update: bool,
@@ -151,8 +149,8 @@ impl Store {
         let db = self.lock()?;
         let old: Option<String> = db
             .query_row(
-                "SELECT description FROM types WHERE ctx=? AND org=? AND name=?",
-                params![p.context, org, typ],
+                "SELECT description FROM types WHERE ctx=? AND name=?",
+                params![p.context, typ],
                 |r| r.get(0),
             )
             .optional()?;
@@ -161,8 +159,8 @@ impl Store {
                 return Err(Error::not_found());
             }
             db.execute(
-                "UPDATE types SET description=? WHERE ctx=? AND org=? AND name=?",
-                params![description, p.context, org, typ],
+                "UPDATE types SET description=? WHERE ctx=? AND name=?",
+                params![description, p.context, typ],
             )?;
             200
         } else if let Some(old) = old {
@@ -175,8 +173,8 @@ impl Store {
             200
         } else {
             db.execute(
-                "INSERT INTO types VALUES(?,?,?,?,?)",
-                params![p.context, org, app, typ, description],
+                "INSERT INTO types VALUES(?,?,?,?)",
+                params![p.context, app, typ, description],
             )?;
             201
         };
@@ -185,15 +183,14 @@ impl Store {
             json!({"type":typ,"description":description,"defaults":{"carbon":true,"silicon":true}}),
         ))
     }
-    pub fn types(&self, p: &Principal, org: &str, app: &str) -> Result<Vec<Value>> {
+    pub fn types(&self, p: &Principal, app: &str) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q = db.prepare(
-            "SELECT name,description FROM types WHERE ctx=? AND org=? AND app=? ORDER BY name",
-        )?;
-        Ok(q.query_map(params![p.context,org,app],|r|Ok(json!({"type":r.get::<_,String>(0)?,"description":r.get::<_,String>(1)?,"defaults":{"carbon":true,"silicon":true}})))?.collect::<std::result::Result<_,_>>()?)
+        let mut q =
+            db.prepare("SELECT name,description FROM types WHERE ctx=? AND app=? ORDER BY name")?;
+        Ok(q.query_map(params![p.context,app],|r|Ok(json!({"type":r.get::<_,String>(0)?,"description":r.get::<_,String>(1)?,"defaults":{"carbon":true,"silicon":true}})))?.collect::<std::result::Result<_,_>>()?)
     }
     pub fn subscribe_app(&self, p: &Proof, b: &Value) -> Result<(u16, Value)> {
-        v::fields(b, &["org_id", "app_id", "for"], &["org_id", "app_id"])?;
+        v::fields(b, &["app_id", "for"], &["app_id"])?;
         if v::string(b, "app_id", 255)? != p.app_id
             || b.get("for")
                 .is_some_and(|f| f.as_str() != Some(&p.actor_id))
@@ -202,14 +199,14 @@ impl Store {
                 403,
                 "permission_denied",
                 "The registration must match the verified issuing app and actor.",
-                "Obtain the recipient's consent through IAM OBO.",
+                "Obtain the recipient's consent through Silicon Accounts User verification.",
             ));
         }
         let db = self.lock()?;
         let old: Option<(String, bool)> = db
             .query_row(
-                "SELECT id,active FROM grants WHERE ctx=? AND org=? AND app=? AND recipient=?",
-                params![p.context, p.org_id, p.app_id, p.actor_id],
+                "SELECT id,active FROM grants WHERE ctx=? AND app=? AND recipient=?",
+                params![p.context, p.app_id, p.actor_id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
@@ -219,39 +216,37 @@ impl Store {
         } else {
             let sid = id("sub");
             db.execute(
-                "INSERT INTO grants VALUES(?,?,?,?,?,1)",
-                params![sid, p.context, p.org_id, p.app_id, p.actor_id],
+                "INSERT INTO grants VALUES(?,?,?,?,1)",
+                params![sid, p.context, p.app_id, p.actor_id],
             )?;
             (sid, 201)
         };
         Ok((
             status,
-            json!({"id":sid,"org_id":p.org_id,"app_id":p.app_id,"for":p.actor_id,"active":true,"required_delivery":Self::required_delivery_enabled(&db,&p.context,&p.org_id,&p.app_id,&p.actor_id)?}),
+            json!({"id":sid,"app_id":p.app_id,"for":p.actor_id,"active":true,"required_delivery":Self::required_delivery_enabled(&db,&p.context,&p.app_id,&p.actor_id)?}),
         ))
     }
     pub fn grants(
         &self,
         ctx: &str,
-        org: &str,
         recipient: Option<&str>,
         app: Option<&str>,
     ) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT g.id,g.app,g.recipient,g.active,g.active AND COALESCE(p.enabled,0) FROM grants g LEFT JOIN preferences p ON p.ctx=g.ctx AND p.org=g.org AND p.app=g.app AND p.recipient=g.recipient AND p.scope='delivery:required' WHERE g.ctx=? AND g.org=? AND (? IS NULL OR g.recipient=?) AND (? IS NULL OR g.app=?) ORDER BY g.id")?;
-        Ok(q.query_map(params![ctx,org,recipient,recipient,app,app],|r|Ok(json!({"id":r.get::<_,String>(0)?,"app_id":r.get::<_,String>(1)?,"for":r.get::<_,String>(2)?,"active":r.get::<_,bool>(3)?,"required_delivery":r.get::<_,bool>(4)?})))?.collect::<std::result::Result<_,_>>()?)
+        let mut q=db.prepare("SELECT g.id,g.app,g.recipient,g.active,g.active AND COALESCE(p.enabled,0) FROM grants g LEFT JOIN preferences p ON p.ctx=g.ctx AND p.app=g.app AND p.recipient=g.recipient AND p.scope='delivery:required' WHERE g.ctx=? AND (? IS NULL OR g.recipient=?) AND (? IS NULL OR g.app=?) ORDER BY g.id")?;
+        Ok(q.query_map(params![ctx,recipient,recipient,app,app],|r|Ok(json!({"id":r.get::<_,String>(0)?,"app_id":r.get::<_,String>(1)?,"for":r.get::<_,String>(2)?,"active":r.get::<_,bool>(3)?,"required_delivery":r.get::<_,bool>(4)?})))?.collect::<std::result::Result<_,_>>()?)
     }
     pub fn required_delivery(
         &self,
         p: &Principal,
-        org: &str,
         sid: &str,
         enabled: Option<bool>,
     ) -> Result<Value> {
         let db = self.lock()?;
         let grant: Option<(String, bool)> = db
             .query_row(
-                "SELECT app,active FROM grants WHERE ctx=? AND org=? AND id=? AND recipient=?",
-                params![p.context, org, sid, p.id],
+                "SELECT app,active FROM grants WHERE ctx=? AND id=? AND recipient=?",
+                params![p.context, sid, p.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
@@ -261,40 +256,39 @@ impl Store {
                 403,
                 "recipient_not_registered",
                 "Required delivery needs an active recipient registration.",
-                "Register through IAM OBO, then explicitly enable required delivery.",
+                "Register through Silicon Accounts User verification, then explicitly enable required delivery.",
             ));
         }
         if let Some(enabled) = enabled {
             if enabled {
                 db.execute(
-                    "INSERT OR REPLACE INTO preferences VALUES(?,?,?,?,'delivery:required',1)",
-                    params![p.context, org, p.id, app],
+                    "INSERT OR REPLACE INTO preferences VALUES(?,?,?,'delivery:required',1)",
+                    params![p.context, p.id, app],
                 )?;
             } else {
                 db.execute(
-                    "DELETE FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope='delivery:required'",
-                    params![p.context, org, p.id, app],
+                    "DELETE FROM preferences WHERE ctx=? AND recipient=? AND app=? AND scope='delivery:required'",
+                    params![p.context, p.id, app],
                 )?;
             }
         }
         Ok(
-            json!({"id":sid,"app_id":app,"for":p.id,"enabled":active && Self::required_delivery_enabled(&db,&p.context,org,&app,&p.id)?}),
+            json!({"id":sid,"app_id":app,"for":p.id,"enabled":active && Self::required_delivery_enabled(&db,&p.context,&app,&p.id)?}),
         )
     }
     pub fn revoke(
         &self,
         ctx: &str,
-        org: &str,
         sid: &str,
         recipient: Option<&str>,
         app: Option<&str>,
     ) -> Result<(Value, String)> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
-        let grant:Option<(String,String)>=tx.query_row("SELECT recipient,app FROM grants WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?)",params![ctx,org,sid,recipient,recipient,app,app],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let grant:Option<(String,String)>=tx.query_row("SELECT recipient,app FROM grants WHERE ctx=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?)",params![ctx,sid,recipient,recipient,app,app],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let (owner, app) = grant.ok_or_else(Error::not_found)?;
         tx.execute("UPDATE grants SET active=0 WHERE id=?", [sid])?;
-        tx.execute("DELETE FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope='delivery:required'",params![ctx,org,owner,app])?;
+        tx.execute("DELETE FROM preferences WHERE ctx=? AND recipient=? AND app=? AND scope='delivery:required'",params![ctx,owner,app])?;
         tx.commit()?;
         Ok((
             json!({"id":sid,"active":false,"required_delivery":false}),
@@ -304,10 +298,8 @@ impl Store {
     pub fn send(&self, p: &AppAuthority, b: &Value) -> Result<(u16, Value)> {
         v::fields(
             b,
-            &[
-                "org_id", "type", "data", "metadata", "for", "key", "delivery",
-            ],
-            &["org_id", "type", "data", "for", "key"],
+            &["type", "data", "metadata", "for", "key", "delivery"],
+            &["type", "data", "for", "key"],
         )?;
         let typ = v::string(b, "type", 255)?;
         let (app, _, _) = v::type_parts(typ)?;
@@ -330,15 +322,14 @@ impl Store {
             return Err(v_err("data and metadata must be JSON objects."));
         }
         let mut normalized = b.clone();
-        normalized["org_id"] = p.org_id.clone().into();
         if normalized.get("metadata").is_none() {
             normalized["metadata"] = json!({})
         }
         let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&normalized)?));
         let mut db = self.lock()?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if let Some((fp,response))=tx.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='send' AND key=? AND expires>?",params![p.context,p.org_id,p.app_id,key,now()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?{if fp!=fingerprint{return Err(conflict("idempotency_conflict","This key was accepted with different content."))}return Ok((200,decode(response)?))}
-        // App IDs are global; types belong to the app's owner, not the delivery org.
+        if let Some((fp,response))=tx.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND owner=? AND kind='send' AND key=? AND expires>?",params![p.context,p.app_id,key,now()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?{if fp!=fingerprint{return Err(conflict("idempotency_conflict","This key was accepted with different content."))}return Ok((200,decode(response)?))}
+        // Notification types belong to the verified sending app.
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM types WHERE ctx=? AND app=? AND name=?)",
             params![p.context, app, typ],
@@ -347,16 +338,15 @@ impl Store {
         if !exists {
             return Err(Error::not_found());
         }
-        if !Self::grant(&tx, &p.context, &p.org_id, app, recipient)? {
+        if !Self::grant(&tx, &p.context, app, recipient)? {
             return Err(Error::new(
                 403,
                 "recipient_not_registered",
                 "The app does not have permission to notify this recipient.",
-                "Register the recipient through a fresh IAM OBO proof.",
+                "Register the recipient through a fresh Silicon Accounts User verification proof.",
             ));
         }
-        if required && !Self::required_delivery_enabled(&tx, &p.context, &p.org_id, app, recipient)?
-        {
+        if required && !Self::required_delivery_enabled(&tx, &p.context, app, recipient)? {
             return Err(Error::new(
                 403,
                 "required_delivery_not_enabled",
@@ -364,16 +354,16 @@ impl Store {
                 "The recipient must explicitly enable required delivery on their subscription.",
             ));
         }
-        let silent = !Self::enabled(&tx, &p.context, &p.org_id, recipient, typ)?;
+        let silent = !Self::enabled(&tx, &p.context, recipient, typ)?;
         let mid = id("msg");
         let created = stamp();
         let mut full = json!({"id":mid,"created_at":created,"type":typ,"data":b["data"],"metadata":normalized["metadata"],"for":recipient,"key":key,"silent":silent,"read":false});
         if required {
             full["delivery"] = "required".into();
         }
-        tx.execute("INSERT INTO tings(id,ctx,org,app,recipient,type,created,body,silent) VALUES(?,?,?,?,?,?,?,?,?)",params![mid,p.context,p.org_id,app,recipient,typ,created,full.to_string(),silent])?;
+        tx.execute("INSERT INTO tings(id,ctx,app,recipient,type,created,body,silent) VALUES(?,?,?,?,?,?,?,?)",params![mid,p.context,app,recipient,typ,created,full.to_string(),silent])?;
         if !silent || required {
-            tx.execute("INSERT INTO deliveries(hook,message) SELECT id,? FROM hooks WHERE ctx=? AND org=? AND recipient=?",params![mid,p.context,p.org_id,recipient])?;
+            tx.execute("INSERT INTO deliveries(hook,message) SELECT id,? FROM hooks WHERE ctx=? AND recipient=?",params![mid,p.context,recipient])?;
         }
         let mut response =
             json!({"id":mid,"created_at":created,"status":"accepted","key":key,"silent":silent});
@@ -381,10 +371,9 @@ impl Store {
             response["delivery"] = "required".into();
         }
         tx.execute(
-            "INSERT OR REPLACE INTO keys VALUES(?,?,?,'send',?,?,?,?)",
+            "INSERT OR REPLACE INTO keys VALUES(?,?,'send',?,?,?,?)",
             params![
                 p.context,
-                p.org_id,
                 p.app_id,
                 key,
                 fingerprint,
@@ -398,7 +387,6 @@ impl Store {
     pub fn tings(
         &self,
         ctx: &str,
-        org: &str,
         recipient: Option<&str>,
         app: Option<&str>,
         f: &Value,
@@ -425,16 +413,15 @@ impl Store {
         let last_created = last.as_ref().and_then(|p| p.first()).map(String::as_str);
         let last_id = last.as_ref().and_then(|p| p.get(1)).map(String::as_str);
         let mut q = db.prepare(
-            "SELECT body,read,type,recipient FROM tings WHERE ctx=?1 AND org=?2
-          AND (?3 IS NULL OR recipient=?3) AND (?4 IS NULL OR app=?4)
-          AND (?5 IS NULL OR type=?5) AND (?6 IS NULL OR read=?6) AND (?7 IS NULL OR silent=?7)
-          AND created<=?8 AND (?9 IS NULL OR (created,id)<(?9,?10))
-          AND created>=?12 AND ((read=0 AND silent=0) OR created>=?13) ORDER BY created DESC,id DESC LIMIT ?11",
+            "SELECT body,read,type,recipient FROM tings WHERE ctx=?1
+          AND (?2 IS NULL OR recipient=?2) AND (?3 IS NULL OR app=?3)
+          AND (?4 IS NULL OR type=?4) AND (?5 IS NULL OR read=?5) AND (?6 IS NULL OR silent=?6)
+          AND created<=?7 AND (?8 IS NULL OR (created,id)<(?8,?9))
+          AND created>=?11 AND ((read=0 AND silent=0) OR created>=?12) ORDER BY created DESC,id DESC LIMIT ?10",
         )?;
         let rows = q.query_map(
             params![
                 ctx,
-                org,
                 recipient,
                 app,
                 f["type"].as_str(),
@@ -468,13 +455,12 @@ impl Store {
     pub fn ting(
         &self,
         ctx: &str,
-        org: &str,
         mid: &str,
         recipient: Option<&str>,
         app: Option<&str>,
     ) -> Result<Value> {
         let db = self.lock()?;
-        let row:Option<(String,bool,String,String)>=db.query_row("SELECT body,read,type,recipient FROM tings WHERE ctx=? AND org=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?) AND created>=? AND ((read=0 AND silent=0) OR created>=?)",params![ctx,org,mid,recipient,recipient,app,app,retention_cutoff(3),retention_cutoff(1)],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let row:Option<(String,bool,String,String)>=db.query_row("SELECT body,read,type,recipient FROM tings WHERE ctx=? AND id=? AND (? IS NULL OR recipient=?) AND (? IS NULL OR app=?) AND created>=? AND ((read=0 AND silent=0) OR created>=?)",params![ctx,mid,recipient,recipient,app,app,retention_cutoff(3),retention_cutoff(1)],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
         let (b, read, typ, recipient) = row.ok_or_else(Error::not_found)?;
         let mut b = current_body(b, typ, recipient)?;
         b["read"] = read.into();
@@ -487,7 +473,7 @@ impl Store {
         Ok(q.query_map([mid],|r|Ok(json!({"webhook_id":r.get::<_,String>(0)?,"delivery_acked":r.get::<_,bool>(1)?,"read_acked":r.get::<_,bool>(2)?})))?.collect::<std::result::Result<_,_>>()?)
     }
     pub fn sent_read(&self, p: &AppAuthority, b: &Value) -> Result<(Value, Vec<(String, bool)>)> {
-        let fields = &["org_id", "app_id", "message_ids", "read", "key"];
+        let fields = &["app_id", "message_ids", "read", "key"];
         v::fields(b, fields, fields)?;
         if v::string(b, "app_id", 255)? != p.app_id {
             return Err(Error::new(
@@ -501,14 +487,13 @@ impl Store {
         let read = v::optional_bool(b, "read")?.unwrap();
         let key = v::string(b, "key", 200)?;
         let mut normalized = b.clone();
-        normalized["org_id"] = p.org_id.clone().into();
         normalized["message_ids"] = json!(ids);
         let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&normalized)?));
         let mut db = self.lock()?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let prior: Option<(String, String)> = tx.query_row(
-            "SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='sent-read' AND key=? AND expires>?",
-            params![p.context,p.org_id,p.app_id,key,now()],
+            "SELECT fingerprint,response FROM keys WHERE ctx=? AND owner=? AND kind='sent-read' AND key=? AND expires>?",
+            params![p.context,p.app_id,key,now()],
             |r| Ok((r.get(0)?, r.get(1)?)),
         ).optional()?;
         if let Some((original, response)) = prior {
@@ -525,12 +510,14 @@ impl Store {
         let read_cutoff = retention_cutoff(1);
         let mut owners = std::collections::BTreeMap::<String, bool>::new();
         for mid in &ids {
-            let row: Option<(String, String, bool)> = tx.query_row(
-                "SELECT recipient,created,read FROM tings WHERE ctx=? AND org=? AND app=? AND id=?
+            let row: Option<(String, String, bool)> = tx
+                .query_row(
+                    "SELECT recipient,created,read FROM tings WHERE ctx=? AND app=? AND id=?
                  AND created>=? AND ((read=0 AND silent=0) OR created>=?)",
-                params![p.context,p.org_id,p.app_id,mid,cutoff,read_cutoff],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            ).optional()?;
+                    params![p.context, p.app_id, mid, cutoff, read_cutoff],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
             let (recipient, created, previous) = row.ok_or_else(Error::not_found)?;
             if previous != read {
                 let expired = read && created < read_cutoff;
@@ -543,10 +530,9 @@ impl Store {
         }
         let response = json!({"message_ids":ids,"read":read});
         tx.execute(
-            "INSERT OR REPLACE INTO keys VALUES(?,?,?,'sent-read',?,?,?,?)",
+            "INSERT OR REPLACE INTO keys VALUES(?,?,'sent-read',?,?,?,?)",
             params![
                 p.context,
-                p.org_id,
                 p.app_id,
                 key,
                 fingerprint,
@@ -557,7 +543,7 @@ impl Store {
         tx.commit()?;
         Ok((response, owners.into_iter().collect()))
     }
-    pub fn read(&self, p: &Principal, org: &str, ids: &[String]) -> Result<(Value, bool)> {
+    pub fn read(&self, p: &Principal, ids: &[String]) -> Result<(Value, bool)> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
         let cutoff = retention_cutoff(1);
@@ -565,8 +551,8 @@ impl Store {
         for mid in ids {
             let row: Option<(String, bool)> = tx
                 .query_row(
-                    "SELECT created,read FROM tings WHERE id=? AND ctx=? AND org=? AND recipient=?",
-                    params![mid, p.context, org, p.id],
+                    "SELECT created,read FROM tings WHERE id=? AND ctx=? AND recipient=?",
+                    params![mid, p.context, p.id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()?;
@@ -579,10 +565,10 @@ impl Store {
         tx.commit()?;
         Ok((json!({"message_ids":ids,"read":true}), expired))
     }
-    pub fn preferences(&self, p: &Principal, org: &str, f: &Value) -> Result<Vec<Value>> {
+    pub fn preferences(&self, p: &Principal, f: &Value) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT app,scope,enabled FROM preferences WHERE ctx=? AND org=? AND recipient=? AND scope<>'delivery:required' ORDER BY app,scope")?;
-        let rows = q.query_map(params![p.context, org, p.id], |r| {
+        let mut q=db.prepare("SELECT app,scope,enabled FROM preferences WHERE ctx=? AND recipient=? AND scope<>'delivery:required' ORDER BY app,scope")?;
+        let rows = q.query_map(params![p.context, p.id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -603,7 +589,7 @@ impl Store {
         }
         Ok(out)
     }
-    pub fn preference(&self, p: &Principal, org: &str, b: &Value, reset: bool) -> Result<Value> {
+    pub fn preference(&self, p: &Principal, b: &Value, reset: bool) -> Result<Value> {
         v::preference(b, !reset)?;
         let scope = if let Some(s) = b["type"].as_str() {
             format!("type:{s}")
@@ -614,13 +600,15 @@ impl Store {
         };
         let db = self.lock()?;
         if reset {
-            db.execute("DELETE FROM preferences WHERE ctx=? AND org=? AND recipient=? AND app=? AND scope=?",params![p.context,org,p.id,b["app_id"].as_str(),scope])?;
+            db.execute(
+                "DELETE FROM preferences WHERE ctx=? AND recipient=? AND app=? AND scope=?",
+                params![p.context, p.id, b["app_id"].as_str(), scope],
+            )?;
         } else {
             db.execute(
-                "INSERT OR REPLACE INTO preferences VALUES(?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO preferences VALUES(?,?,?,?,?)",
                 params![
                     p.context,
-                    org,
                     p.id,
                     b["app_id"].as_str(),
                     scope,
@@ -743,20 +731,14 @@ impl Store {
         }
         Ok(out)
     }
-    pub fn hooks(&self, p: &Principal, org: &str) -> Result<Vec<Value>> {
+    pub fn hooks(&self, p: &Principal) -> Result<Vec<Value>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT h.id,h.receiver,h.state,(SELECT COUNT(*) FROM deliveries d JOIN tings t ON t.id=d.message WHERE d.hook=h.id AND d.read=0 AND t.created>=? AND ((t.read=0 AND t.silent=0) OR t.created>=?)) FROM hooks h WHERE ctx=? AND org=? AND recipient=? ORDER BY id")?;
-        Ok(q.query_map(params![retention_cutoff(3),retention_cutoff(1),p.context,org,p.id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"receiver_id":r.get::<_,Option<String>>(1)?,"for":p.id,"state":r.get::<_,String>(2)?,"pending":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<_,_>>()?)
+        let mut q=db.prepare("SELECT h.id,h.receiver,h.state,(SELECT COUNT(*) FROM deliveries d JOIN tings t ON t.id=d.message WHERE d.hook=h.id AND d.read=0 AND t.created>=? AND ((t.read=0 AND t.silent=0) OR t.created>=?)) FROM hooks h WHERE ctx=? AND recipient=? ORDER BY id")?;
+        Ok(q.query_map(params![retention_cutoff(3),retention_cutoff(1),p.context,p.id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"receiver_id":r.get::<_,Option<String>>(1)?,"for":p.id,"state":r.get::<_,String>(2)?,"pending":r.get::<_,i64>(3)?})))?.collect::<std::result::Result<_,_>>()?)
     }
-    pub fn hook_retry(
-        &self,
-        p: &Principal,
-        org: &str,
-        key: &str,
-        b: &Value,
-    ) -> Result<Option<Value>> {
+    pub fn hook_retry(&self, p: &Principal, key: &str, b: &Value) -> Result<Option<Value>> {
         let db = self.lock()?;
-        let row:Option<(String,String)>=db.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND org=? AND owner=? AND kind='hook' AND key=? AND expires>?",params![p.context,org,p.id,key,now()],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let row:Option<(String,String)>=db.query_row("SELECT fingerprint,response FROM keys WHERE ctx=? AND owner=? AND kind='hook' AND key=? AND expires>?",params![p.context,p.id,key,now()],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((fp, res)) = row {
             // Compare the stored serialized fingerprint, not a JSON string value.
             let request_fingerprint = b.to_string();
@@ -773,7 +755,6 @@ impl Store {
     pub fn create_hook(
         &self,
         p: &Principal,
-        org: &str,
         receiver: &str,
         key: &str,
         b: &Value,
@@ -782,15 +763,15 @@ impl Store {
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let hid = id("hook");
         tx.execute(
-            "INSERT INTO hooks VALUES(?,?,?,?,'connected',?,?)",
-            params![hid, p.context, org, p.id, receiver, p.session],
+            "INSERT INTO hooks VALUES(?,?,?,'connected',?,?)",
+            params![hid, p.context, p.id, receiver, p.session],
         )?;
-        tx.execute("INSERT INTO deliveries(hook,message) SELECT ?1,t.id FROM tings t WHERE t.ctx=?2 AND t.org=?3 AND t.recipient=?4 AND t.read=0 AND t.created>=?5 AND (t.silent=0 OR t.created>=?6)
-        AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.org=t.org AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
-        AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
-        OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
+        tx.execute("INSERT INTO deliveries(hook,message) SELECT ?1,t.id FROM tings t WHERE t.ctx=?2 AND t.recipient=?3 AND t.read=0 AND t.created>=?4 AND (t.silent=0 OR t.created>=?5)
+        AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
+        AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
+        OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app
           AND p.scope IN ('type:'||t.type,'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
-          ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))",params![hid,p.context,org,p.id,retention_cutoff(3),retention_cutoff(1)])?;
+          ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))",params![hid,p.context,p.id,retention_cutoff(3),retention_cutoff(1)])?;
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM deliveries WHERE hook=?",
             [&hid],
@@ -798,10 +779,9 @@ impl Store {
         )?;
         let result = json!({"id":hid,"receiver_id":receiver,"for":p.id,"state":"connected","pending":pending});
         tx.execute(
-            "INSERT OR REPLACE INTO keys VALUES(?,?,?,'hook',?,?,?,?)",
+            "INSERT OR REPLACE INTO keys VALUES(?,?,'hook',?,?,?,?)",
             params![
                 p.context,
-                org,
                 p.id,
                 key,
                 b.to_string(),
@@ -815,7 +795,6 @@ impl Store {
     pub fn bind(
         &self,
         p: &Principal,
-        org: &str,
         receiver: &str,
         ids: &[String],
         explicit: bool,
@@ -825,7 +804,13 @@ impl Store {
         let tx = db.transaction()?;
         let mut replaced = vec![];
         for hid in ids {
-            let row:Option<(String,Option<String>)>=tx.query_row("SELECT state,receiver FROM hooks WHERE id=? AND ctx=? AND org=? AND recipient=?",params![hid,p.context,org,p.id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+            let row: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT state,receiver FROM hooks WHERE id=? AND ctx=? AND recipient=?",
+                    params![hid, p.context, p.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
             let (state, old) = row.ok_or_else(Error::not_found)?;
             if !explicit && (state == "paused" || state == "detached") {
                 return Err(Error::new(
@@ -857,12 +842,12 @@ impl Store {
         tx.commit()?;
         Ok(replaced)
     }
-    pub fn detach(&self, p: &Principal, org: &str, hid: &str) -> Result<Option<String>> {
+    pub fn detach(&self, p: &Principal, hid: &str) -> Result<Option<String>> {
         let db = self.lock()?;
         let row: Option<Option<String>> = db
             .query_row(
-                "SELECT receiver FROM hooks WHERE id=? AND ctx=? AND org=? AND recipient=?",
-                params![hid, p.context, org, p.id],
+                "SELECT receiver FROM hooks WHERE id=? AND ctx=? AND recipient=?",
+                params![hid, p.context, p.id],
                 |r| r.get(0),
             )
             .optional()?;
@@ -880,17 +865,12 @@ impl Store {
         db.execute("UPDATE hooks SET receiver=NULL,session=NULL,state=CASE WHEN state='connected' THEN 'disconnected' ELSE state END WHERE receiver=?",[receiver])?;
         Ok(())
     }
-    pub fn invalidate(
-        &self,
-        ctx: &str,
-        org: &str,
-        recipient: &str,
-    ) -> Result<Vec<(String, String)>> {
+    pub fn invalidate(&self, ctx: &str, recipient: &str) -> Result<Vec<(String, String)>> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
         let rows = {
-            let mut q=tx.prepare("SELECT receiver,id FROM hooks WHERE ctx=? AND org=? AND recipient=? AND receiver IS NOT NULL")?;
-            q.query_map(params![ctx, org, recipient], |r| Ok((r.get(0)?, r.get(1)?)))?
+            let mut q=tx.prepare("SELECT receiver,id FROM hooks WHERE ctx=? AND recipient=? AND receiver IS NOT NULL")?;
+            q.query_map(params![ctx, recipient], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<std::result::Result<Vec<(String, String)>, _>>()?
         };
         for (_, hid) in &rows {
@@ -903,19 +883,13 @@ impl Store {
         tx.commit()?;
         Ok(rows)
     }
-    pub fn unsubscribe(
-        &self,
-        receiver: &str,
-        org: &str,
-        ids: &[String],
-        pause: bool,
-    ) -> Result<()> {
+    pub fn unsubscribe(&self, receiver: &str, ids: &[String], pause: bool) -> Result<()> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
         for hid in ids {
             if !tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM hooks WHERE id=? AND org=? AND receiver=?)",
-                params![hid, org, receiver],
+                "SELECT EXISTS(SELECT 1 FROM hooks WHERE id=? AND receiver=?)",
+                params![hid, receiver],
                 |r| r.get::<_, bool>(0),
             )? {
                 return Err(Error::not_found());
@@ -934,31 +908,26 @@ impl Store {
     pub fn active_hooks(&self, receiver: &str) -> Result<Vec<ActiveHookRow>> {
         let db = self.lock()?;
         let mut q = db.prepare(
-            "SELECT id,ctx,org,recipient,session FROM hooks WHERE receiver=? AND state='connected'",
+            "SELECT id,ctx,recipient,session FROM hooks WHERE receiver=? AND state='connected'",
         )?;
         Ok(q.query_map([receiver], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
         })?
         .collect::<std::result::Result<_, _>>()?)
     }
     pub fn offer(&self, receiver: &str, hid: &str) -> Result<Option<Value>> {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
-        let row:Option<(String,String,String)>=tx.query_row("SELECT ctx,org,recipient FROM hooks WHERE id=? AND receiver=? AND state='connected'",params![hid,receiver],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        let Some((ctx, org, _recipient)) = row else {
+        let row: Option<(String, String)> = tx
+            .query_row(
+                "SELECT ctx,recipient FROM hooks WHERE id=? AND receiver=? AND state='connected'",
+                params![hid, receiver],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((_ctx, _recipient)) = row else {
             return Ok(None);
         };
-        if ctx != "production" {
-            let active: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM lifecycle_environments WHERE id=? AND state='active')",
-                [&ctx],
-                |r| r.get(0),
-            )?;
-            if !active {
-                return Ok(None);
-            }
-        }
-
         let active: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM deliveries WHERE hook=? AND read=0 AND offer_receiver=?)",
             params![hid, receiver],
@@ -968,9 +937,9 @@ impl Store {
             let mut q=tx.prepare("SELECT t.body,t.type,t.recipient FROM deliveries d JOIN tings t ON t.id=d.message
               WHERE d.hook=?1 AND d.read=0 AND t.created>=?5 AND ((t.read=0 AND t.silent=0) OR t.created>=?6)
               AND (?2=0 OR (d.offer_receiver=?3 AND d.delivery=0 AND d.last_offer<=?4))
-              AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.org=t.org AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
-              AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
-              OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.org=t.org AND p.recipient=t.recipient AND p.app=t.app
+              AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
+              AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
+              OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app
                 AND p.scope IN ('type:'||t.type, 'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
                 ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))
               ORDER BY t.created,t.id LIMIT 100")?;
@@ -1012,7 +981,7 @@ impl Store {
         for ting in &tings {
             tx.execute("UPDATE deliveries SET offered=1,offer_receiver=?,last_offer=? WHERE hook=? AND message=?",params![receiver,now(),hid,ting["id"].as_str()])?;
         }
-        let envelope = json!({"op":"tings","org_id":org,"webhook_id":hid,"tings":tings});
+        let envelope = json!({"op":"tings","webhook_id":hid,"tings":tings});
         if envelope.to_string().len() > 1024 * 1024 {
             return Err(Error::unavailable("Delivery envelope exceeded its limit."));
         }
@@ -1022,7 +991,6 @@ impl Store {
     pub fn ack(
         &self,
         receiver: &str,
-        org: &str,
         hid: &str,
         ids: &[String],
         kind: &str,
@@ -1032,7 +1000,13 @@ impl Store {
         }
         let mut db = self.lock()?;
         let tx = db.transaction()?;
-        let owner:Option<(String,String)>=tx.query_row("SELECT ctx,recipient FROM hooks WHERE id=? AND org=? AND receiver=? AND state='connected'",params![hid,org,receiver],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let owner: Option<(String, String)> = tx
+            .query_row(
+                "SELECT ctx,recipient FROM hooks WHERE id=? AND receiver=? AND state='connected'",
+                params![hid, receiver],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
         let owner = owner.ok_or_else(Error::not_found)?;
         let cutoff = retention_cutoff(1);
         let mut expired = false;
@@ -1080,12 +1054,12 @@ impl Store {
         tx.commit()?;
         Ok((owner.0, owner.1, expired))
     }
-    pub fn expired_owners(&self) -> Result<Vec<(String, String, String)>> {
+    pub fn expired_owners(&self) -> Result<Vec<(String, String)>> {
         let db = self.lock()?;
-        let mut q=db.prepare("SELECT DISTINCT h.ctx,h.org,h.recipient FROM hooks h JOIN deliveries d ON d.hook=h.id JOIN tings t ON t.id=d.message WHERE h.receiver IS NOT NULL AND d.read=0 AND (t.created<?1 OR ((t.read=1 OR t.silent=1) AND t.created<?2))")?;
+        let mut q=db.prepare("SELECT DISTINCT h.ctx,h.recipient FROM hooks h JOIN deliveries d ON d.hook=h.id JOIN tings t ON t.id=d.message WHERE h.receiver IS NOT NULL AND d.read=0 AND (t.created<?1 OR ((t.read=1 OR t.silent=1) AND t.created<?2))")?;
         Ok(
             q.query_map(params![retention_cutoff(3), retention_cutoff(1)], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                Ok((r.get(0)?, r.get(1)?))
             })?
             .collect::<std::result::Result<_, _>>()?,
         )
@@ -1108,14 +1082,6 @@ impl Store {
         tx.execute("DELETE FROM login_attempts WHERE expires<=?", [now()])?;
         tx.commit()?;
         Ok(removed)
-    }
-    pub fn context_owners(&self, ctx: &str) -> Result<Vec<(String, String)>> {
-        let db = self.lock()?;
-        let mut q = db.prepare(
-            "SELECT DISTINCT org,recipient FROM hooks WHERE ctx=? AND receiver IS NOT NULL",
-        )?;
-        Ok(q.query_map([ctx], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<std::result::Result<_, _>>()?)
     }
     pub fn login_attempt(&self, next: &str) -> Result<String> {
         let db = self.lock()?;
@@ -1152,1119 +1118,4 @@ fn cursor_err() -> Error {
         "The cursor is invalid, expired or belongs to another query.",
         "Start a new list request without a cursor.",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn fixture() -> (Store, Principal, Proof) {
-        let s = Store::open(":memory:").unwrap();
-        let p = Principal {
-            context: "production".into(),
-            id: "si:fixture".into(),
-            kind: "silicon".into(),
-            session: "private-session".into(),
-        };
-        let proof = Proof {
-            context: p.context.clone(),
-            org_id: "org-uuid".into(),
-            app_id: "example".into(),
-            actor_id: p.id.clone(),
-            actor_kind: p.kind.clone(),
-            expires_at: now() + 300,
-            test: None,
-        };
-        s.register_type(
-            &p,
-            "app-owner-org",
-            &proof.app_id,
-            &json!({"type":"example.msg.received","description":"A message arrived."}),
-            false,
-        )
-        .unwrap();
-        s.subscribe_app(
-            &proof,
-            &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
-        )
-        .unwrap();
-        (s, p, proof)
-    }
-    fn body(key: &str) -> Value {
-        json!({"org_id":"org-uuid","type":"example.msg.received","data":{"message":"hello"},"metadata":{},"for":"si:fixture","key":key})
-    }
-    fn hook(s: &Store, p: &Principal, recv: &str) -> String {
-        s.create_hook(
-            p,
-            "org-uuid",
-            recv,
-            &id("key"),
-            &json!({"receiver_id":recv}),
-        )
-        .unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .into()
-    }
-    #[test]
-    fn sent_read_is_scoped_atomic_and_retries_preserve_newer_state() {
-        let (s, p, proof) = fixture();
-        let first = s.send(&proof.application(), &body("first")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let second = s.send(&proof.application(), &body("second")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.lock()
-            .unwrap()
-            .execute(
-                "UPDATE tings SET recipient='c:second' WHERE id=?",
-                [&second],
-            )
-            .unwrap();
-        let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,
-            "message_ids":[first,first,second],"read":true,"key":"mark-read"});
-        let state = |id: &str| {
-            s.ting(&p.context, &proof.org_id, id, None, Some(&proof.app_id))
-                .unwrap()["read"]
-                .as_bool()
-                .unwrap()
-        };
-        for column in ["app", "org", "ctx"] {
-            s.lock()
-                .unwrap()
-                .execute(
-                    &format!("UPDATE tings SET {column}='other' WHERE id=?"),
-                    [&second],
-                )
-                .unwrap();
-            assert_eq!(
-                s.sent_read(&proof.application(), &request)
-                    .unwrap_err()
-                    .status,
-                404
-            );
-            assert!(!state(&first));
-            let original = match column {
-                "app" => &proof.app_id,
-                "org" => &proof.org_id,
-                _ => &proof.context,
-            };
-            s.lock()
-                .unwrap()
-                .execute(
-                    &format!("UPDATE tings SET {column}=? WHERE id=?"),
-                    params![original, second],
-                )
-                .unwrap();
-        }
-        let mut invalid = request.clone();
-        invalid["message_ids"] = json!([first, "missing"]);
-        assert_eq!(
-            s.sent_read(&proof.application(), &invalid)
-                .unwrap_err()
-                .status,
-            404
-        );
-        assert!(!state(&first));
-        for (field, value, status) in [
-            ("app_id", json!("other"), 403),
-            ("read", json!("false"), 400),
-            ("message_ids", json!([]), 400),
-            ("key", json!(""), 400),
-        ] {
-            let mut invalid = request.clone();
-            invalid[field] = value;
-            assert_eq!(
-                s.sent_read(&proof.application(), &invalid)
-                    .unwrap_err()
-                    .status,
-                status
-            );
-        }
-        let (receipt, owners) = s.sent_read(&proof.application(), &request).unwrap();
-        assert_eq!(receipt, json!({"message_ids":[first,second],"read":true}));
-        assert_eq!(
-            owners,
-            vec![("c:second".into(), false), (p.id.clone(), false)]
-        );
-        assert!(state(&first) && state(&second));
-        let mut unread = request.clone();
-        unread["read"] = false.into();
-        assert_eq!(
-            s.sent_read(&proof.application(), &unread).unwrap_err().body["error"]["code"],
-            "idempotency_conflict"
-        );
-        unread["key"] = "mark-unread".into();
-        s.sent_read(&proof.application(), &unread).unwrap();
-        assert!(!state(&first) && !state(&second));
-        assert_eq!(
-            s.sent_read(&proof.application(), &request).unwrap(),
-            (receipt, vec![])
-        );
-        assert!(!state(&first) && !state(&second));
-        let db = s.lock().unwrap();
-        // Replay records must remain valid when the server opens this database again.
-        crate::migration::ensure_current(&db).unwrap();
-        let keys: i64 = db
-            .query_row(
-                "SELECT count(*) FROM keys WHERE kind='sent-read'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(keys, 2);
-    }
-    #[test]
-    fn sent_read_preserves_hook_completion_and_unread_backlog() {
-        let (s, p, proof) = fixture();
-        let a = hook(&s, &p, "a");
-        let b = hook(&s, &p, "b");
-        let mid = s.send(&proof.application(), &body("first")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let change = |read: bool, key: &str| {
-            s.sent_read(&proof.application(), &json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":read,"key":key})).unwrap()
-        };
-        change(true, "app-read");
-        let completed = s.deliveries(&mid).unwrap();
-        assert!(completed.iter().all(|d| d["read_acked"] == false));
-        // App read state cannot complete or discard a webhook's pending work.
-        assert!(s.offer("a", &a).unwrap().is_some());
-        s.ack("a", &proof.org_id, &a, std::slice::from_ref(&mid), "read")
-            .unwrap();
-        let receipts = s.deliveries(&mid).unwrap();
-        change(false, "app-unread");
-        assert_eq!(s.deliveries(&mid).unwrap(), receipts);
-        s.ack("a", &proof.org_id, &a, std::slice::from_ref(&mid), "read")
-            .unwrap();
-        assert_eq!(
-            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
-            false
-        );
-        assert!(s.offer("a", &a).unwrap().is_none());
-        let c = hook(&s, &p, "c");
-        assert!(s.offer("c", &c).unwrap().is_some());
-        assert!(s.offer("b", &b).unwrap().is_some());
-        // A genuinely new receiver completion may mark it read again.
-        s.ack("b", &proof.org_id, &b, std::slice::from_ref(&mid), "read")
-            .unwrap();
-        assert_eq!(
-            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
-            true
-        );
-        change(false, "unread-again");
-        s.read(&p, &proof.org_id, std::slice::from_ref(&mid))
-            .unwrap();
-        assert_eq!(
-            s.ting(&p.context, &proof.org_id, &mid, None, None).unwrap()["read"],
-            true
-        );
-    }
-    #[test]
-    fn sent_read_cannot_resurrect_expired_rows_or_extend_creation_time() {
-        let (s, p, proof) = fixture();
-        let old = (chrono::Utc::now() - chrono::Months::new(2))
-            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-        let h = hook(&s, &p, "r");
-        for (key, read, silent, months) in [
-            ("read", true, false, 2),
-            ("silent", false, true, 2),
-            ("unread", false, false, 4),
-        ] {
-            let mid = s.send(&proof.application(), &body(key)).unwrap().1["id"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-            let created = (chrono::Utc::now() - chrono::Months::new(months))
-                .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-            s.lock()
-                .unwrap()
-                .execute(
-                    "UPDATE tings SET created=?,read=?,silent=? WHERE id=?",
-                    params![created, read, silent, mid],
-                )
-                .unwrap();
-            let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":false,"key":key});
-            assert_eq!(
-                s.sent_read(&proof.application(), &request)
-                    .unwrap_err()
-                    .status,
-                404
-            );
-        }
-        let mid = s
-            .send(&proof.application(), &body("retained-unread"))
-            .unwrap()
-            .1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.lock()
-            .unwrap()
-            .execute("UPDATE tings SET created=? WHERE id=?", params![old, mid])
-            .unwrap();
-        let request = json!({"org_id":proof.org_id,"app_id":proof.app_id,"message_ids":[mid],"read":true,"key":"expire"});
-        let (receipt, owners) = s.sent_read(&proof.application(), &request).unwrap();
-        assert_eq!(owners, vec![(p.id.clone(), true)]);
-        assert!(s.offer("r", &h).unwrap().is_none());
-        let created: String = s
-            .lock()
-            .unwrap()
-            .query_row("SELECT created FROM tings WHERE id=?", [&mid], |r| r.get(0))
-            .unwrap();
-        assert_eq!(created, old);
-        let mut unread = request.clone();
-        unread["read"] = false.into();
-        unread["key"] = "resurrect".into();
-        assert_eq!(
-            s.sent_read(&proof.application(), &unread)
-                .unwrap_err()
-                .status,
-            404
-        );
-        s.prune().unwrap();
-        assert_eq!(
-            s.sent_read(&proof.application(), &request).unwrap(),
-            (receipt, vec![])
-        );
-        assert!(s.ting(&p.context, &proof.org_id, &mid, None, None).is_err());
-    }
-    #[test]
-    fn global_app_catalog_keeps_recipient_state_and_contexts_isolated() {
-        let (s, p, proof) = fixture();
-        assert_eq!(
-            s.types(&p, "app-owner-org", &proof.app_id).unwrap().len(),
-            1
-        );
-        assert!(
-            s.types(&p, &proof.org_id, &proof.app_id)
-                .unwrap()
-                .is_empty()
-        );
-        let h = hook(&s, &p, "r");
-        let other = Proof {
-            org_id: "other-recipient-org".into(),
-            context: proof.context.clone(),
-            app_id: proof.app_id.clone(),
-            actor_id: proof.actor_id.clone(),
-            actor_kind: proof.actor_kind.clone(),
-            expires_at: proof.expires_at,
-            test: None,
-        };
-        let mut request = body("shared-key");
-        request["org_id"] = other.org_id.clone().into();
-        assert_eq!(
-            s.send(&other.application(), &request).unwrap_err().body["error"]["code"],
-            "recipient_not_registered"
-        );
-        s.subscribe_app(
-            &other,
-            &json!({"org_id":other.org_id,"app_id":other.app_id}),
-        )
-        .unwrap();
-        let other_hook = s
-            .create_hook(
-                &p,
-                &other.org_id,
-                "other",
-                "hook",
-                &json!({"receiver_id":"other"}),
-            )
-            .unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.preference(
-            &p,
-            &proof.org_id,
-            &json!({"app_id":proof.app_id,"enabled":false}),
-            false,
-        )
-        .unwrap();
-        let silent = s.send(&proof.application(), &body("shared-key")).unwrap().1;
-        assert_eq!(silent["silent"], true);
-        let sent = s.send(&other.application(), &request).unwrap();
-        assert_eq!(sent.0, 202);
-        assert_eq!(sent.1["silent"], false);
-        assert_ne!(sent.1["id"], silent["id"]);
-        assert_eq!(
-            s.send(&other.application(), &request).unwrap(),
-            (200, sent.1.clone())
-        );
-        let mid = sent.1["id"].as_str().unwrap().to_owned();
-        assert!(
-            s.ting(&p.context, &proof.org_id, &mid, Some(&p.id), None)
-                .is_err()
-        );
-        assert_eq!(
-            s.tings(
-                &p.context,
-                &other.org_id,
-                Some(&p.id),
-                Some(&proof.app_id),
-                &json!({})
-            )
-            .unwrap()
-            .len(),
-            1
-        );
-        assert!(s.offer("r", &h).unwrap().is_none());
-        let offered = s.offer("other", &other_hook).unwrap().unwrap();
-        assert_eq!(offered["org_id"], other.org_id);
-        assert_eq!(offered["tings"][0]["id"], mid);
-        assert!(
-            s.ack(
-                "other",
-                &proof.org_id,
-                &other_hook,
-                std::slice::from_ref(&mid),
-                "read"
-            )
-            .is_err()
-        );
-        s.ack(
-            "other",
-            &other.org_id,
-            &other_hook,
-            std::slice::from_ref(&mid),
-            "read",
-        )
-        .unwrap();
-        assert_eq!(s.deliveries(&mid).unwrap()[0]["read_acked"], true);
-        let grant = s
-            .grants(&p.context, &proof.org_id, Some(&p.id), Some(&proof.app_id))
-            .unwrap()[0]
-            .clone();
-        s.required_delivery(&p, &proof.org_id, grant["id"].as_str().unwrap(), Some(true))
-            .unwrap();
-        request["key"] = "required".into();
-        request["delivery"] = "required".into();
-        assert_eq!(
-            s.send(&other.application(), &request).unwrap_err().body["error"]["code"],
-            "required_delivery_not_enabled"
-        );
-
-        let mut isolated = Proof {
-            context: "other-context".into(),
-            ..other
-        };
-        s.subscribe_app(
-            &isolated,
-            &json!({"org_id":isolated.org_id,"app_id":isolated.app_id}),
-        )
-        .unwrap();
-        assert_eq!(
-            s.send(&isolated.application(), &request)
-                .unwrap_err()
-                .status,
-            404
-        );
-        isolated.context = p.context.clone();
-        isolated.app_id = "elsewhere>app".into();
-        assert_eq!(
-            s.send(&isolated.application(), &request)
-                .unwrap_err()
-                .status,
-            403
-        );
-    }
-    #[test]
-    fn bounded_pages_survive_read_changes_and_retention() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        let mut ids = vec![];
-        for n in 0..5 {
-            ids.push(
-                s.send(&proof.application(), &body(&format!("page-{n}")))
-                    .unwrap()
-                    .1["id"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned(),
-            );
-        }
-        let f = json!({"limit":2,"read":false});
-        let rows = s
-            .tings(&p.context, "org-uuid", Some(&p.id), None, &f)
-            .unwrap();
-        assert_eq!(rows.len(), 3);
-        let first = s.page(rows, "bound-context", &f, true).unwrap();
-        let first_ids: Vec<String> = first["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|x| x["id"].as_str().unwrap().into())
-            .collect();
-        s.read(&p, "org-uuid", &first_ids).unwrap();
-        let next = json!({"limit":2,"read":false,"cursor":first["next_cursor"]});
-        let rows = s
-            .tings(&p.context, "org-uuid", Some(&p.id), None, &next)
-            .unwrap();
-        let second = s.page(rows, "bound-context", &next, true).unwrap();
-        assert_eq!(second["items"].as_array().unwrap().len(), 2);
-        assert!(
-            second["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|v| !first_ids.contains(&v["id"].as_str().unwrap().to_owned()))
-        );
-        assert!(s.page(vec![], "other-context", &next, true).is_err());
-        let old = &ids[0];
-        let created = (chrono::Utc::now() - chrono::Months::new(4))
-            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-        {
-            let db = s.lock().unwrap();
-            db.execute(
-                "UPDATE tings SET created=? WHERE id=?",
-                params![created, old],
-            )
-            .unwrap();
-        }
-        assert!(
-            s.ting(&p.context, "org-uuid", old, Some(&p.id), None)
-                .is_err()
-        );
-        let offered = s.offer("r", &h).unwrap().unwrap();
-        assert!(
-            offered["tings"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|x| x["id"] != *old)
-        );
-        assert_eq!(s.prune().unwrap(), 1);
-        assert!(s.deliveries(old).unwrap().is_empty());
-        assert_eq!(
-            s.tings(&p.context, "org-uuid", Some(&p.id), None, &json!({}))
-                .unwrap()
-                .len(),
-            4
-        );
-    }
-    #[test]
-    fn read_and_silent_expire_after_one_month_unread_after_three() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        let unread = s.send(&proof.application(), &body("unread-old")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let read = s.send(&proof.application(), &body("read-old")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert!(
-            !s.read(&p, "org-uuid", std::slice::from_ref(&read))
-                .unwrap()
-                .1
-        );
-        s.preference(
-            &p,
-            "org-uuid",
-            &json!({"app_id":proof.app_id,"enabled":false}),
-            false,
-        )
-        .unwrap();
-        let silent = s.send(&proof.application(), &body("silent-old")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.preference(&p, "org-uuid", &json!({"app_id":proof.app_id}), true)
-            .unwrap();
-        let created = (chrono::Utc::now() - chrono::Months::new(2))
-            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-        {
-            let db = s.lock().unwrap();
-            for mid in [&unread, &read, &silent] {
-                db.execute(
-                    "UPDATE tings SET created=? WHERE id=?",
-                    params![created, mid],
-                )
-                .unwrap();
-            }
-        }
-        assert!(
-            s.ting(&p.context, "org-uuid", &unread, Some(&p.id), None)
-                .is_ok()
-        );
-        assert!(
-            s.ting(&p.context, "org-uuid", &read, Some(&p.id), None)
-                .is_err()
-        );
-        assert!(
-            s.ting(&p.context, "org-uuid", &silent, Some(&p.id), None)
-                .is_err()
-        );
-        let batch = s.offer("r", &h).unwrap().unwrap();
-        assert_eq!(batch["tings"].as_array().unwrap().len(), 1);
-        assert_eq!(batch["tings"][0]["id"], unread);
-        assert_eq!(s.hooks(&p, "org-uuid").unwrap()[0]["pending"], 1);
-        assert_eq!(s.prune().unwrap(), 2);
-        assert!(s.deliveries(&read).unwrap().is_empty());
-        assert!(s.deliveries(&unread).unwrap().len() == 1);
-        assert!(
-            s.read(&p, "org-uuid", std::slice::from_ref(&unread))
-                .unwrap()
-                .1
-        );
-        assert_eq!(s.hooks(&p, "org-uuid").unwrap()[0]["pending"], 0);
-        assert_eq!(s.prune().unwrap(), 1);
-    }
-    #[test]
-    fn read_ack_expires_old_copies_on_other_hooks() {
-        let (s, p, proof) = fixture();
-        let a = hook(&s, &p, "a");
-        let b = hook(&s, &p, "b");
-        let mid = s.send(&proof.application(), &body("old-copy")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.offer("a", &a).unwrap().unwrap();
-        s.offer("b", &b).unwrap().unwrap();
-        let created = (chrono::Utc::now() - chrono::Months::new(2))
-            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-        s.lock()
-            .unwrap()
-            .execute(
-                "UPDATE tings SET created=? WHERE id=?",
-                params![created, mid],
-            )
-            .unwrap();
-        assert!(
-            !s.ack("a", "org-uuid", &a, std::slice::from_ref(&mid), "delivery")
-                .unwrap()
-                .2
-        );
-        assert!(
-            s.ack("a", "org-uuid", &a, std::slice::from_ref(&mid), "read")
-                .unwrap()
-                .2
-        );
-        assert_eq!(
-            s.ting(&p.context, "org-uuid", &mid, Some(&p.id), None)
-                .unwrap_err()
-                .status,
-            404
-        );
-        assert!(
-            s.hooks(&p, "org-uuid")
-                .unwrap()
-                .iter()
-                .all(|h| h["pending"] == 0)
-        );
-        assert!(!s.ack("a", "org-uuid", &a, &[mid], "read").unwrap().2);
-        assert!(s.offer("b", &b).unwrap().is_none());
-    }
-    #[test]
-    fn concurrent_keys_and_expiry_create_only_intended_records() {
-        let (s, _p, proof) = fixture();
-        let s = std::sync::Arc::new(s);
-        let mut threads = vec![];
-        for _ in 0..12 {
-            let s = s.clone();
-            threads.push(std::thread::spawn(move || {
-                let proof = Proof {
-                    context: "production".into(),
-                    org_id: "org-uuid".into(),
-                    app_id: "example".into(),
-                    actor_id: "si:fixture".into(),
-                    actor_kind: "silicon".into(),
-                    expires_at: now() + 300,
-                    test: None,
-                };
-                s.send(&proof.application(), &body("concurrent")).unwrap()
-            }));
-        }
-        let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
-        assert_eq!(results.iter().filter(|r| r.0 == 202).count(), 1);
-        assert!(results.iter().all(|r| r.1 == results[0].1));
-        {
-            let db = s.lock().unwrap();
-            db.execute("UPDATE keys SET expires=?", [now() - 1])
-                .unwrap();
-        }
-        let next = s.send(&proof.application(), &body("concurrent")).unwrap();
-        assert_eq!(next.0, 202);
-        assert_ne!(next.1["id"], results[0].1["id"]);
-    }
-    #[test]
-    fn idempotency_and_recovery() {
-        let (s, p, proof) = fixture();
-        let first = s.send(&proof.application(), &body("one")).unwrap();
-        assert_eq!(first.0, 202);
-        let mut retry = body("one");
-        retry.as_object_mut().unwrap().remove("metadata");
-        assert_eq!(
-            s.send(&proof.application(), &retry).unwrap(),
-            (200, first.1.clone())
-        );
-        retry["data"] = json!({"changed":true});
-        assert_eq!(
-            s.send(&proof.application(), &retry).unwrap_err().status,
-            409
-        );
-        let grant = s
-            .grants(&p.context, &proof.org_id, Some(&p.id), None)
-            .unwrap()[0]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.revoke(&p.context, &proof.org_id, &grant, Some(&p.id), None)
-            .unwrap();
-        assert_eq!(s.send(&proof.application(), &body("one")).unwrap().0, 200);
-        assert_eq!(
-            s.send(&proof.application(), &body("new"))
-                .unwrap_err()
-                .status,
-            403
-        );
-        let test_proof = Proof {
-            context: "test-environment".into(),
-            ..proof
-        };
-        assert!(s.send(&test_proof.application(), &body("one")).is_err());
-    }
-    #[test]
-    fn independent_copies_late_acks_and_takeover() {
-        let (s, p, proof) = fixture();
-        let a = hook(&s, &p, "recv_a");
-        let b = hook(&s, &p, "recv_b");
-        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert!(s.offer("recv_a", &a).unwrap().is_some());
-        s.ack(
-            "recv_a",
-            "org-uuid",
-            &a,
-            std::slice::from_ref(&mid),
-            "delivery",
-        )
-        .unwrap();
-        assert!(s.offer("recv_a", &a).unwrap().is_none());
-        assert!(s.offer("recv_b", &b).unwrap().is_some());
-        s.ack("recv_b", "org-uuid", &b, std::slice::from_ref(&mid), "read")
-            .unwrap();
-        assert_eq!(
-            s.ting(&p.context, "org-uuid", &mid, Some(&p.id), None)
-                .unwrap()["read"],
-            true
-        );
-        s.release_receiver("recv_a").unwrap();
-        s.bind(
-            &p,
-            "org-uuid",
-            "recv_new",
-            std::slice::from_ref(&a),
-            false,
-            false,
-        )
-        .unwrap();
-        assert!(s.offer("recv_new", &a).unwrap().is_some());
-        assert!(
-            s.ack("recv_a", "org-uuid", &a, std::slice::from_ref(&mid), "read")
-                .is_err()
-        );
-        s.ack(
-            "recv_new",
-            "org-uuid",
-            &a,
-            std::slice::from_ref(&mid),
-            "read",
-        )
-        .unwrap();
-        s.ack(
-            "recv_new",
-            "org-uuid",
-            &a,
-            std::slice::from_ref(&mid),
-            "delivery",
-        )
-        .unwrap();
-        assert!(
-            s.deliveries(&mid)
-                .unwrap()
-                .iter()
-                .all(|d| d["read_acked"] == true)
-        );
-        let c = hook(&s, &p, "recv_c");
-        assert!(s.offer("recv_c", &c).unwrap().is_none());
-    }
-    #[test]
-    fn silence_and_preferences_never_replay() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        s.preference(
-            &p,
-            "org-uuid",
-            &json!({"app_id":proof.app_id,"enabled":false}),
-            false,
-        )
-        .unwrap();
-        let silent = s.send(&proof.application(), &body("muted")).unwrap();
-        assert_eq!(silent.1["silent"], true);
-        s.preference(&p, "org-uuid", &json!({"app_id":proof.app_id}), true)
-            .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_none());
-        let a = s.send(&proof.application(), &body("audible")).unwrap().1;
-        let batch = s.offer("r", &h).unwrap().unwrap();
-        assert_eq!(batch["tings"][0]["created_at"], a["created_at"]);
-        s.preference(
-            &p,
-            "org-uuid",
-            &json!({"app_id":proof.app_id,"enabled":false}),
-            false,
-        )
-        .unwrap();
-        s.invalidate(&p.context, "org-uuid", &p.id).unwrap();
-        s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), false, false)
-            .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_none());
-        s.ack(
-            "r",
-            "org-uuid",
-            &h,
-            &[a["id"].as_str().unwrap().into()],
-            "read",
-        )
-        .unwrap();
-    }
-    #[test]
-    fn required_delivery_needs_recipient_opt_in_and_preserves_notification_mutes() {
-        for preference in [
-            json!({"app_id":"example","enabled":false}),
-            json!({"app_id":"example","service":"msg","enabled":false}),
-            json!({"app_id":"example","type":"example.msg.received","enabled":false}),
-        ] {
-            let (s, p, proof) = fixture();
-            let h = hook(&s, &p, "r");
-            let grant = s
-                .grants(&p.context, &proof.org_id, Some(&p.id), None)
-                .unwrap()[0]
-                .clone();
-            let sid = grant["id"].as_str().unwrap();
-            assert_eq!(grant["required_delivery"], false);
-            let mut request = body("required");
-            request["delivery"] = "required".into();
-            assert_eq!(
-                s.send(&proof.application(), &request).unwrap_err().body["error"]["code"],
-                "required_delivery_not_enabled"
-            );
-            s.preference(&p, &proof.org_id, &preference, false).unwrap();
-            let before = s.preferences(&p, &proof.org_id, &json!({})).unwrap();
-            let ordinary = s.send(&proof.application(), &body("ordinary")).unwrap().1;
-            assert_eq!(ordinary["silent"], true);
-            assert_eq!(
-                s.required_delivery(&p, &proof.org_id, sid, None).unwrap()["enabled"],
-                false
-            );
-            let other = Principal {
-                id: "si_other".into(),
-                ..p.clone()
-            };
-            assert_eq!(
-                s.required_delivery(&other, &proof.org_id, sid, Some(true))
-                    .unwrap_err()
-                    .status,
-                404
-            );
-            assert_eq!(
-                s.required_delivery(&p, "other-org", sid, Some(true))
-                    .unwrap_err()
-                    .status,
-                404
-            );
-            let other_context = Principal {
-                context: "other-context".into(),
-                ..p.clone()
-            };
-            assert_eq!(
-                s.required_delivery(&other_context, &proof.org_id, sid, Some(true))
-                    .unwrap_err()
-                    .status,
-                404
-            );
-            assert_eq!(
-                s.required_delivery(&p, &proof.org_id, sid, Some(true))
-                    .unwrap()["enabled"],
-                true
-            );
-            assert_eq!(
-                s.preferences(&p, &proof.org_id, &json!({})).unwrap(),
-                before
-            );
-            let sent = s.send(&proof.application(), &request).unwrap().1;
-            assert_eq!(sent["silent"], true);
-            assert_eq!(sent["delivery"], "required");
-            let new_hook = hook(&s, &p, "new");
-            for (receiver, hook) in [("r", h), ("new", new_hook)] {
-                let batch = s.offer(receiver, &hook).unwrap().unwrap();
-                assert_eq!(batch["tings"].as_array().unwrap().len(), 1);
-                assert_eq!(batch["tings"][0]["id"], sent["id"]);
-                assert_eq!(batch["tings"][0]["delivery"], "required");
-            }
-            assert!(
-                s.deliveries(ordinary["id"].as_str().unwrap())
-                    .unwrap()
-                    .is_empty()
-            );
-            let mut reset = preference.clone();
-            reset.as_object_mut().unwrap().remove("enabled");
-            s.preference(&p, &proof.org_id, &reset, true).unwrap();
-            let after_unmute = hook(&s, &p, "unmuted");
-            assert_eq!(
-                s.offer("unmuted", &after_unmute).unwrap().unwrap()["tings"]
-                    .as_array()
-                    .unwrap()
-                    .len(),
-                1
-            );
-        }
-    }
-    #[test]
-    fn required_delivery_opt_out_and_grant_revocation_stop_pending_without_losing_replays() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        let grant = s
-            .grants(&p.context, &proof.org_id, Some(&p.id), None)
-            .unwrap()[0]
-            .clone();
-        let sid = grant["id"].as_str().unwrap();
-        s.required_delivery(&p, &proof.org_id, sid, Some(true))
-            .unwrap();
-        let mut request = body("required");
-        request["delivery"] = "required".into();
-        let accepted = s.send(&proof.application(), &request).unwrap().1;
-        assert_eq!(accepted["silent"], false);
-        assert!(s.offer("r", &h).unwrap().is_some());
-        s.required_delivery(&p, &proof.org_id, sid, Some(false))
-            .unwrap();
-        s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
-        s.bind(
-            &p,
-            &proof.org_id,
-            "r",
-            std::slice::from_ref(&h),
-            false,
-            false,
-        )
-        .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_none());
-        let new_hook = hook(&s, &p, "new");
-        assert!(s.offer("new", &new_hook).unwrap().is_none());
-        assert_eq!(
-            s.send(&proof.application(), &request).unwrap(),
-            (200, accepted.clone())
-        );
-        assert_eq!(
-            s.send(&proof.application(), &body("required"))
-                .unwrap_err()
-                .status,
-            409
-        );
-        request["key"] = "new-required".into();
-        assert_eq!(
-            s.send(&proof.application(), &request).unwrap_err().status,
-            403
-        );
-        let ordinary = s.send(&proof.application(), &body("ordinary")).unwrap().1;
-        assert_eq!(
-            s.offer("r", &h).unwrap().unwrap()["tings"][0]["id"],
-            ordinary["id"]
-        );
-        s.required_delivery(&p, &proof.org_id, sid, Some(true))
-            .unwrap();
-        let registration = s
-            .subscribe_app(
-                &proof,
-                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
-            )
-            .unwrap()
-            .1;
-        assert_eq!(registration["required_delivery"], true);
-        s.revoke(&p.context, &proof.org_id, sid, Some(&p.id), None)
-            .unwrap();
-        s.invalidate(&p.context, &proof.org_id, &p.id).unwrap();
-        s.bind(
-            &p,
-            &proof.org_id,
-            "r",
-            std::slice::from_ref(&h),
-            false,
-            false,
-        )
-        .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_none());
-        assert_eq!(
-            s.required_delivery(&p, &proof.org_id, sid, Some(true))
-                .unwrap_err()
-                .status,
-            403
-        );
-        assert_eq!(
-            s.required_delivery(&p, &proof.org_id, sid, None).unwrap()["enabled"],
-            false
-        );
-        let registration = s
-            .subscribe_app(
-                &proof,
-                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
-            )
-            .unwrap()
-            .1;
-        assert_eq!(registration["required_delivery"], false);
-        assert_eq!(
-            s.send(&proof.application(), &request).unwrap_err().body["error"]["code"],
-            "required_delivery_not_enabled"
-        );
-        request["delivery"] = "invalid".into();
-        assert_eq!(
-            s.send(&proof.application(), &request).unwrap_err().status,
-            400
-        );
-    }
-    #[test]
-    fn required_delivery_keeps_silent_retention_and_unread_backlog_rules() {
-        let (s, p, proof) = fixture();
-        let grant = s
-            .grants(&p.context, &proof.org_id, Some(&p.id), None)
-            .unwrap()[0]
-            .clone();
-        s.required_delivery(&p, &proof.org_id, grant["id"].as_str().unwrap(), Some(true))
-            .unwrap();
-        s.preference(
-            &p,
-            &proof.org_id,
-            &json!({"app_id":proof.app_id,"enabled":false}),
-            false,
-        )
-        .unwrap();
-        let h = hook(&s, &p, "r");
-        let mut request = body("required");
-        request["delivery"] = "required".into();
-        let mid = s.send(&proof.application(), &request).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.read(&p, &proof.org_id, std::slice::from_ref(&mid))
-            .unwrap();
-        let after_read = hook(&s, &p, "after-read");
-        assert!(s.offer("after-read", &after_read).unwrap().is_none());
-        assert!(s.offer("r", &h).unwrap().is_some());
-        s.release_receiver("r").unwrap();
-        s.bind(
-            &p,
-            &proof.org_id,
-            "r",
-            std::slice::from_ref(&h),
-            false,
-            false,
-        )
-        .unwrap();
-        let created = (chrono::Utc::now() - chrono::Months::new(2))
-            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-        s.lock()
-            .unwrap()
-            .execute(
-                "UPDATE tings SET created=?,read=0 WHERE id=?",
-                params![created, mid],
-            )
-            .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_none());
-        let after_expiry = hook(&s, &p, "after-expiry");
-        assert!(s.offer("after-expiry", &after_expiry).unwrap().is_none());
-        assert_eq!(s.prune().unwrap(), 1);
-    }
-    #[test]
-    fn ack_and_read_are_atomic() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert!(
-            s.ack("r", "org-uuid", &h, std::slice::from_ref(&mid), "read")
-                .is_err()
-        );
-        s.offer("r", &h).unwrap();
-        assert!(
-            s.ack(
-                "r",
-                "org-uuid",
-                &h,
-                &[mid.clone(), "unknown".into()],
-                "read"
-            )
-            .is_err()
-        );
-        assert!(
-            s.read(&p, "org-uuid", &[mid.clone(), "unknown".into()])
-                .is_err()
-        );
-        assert_eq!(
-            s.ting(&p.context, "org-uuid", &mid, Some(&p.id), None)
-                .unwrap()["read"],
-            false
-        );
-    }
-    #[test]
-    fn detach_retains_pending_and_backfills_only_unread() {
-        let (s, p, proof) = fixture();
-        let h = hook(&s, &p, "r");
-        s.detach(&p, "org-uuid", &h).unwrap();
-        let mid = s.send(&proof.application(), &body("one")).unwrap().1["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        s.read(&p, "org-uuid", std::slice::from_ref(&mid)).unwrap();
-        assert!(
-            s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), false, false)
-                .is_err()
-        );
-        s.bind(&p, "org-uuid", "r", std::slice::from_ref(&h), true, false)
-            .unwrap();
-        assert!(s.offer("r", &h).unwrap().is_some());
-        let new = hook(&s, &p, "r2");
-        assert!(s.offer("r2", &new).unwrap().is_none());
-    }
-    #[test]
-    fn durable_restart_preserves_copies_and_idempotency() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("store.sqlite");
-        let (_, p, proof) = fixture();
-        let (h, mid, response);
-        {
-            let s = Store::open(path.to_str().unwrap()).unwrap();
-            s.register_type(
-                &p,
-                "app-owner-org",
-                &proof.app_id,
-                &json!({"type":"example.msg.received","description":"arrived"}),
-                false,
-            )
-            .unwrap();
-            s.subscribe_app(&proof, &json!({"org_id":"org-uuid","app_id":proof.app_id}))
-                .unwrap();
-            h = hook(&s, &p, "r");
-            response = s.send(&proof.application(), &body("one")).unwrap().1;
-            mid = response["id"].as_str().unwrap().to_owned();
-            s.offer("r", &h).unwrap();
-            s.ack("r", "org-uuid", &h, std::slice::from_ref(&mid), "delivery")
-                .unwrap();
-        }
-        let s = Store::open(path.to_str().unwrap()).unwrap();
-        assert_eq!(
-            s.send(&proof.application(), &body("one")).unwrap(),
-            (200, response)
-        );
-        s.bind(&p, "org-uuid", "r2", std::slice::from_ref(&h), false, false)
-            .unwrap();
-        assert_eq!(s.offer("r2", &h).unwrap().unwrap()["tings"][0]["id"], mid);
-    }
 }

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the published CLI and one system service. No IAM login is performed.
+# Install the published CLI and one system service. No Silicon Accounts sign-in is performed.
 set -eu
 VERSION=${TING_VERSION:-v0.2.1}
 REPOSITORY=https://github.com/teamofsilicons/silicon-ting

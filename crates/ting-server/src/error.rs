@@ -44,7 +44,7 @@ impl Error {
             404,
             "not_found",
             "The resource was not found.",
-            "Check its ID and the selected org.",
+            "Check its ID and the signed-in account.",
         )
     }
     pub fn details(mut self, details: Value) -> Self {

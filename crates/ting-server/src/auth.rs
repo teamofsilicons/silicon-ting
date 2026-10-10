@@ -1,7 +1,4 @@
-//! Upstream authority is always checked live; only encrypted credentials are stored locally.
-mod ata;
-mod catalog;
-
+//! Silicon Accounts owns identity and session lifetime; upstream tokens stay encrypted here.
 use crate::{
     error::{Error, Result},
     validation as v,
@@ -17,7 +14,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use silicon_iam_client::{Client, Credential, EnvironmentKey, IdempotencyKey, Mutation, models};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, Weak},
@@ -25,179 +21,113 @@ use std::{
 };
 use tokio::sync::Mutex as AsyncMutex;
 
-type LoginReceiptRow = (String, i64, Option<Vec<u8>>, Option<Vec<u8>>);
-
 #[derive(Clone)]
 pub struct Principal {
     pub context: String,
+    /// Immutable Accounts UUID, never a mutable c:/si: handle.
     pub id: String,
     pub kind: String,
     pub session: String,
 }
 pub struct Proof {
     pub context: String,
-    pub org_id: String,
     pub app_id: String,
     pub actor_id: String,
-    pub actor_kind: String,
     pub expires_at: i64,
-    pub(crate) test: Option<TestContext>,
 }
-// App-owned operations need application authority, never a manufactured user.
 pub struct AppAuthority {
     pub context: String,
-    pub org_id: String,
     pub app_id: String,
     pub expires_at: i64,
-    test: Option<TestContext>,
-}
-impl Proof {
-    pub fn application(&self) -> AppAuthority {
-        AppAuthority {
-            context: self.context.clone(),
-            org_id: self.org_id.clone(),
-            app_id: self.app_id.clone(),
-            expires_at: self.expires_at,
-            test: self.test.clone(),
-        }
-    }
-    pub fn receiver_context(&self) -> Option<(i64, String)> {
-        let test = self.test.as_ref()?;
-        Some((test.generation?, hash(test.key.as_bytes())))
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TestContext {
-    id: String,
-    secret: String,
-    key: String,
-    #[serde(default)]
-    generation: Option<i64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Session {
-    context: String,
+    uuid: String,
     id: String,
     kind: String,
-    access: String,
     refresh: String,
     expires: i64,
-    test: Option<TestContext>,
-    refresh_key: Option<String>,
-    #[serde(default)]
-    refresh_started: Option<i64>,
-    revoke_key: String,
 }
 pub struct Auth {
     db: Mutex<Connection>,
     cipher: Aes256Gcm,
-    iam: Client,
+    accounts: String,
     app_id: String,
-    honeycomb: String,
+    app_secret: String,
+    apps_url: String,
     station: String,
     station_key: String,
     station_table: String,
     http: reqwest::Client,
     locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
     telemetry: Option<space_station::SpaceClient>,
-    webhook: Option<silicon_iam_client::webhook::WebhookVerifier>,
 }
-
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 fn hash(value: &[u8]) -> String {
     hex::encode(Sha256::digest(value))
 }
+pub fn secret() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+fn storage(_: impl std::fmt::Display) -> Error {
+    Error::unavailable("Credential storage is unavailable; retry the same operation.")
+}
 fn unavailable() -> Error {
     Error::unavailable(
-        "An authentication dependency could not confirm authority; retry when it is available.",
+        "Silicon Accounts could not confirm authority. Your saved session is unchanged; retry shortly.",
     )
 }
 fn expired() -> Error {
     Error::new(
         401,
         "session_expired",
-        "The Ting session is expired or revoked.",
-        "Log in with a fresh Ting-bound IAM short-lived token.",
+        "This session has expired or was revoked.",
+        "Sign in through Silicon Accounts again.",
     )
 }
 fn forbidden() -> Error {
     Error::new(
         403,
         "permission_denied",
-        "Current authority does not permit this operation.",
-        "Check selected IAM organizations and the application's approved permissions.",
+        "This account or proof cannot perform this operation.",
+        "Use an app author account or a proof with the required Ting scope.",
     )
 }
-fn storage(_: impl std::fmt::Display) -> Error {
-    Error::new(
-        503,
-        "storage_unavailable",
-        "Credential storage is unavailable.",
-        "Retry the same operation and idempotency key.",
-    )
+fn timestamp(value: &Value) -> Result<i64> {
+    value
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|s| s.timestamp())
+        .ok_or_else(unavailable)
 }
-fn iam_error(error: silicon_iam_client::Error) -> Error {
-    match error {
-        silicon_iam_client::Error::Api(e) if e.status == 401 => expired(),
-        silicon_iam_client::Error::Api(e)
-            if e.status == 400 && (e.code.contains("slt") || e.code == "invalid_grant") =>
-        {
-            expired()
-        }
-        silicon_iam_client::Error::Api(e) if e.status == 403 => forbidden(),
-        silicon_iam_client::Error::Api(e) if e.code == "idempotency_conflict" => Error::new(
-            409,
-            "idempotency_conflict",
-            "IAM rejected a changed idempotent operation.",
-            "Repeat the original request with its original key.",
-        ),
-        _ => unavailable(),
-    }
+fn iso(timestamp: i64) -> String {
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
-fn mutation(key: &str) -> Result<Mutation> {
-    Ok(Mutation::with_key(IdempotencyKey::parse(key).map_err(
-        |_| Error::invalid("Idempotency-Key must contain 16–255 visible ASCII characters."),
-    )?))
+fn identity(account: &Value) -> Result<(&str, &str, &str)> {
+    let uuid = account["uuid"]
+        .as_str()
+        .filter(|s| uuid::Uuid::parse_str(s).is_ok_and(|u| u.to_string() == *s))
+        .ok_or_else(unavailable)?;
+    let id = account["id"].as_str().ok_or_else(unavailable)?;
+    let kind = account["kind"]
+        .as_str()
+        .filter(|k| v::actor_kind(id) == Some(*k))
+        .ok_or_else(unavailable)?;
+    Ok((uuid, id, kind))
 }
-fn secret() -> String {
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
-}
-fn bearer(headers: &HeaderMap) -> Result<&str> {
-    headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .filter(|v| !v.is_empty() && v.len() <= 8192)
-        .ok_or_else(|| {
-            Error::new(
-                401,
-                "authentication_required",
-                "An IAM App Proof Token is required.",
-                "Prepare the exact request and obtain a fresh IAM proof.",
-            )
-        })
-}
-
 impl Auth {
     pub fn new(config: &crate::Config) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            v::app_id(&config.iam_app_id),
-            "TING_IAM_APP_ID must be a bare canonical IAM application ID"
-        );
-        // IAM and telemetry enable different rustls providers; select one before
-        // either client starts a background connection.
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let key = hex::decode(&config.encryption_key).map_err(|_| {
-            anyhow::anyhow!("TING_ENCRYPTION_KEY must be 64 hexadecimal characters")
-        })?;
+        let key = hex::decode(&config.encryption_key)?;
         anyhow::ensure!(
             key.len() == 32,
-            "TING_ENCRYPTION_KEY must encode 32 random bytes"
+            "TING_ENCRYPTION_KEY must contain 32 random bytes in hex"
         );
         let file = format!("{}.auth", config.database_path);
         let db = Connection::open(&file)?;
@@ -208,19 +138,10 @@ impl Auth {
         }
         db.busy_timeout(Duration::from_secs(5))?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-            CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, payload BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, revoke_pending INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS logins (id TEXT PRIMARY KEY, slt_hash TEXT NOT NULL, created INTEGER NOT NULL, payload BLOB, response BLOB);
-            CREATE INDEX IF NOT EXISTS logins_slt ON logins(slt_hash);
-            CREATE TABLE IF NOT EXISTS invalidated_logins (id TEXT PRIMARY KEY);
-            CREATE TABLE IF NOT EXISTS testing_contexts (id TEXT PRIMARY KEY,state TEXT NOT NULL,key_hash TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS catalog_authorizations(id TEXT PRIMARY KEY,payload BLOB NOT NULL,context TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS catalog_grants(id TEXT PRIMARY KEY,payload BLOB NOT NULL,context TEXT NOT NULL);")?;
-        // Read the authoritative lifecycle generation without duplicating it in credentials.
-        db.execute("ATTACH DATABASE ? AS delivery", [&config.database_path])?;
-        let iam = Client::new(&config.iam_url)?.with_credential(Credential::application(
-            &config.iam_app_id,
-            &config.iam_app_secret,
-        ));
+          CREATE TABLE IF NOT EXISTS account_sessions(id TEXT PRIMARY KEY,payload BLOB NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,revoke_pending INTEGER NOT NULL DEFAULT 0);
+          CREATE TABLE IF NOT EXISTS account_logins(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL,response BLOB NOT NULL,session TEXT NOT NULL);
+          CREATE UNIQUE INDEX IF NOT EXISTS account_login_credential ON account_logins(credential_hash);
+          CREATE TABLE IF NOT EXISTS account_exchanges(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL UNIQUE);")?;
         let telemetry = if config.spacestation_key.is_empty() {
             None
         } else {
@@ -233,234 +154,30 @@ impl Auth {
                     .build()?,
             )
         };
-        let webhook = std::env::var("TING_IAM_WEBHOOK_SECRET")
-            .ok()
-            .map(|secret| -> anyhow::Result<_> {
-                use silicon_iam_client::webhook::{
-                    WebhookSecret, WebhookSecretKeyring, WebhookVerifier,
-                };
-                let version = std::env::var("TING_IAM_WEBHOOK_SECRET_VERSION")
-                    .unwrap_or_else(|_| "1".into())
-                    .parse::<i64>()?;
-                Ok(WebhookVerifier::new(WebhookSecretKeyring::new(
-                    version,
-                    WebhookSecret::new(secret)?,
-                )?))
-            })
-            .transpose()?;
         Ok(Self {
             db: Mutex::new(db),
             cipher: Aes256Gcm::new_from_slice(&key)
                 .map_err(|_| anyhow::anyhow!("Invalid encryption key"))?,
-            iam,
-            app_id: config.iam_app_id.clone(),
-            honeycomb: config.honeycomb_url.trim_end_matches('/').into(),
+            accounts: config.accounts_url.trim_end_matches('/').into(),
+            app_id: config.accounts_app_id.clone(),
+            app_secret: config.accounts_app_secret.clone(),
+            apps_url: config.apps_url.trim_end_matches('/').into(),
             station: config.spacestation_url.trim_end_matches('/').into(),
             station_key: config.spacestation_key.clone(),
             station_table: config.spacestation_table.clone(),
+            telemetry,
             http: reqwest::Client::builder()
-                .user_agent(concat!("silicon-ting-server/", env!("CARGO_PKG_VERSION")))
                 .timeout(Duration::from_secs(20))
                 .redirect(reqwest::redirect::Policy::none())
+                .user_agent(concat!("silicon-ting-server/", env!("CARGO_PKG_VERSION")))
                 .build()?,
             locks: Mutex::new(HashMap::new()),
-            telemetry,
-            webhook,
         })
     }
     pub fn diagnostic(&self, event: &str, method: &str, path: &str, status: u16, elapsed_ms: u64) {
-        if let Some(telemetry) = &self.telemetry {
-            telemetry.record(json!({"source":"ting.backend","event":event,"step":"complete","method":method,"path":path,"status":status,"elapsed_ms":elapsed_ms,"version":env!("CARGO_PKG_VERSION")}));
+        if let Some(t) = &self.telemetry {
+            t.record(json!({"source":"ting.backend","event":event,"method":method,"path":path,"status":status,"elapsed_ms":elapsed_ms,"version":env!("CARGO_PKG_VERSION")}));
         }
-    }
-    pub fn webhook(&self, headers: &HeaderMap, raw: &[u8]) -> Result<Value> {
-        self.webhook
-            .as_ref()
-            .ok_or_else(unavailable)?
-            .verify(headers, raw)
-            .map_err(|_| {
-                Error::new(
-                    401,
-                    "authentication_required",
-                    "IAM webhook signature verification failed.",
-                    "Use the current signing key and exact signed request bytes.",
-                )
-            })?;
-        // IAM authority is checked live on each operation and every 30 seconds for receivers;
-        // webhook redelivery therefore needs no mutable authorization projection.
-        Ok(json!({"accepted":true}))
-    }
-    pub async fn revalidate(&self, p: &Principal) -> Result<Principal> {
-        let (s, _) = self.live(&p.session).await?;
-        if s.id != p.id || s.context != p.context || s.kind != p.kind {
-            return Err(expired());
-        }
-        Ok(p.clone())
-    }
-    pub async fn authenticate_session_org(
-        &self,
-        id: &str,
-        org: &str,
-    ) -> Result<(Principal, String)> {
-        let (s, token) = self.live(id).await?;
-        let org = Self::org_authorization(token, org)?
-            .organization_id
-            .to_string();
-        Ok((
-            Principal {
-                context: s.context,
-                id: s.id,
-                kind: s.kind,
-                session: id.into(),
-            },
-            org,
-        ))
-    }
-    pub fn fence_context(
-        &self,
-        context: &str,
-        state: &str,
-        key_hash: &str,
-        revoke: bool,
-    ) -> Result<()> {
-        let mut db = self.db.lock().unwrap();
-        let tx = db.transaction().map_err(storage)?;
-        tx.execute("INSERT INTO testing_contexts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,key_hash=excluded.key_hash",params![context,state,key_hash]).map_err(storage)?;
-        if revoke {
-            tx.execute(
-                "DELETE FROM catalog_authorizations WHERE context=?",
-                [context],
-            )
-            .map_err(storage)?;
-            tx.execute("DELETE FROM catalog_grants WHERE context=?", [context])
-                .map_err(storage)?;
-            // ponytail: lifecycle scans encrypted sessions; add a context index if this becomes large.
-            let rows: Vec<(String, Vec<u8>)> = {
-                let mut q = tx
-                    .prepare("SELECT id,payload FROM sessions WHERE revoked=0")
-                    .map_err(storage)?;
-                q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .map_err(storage)?
-                    .collect::<std::result::Result<_, _>>()
-                    .map_err(storage)?
-            };
-            for (id, bytes) in rows {
-                let session: Session = self.open(&id, &bytes)?;
-                if session.context == context {
-                    tx.execute(
-                        "UPDATE sessions SET revoked=1,revoke_pending=1 WHERE id=?",
-                        [id],
-                    )
-                    .map_err(storage)?;
-                }
-            }
-        }
-        tx.commit().map_err(storage)?;
-        Ok(())
-    }
-    fn check_context(&self, context: &str, key: &str) -> Result<i64> {
-        self.check_context_hash(context, &hash(key.as_bytes()))
-    }
-    pub fn check_receiver_context(
-        &self,
-        context: &str,
-        generation: i64,
-        key_hash: &str,
-    ) -> Result<()> {
-        if self.check_context_hash(context, key_hash)? != generation {
-            return Err(forbidden());
-        }
-        Ok(())
-    }
-    fn check_context_hash(&self, context: &str, key_hash: &str) -> Result<i64> {
-        let db = self.db.lock().unwrap();
-        let known: Option<(String, String)> = db
-            .query_row(
-                "SELECT state,key_hash FROM testing_contexts WHERE id=?",
-                [context],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()
-            .map_err(storage)?;
-        let (state, expected) = known.ok_or_else(|| {
-            Error::unavailable("Import this testing environment through Honeycomb before use.")
-        })?;
-        if state == "pending" {
-            return Err(Error::unavailable(
-                "This testing environment has an unfinished lifecycle operation.",
-            ));
-        }
-        if state != "active" || expected != key_hash {
-            return Err(forbidden());
-        }
-        db
-            .query_row(
-                "SELECT generation FROM delivery.lifecycle_environments WHERE id=? AND state='active' AND key_hash=? AND generation>0",
-                params![context, expected],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(storage)?
-            .ok_or_else(|| Error::unavailable("This testing environment has no active lifecycle generation."))
-    }
-    fn session_environment(&self, session: &Session) -> Result<Value> {
-        // Public identity changes require a fresh login; never rewrite claims before refresh.
-        if v::actor_kind(&session.id) != Some(session.kind.as_str()) {
-            return Err(expired());
-        }
-        match &session.test {
-            None if session.context == "production" => Ok(json!({"kind":"production"})),
-            Some(test) if test.id == session.context => {
-                let generation = self.check_context(&test.id, &test.key)?;
-                if test.generation != Some(generation) {
-                    return Err(expired());
-                }
-                Ok(json!({"kind":"testing","id":test.id,"generation":generation}))
-            }
-            _ => Err(expired()),
-        }
-    }
-    fn current_session(&self, principal: &Principal) -> Result<Session> {
-        let session = self.session(&principal.session)?;
-        if session.id != principal.id
-            || session.kind != principal.kind
-            || session.context != principal.context
-            || session.expires <= now()
-        {
-            return Err(expired());
-        }
-        self.session_environment(&session)?;
-        Ok(session)
-    }
-    pub fn check_session(&self, principal: &Principal) -> Result<()> {
-        self.current_session(principal).map(|_| ())
-    }
-    pub fn check_proof(&self, proof: &Proof) -> Result<()> {
-        if v::actor_kind(&proof.actor_id) != Some(proof.actor_kind.as_str()) {
-            return Err(forbidden());
-        }
-        self.check_app(&proof.application())
-    }
-    pub fn check_app(&self, proof: &AppAuthority) -> Result<()> {
-        if !v::app_id(&proof.app_id) || proof.expires_at <= now() {
-            return Err(forbidden());
-        }
-        match &proof.test {
-            None if proof.context == "production" => Ok(()),
-            Some(test)
-                if test.id == proof.context
-                    && test.generation == Some(self.check_context(&test.id, &test.key)?) =>
-            {
-                Ok(())
-            }
-            _ => Err(forbidden()),
-        }
-    }
-    pub fn me(&self, principal: &Principal) -> Result<Value> {
-        let session = self.current_session(principal)?;
-        Ok(
-            json!({"id":session.id,"kind":session.kind,"authenticated":true,"environment":self.session_environment(&session)?}),
-        )
     }
     fn lock(&self, id: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.locks.lock().unwrap();
@@ -472,23 +189,23 @@ impl Auth {
         locks.insert(id.into(), Arc::downgrade(&lock));
         lock
     }
-    pub(crate) fn seal(&self, id: &str, value: &impl Serialize) -> Result<Vec<u8>> {
+    fn seal(&self, id: &str, value: &impl Serialize) -> Result<Vec<u8>> {
         let mut nonce = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce);
-        let bytes = serde_json::to_vec(value).map_err(storage)?;
-        let encrypted = self
+        let data = serde_json::to_vec(value).map_err(storage)?;
+        let bytes = self
             .cipher
             .encrypt(
                 Nonce::from_slice(&nonce),
                 Payload {
-                    msg: &bytes,
+                    msg: &data,
                     aad: id.as_bytes(),
                 },
             )
-            .map_err(|_| storage("encryption"))?;
-        Ok([nonce.as_slice(), encrypted.as_slice()].concat())
+            .map_err(storage)?;
+        Ok([nonce.as_slice(), bytes.as_slice()].concat())
     }
-    pub(crate) fn open<T: serde::de::DeserializeOwned>(&self, id: &str, bytes: &[u8]) -> Result<T> {
+    fn open<T: serde::de::DeserializeOwned>(&self, id: &str, bytes: &[u8]) -> Result<T> {
         if bytes.len() < 28 {
             return Err(storage("invalid ciphertext"));
         }
@@ -501,544 +218,369 @@ impl Auth {
                     aad: id.as_bytes(),
                 },
             )
-            .map_err(|_| storage("decryption"))?;
+            .map_err(storage)?;
         serde_json::from_slice(&data).map_err(storage)
     }
     fn session(&self, id: &str) -> Result<Session> {
-        let data: Option<Vec<u8>> = self
+        let bytes: Option<Vec<u8>> = self
             .db
             .lock()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sessions WHERE id=? AND revoked=0",
+                "SELECT payload FROM account_sessions WHERE id=? AND revoked=0",
                 [id],
                 |r| r.get(0),
             )
             .optional()
             .map_err(storage)?;
-        self.open(id, &data.ok_or_else(expired)?)
+        let s: Session = self.open(id, &bytes.ok_or_else(expired)?)?;
+        if s.expires <= now() {
+            return Err(expired());
+        }
+        Ok(s)
     }
     fn save(&self, id: &str, s: &Session) -> Result<()> {
-        let encrypted = self.seal(id, s)?;
+        let bytes = self.seal(id, s)?;
         self.db
             .lock()
             .unwrap()
             .execute(
-                "UPDATE sessions SET payload=? WHERE id=?",
-                params![encrypted, id],
+                "UPDATE account_sessions SET payload=? WHERE id=? AND revoked=0",
+                params![bytes, id],
             )
             .map_err(storage)?;
         Ok(())
     }
-    fn client(&self, test: Option<&TestContext>) -> Result<Client> {
-        match test {
-            Some(t) => Ok(self
-                .iam
-                .with_credential(Credential::application(&self.app_id, &t.secret))
-                .with_environment(EnvironmentKey::new(&t.key).map_err(|_| forbidden())?)),
-            None => Ok(self.iam.clone()),
-        }
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.http
+            .request(method, format!("{}{path}", self.accounts))
+            .basic_auth(&self.app_id, Some(&self.app_secret))
     }
-    async fn test_headers(&self, headers: &HeaderMap) -> Result<Option<TestContext>> {
-        let secret = headers.get("iam_test_app_secret");
-        let key = headers.get("x-testing-environment-key");
-        match (secret, key) {
-            (None, None) => Ok(None),
-            (Some(secret), Some(key)) => {
-                let mut test = TestContext {
-                    id: String::new(),
-                    secret: secret.to_str().map_err(|_| forbidden())?.into(),
-                    key: key.to_str().map_err(|_| forbidden())?.into(),
-                    generation: None,
-                };
-                let validated = self
-                    .client(Some(&test))?
-                    .applications()
-                    .testing_context()
-                    .await
-                    .map_err(iam_error)?;
-                if validated.application.app_id != self.app_id {
-                    return Err(forbidden());
-                }
-                test.id = validated.environment_id.to_string();
-                test.generation = Some(self.check_context(&test.id, &test.key)?);
-                Ok(Some(test))
+    async fn upstream(&self, r: reqwest::RequestBuilder) -> Result<Value> {
+        let response = r.send().await.map_err(|_| unavailable())?;
+        let status = response.status();
+        let value: Value = response.json().await.map_err(|_| unavailable())?;
+        if !status.is_success() {
+            if value["error"] == "invalid_grant" {
+                return Err(expired());
             }
-            _ => Err(Error::new(
-                400,
-                "test_context_required",
-                "Both IAM_TEST_APP_SECRET and X-Testing-Environment-Key are required together.",
-                "Supply both current test credentials or omit both for production.",
-            )),
-        }
-    }
-    async fn inspect(&self, s: &Session) -> Result<models::TokenIntrospection> {
-        self.session_environment(s)?;
-        let client = self.client(s.test.as_ref())?;
-        if let Some(test) = &s.test {
-            let current = client
-                .applications()
-                .testing_context()
-                .await
-                .map_err(iam_error)?;
-            if current.environment_id.to_string() != s.context
-                || current.application.app_id != self.app_id
-                || test.id != s.context
-            {
-                return Err(forbidden());
+            if status.as_u16() == 404 {
+                return Err(Error::not_found());
             }
-        }
-        let token = client
-            .oauth()
-            .introspect(
-                &models::TokenIntrospectionRequest {
-                    token: s.access.clone(),
-                    token_type_hint: None,
-                },
-                None,
-            )
-            .await
-            .map_err(iam_error)?;
-        if !token.active
-            || token.public_id.as_deref() != Some(&s.id)
-            || token.client_id.as_deref().or(token.audience.as_deref()) != Some(&self.app_id)
-            || token.client_id.as_deref().is_some_and(|a| a != self.app_id)
-            || token.audience.as_deref().is_some_and(|a| a != self.app_id)
-        {
-            return Err(expired());
-        }
-        let kind = serde_json::to_value(&token.actor_type).map_err(storage)?;
-        if kind.as_str() != Some(&s.kind) {
-            return Err(expired());
-        }
-        for org in token
-            .authorization
-            .iter()
-            .chain(token.authorizations.iter().flatten())
-        {
-            if org.audience != self.app_id
-                || org.public_id.as_deref() != Some(&s.id)
-                || serde_json::to_value(&org.actor_type)
-                    .map_err(storage)?
-                    .as_str()
-                    != Some(&s.kind)
-                || org.org_id.is_empty()
-                || org
-                    .testing_environment_id
-                    .map(|id| id.to_string())
-                    .as_deref()
-                    != s.test.as_ref().map(|t| t.id.as_str())
-            {
-                return Err(forbidden());
-            }
-        }
-        // An IAM request can overlap a clean or rotation; do not attest the old generation.
-        self.session_environment(s)?;
-        Ok(token)
-    }
-    async fn live(&self, id: &str) -> Result<(Session, models::TokenIntrospection)> {
-        let lock = self.lock(id);
-        let _guard = lock.lock().await;
-        let mut session = self.session(id)?;
-        self.session_environment(&session)?;
-        // At most one old result and one fresh rotation; malformed IAM lifetimes must not spin.
-        for _ in 0..2 {
-            if session.expires > now() + 10 && session.refresh_key.is_none() {
-                break;
-            }
-            if session.refresh_key.is_none() {
-                session.refresh_key = Some(secret());
-                session.refresh_started = Some(now());
-                self.save(id, &session)?;
-            }
-            let refreshed = self
-                .client(session.test.as_ref())?
-                .oauth()
-                .refresh(
-                    &self.app_id,
-                    &session.refresh,
-                    &mutation(session.refresh_key.as_ref().unwrap())?,
-                )
-                .await
-                .map_err(iam_error)?;
-            session.access = refreshed.access_token;
-            session.refresh = refreshed.refresh_token;
-            // Legacy pending operations have no known start: recover their family, then rotate again.
-            session.expires = session
-                .refresh_started
-                .map(|started| started.saturating_add(refreshed.expires_in))
-                .unwrap_or(0);
-            session.refresh_key = None;
-            session.refresh_started = None;
-            self.save(id, &session)?;
-            self.session(id)?;
-            self.session_environment(&session)?;
-        }
-        if session.expires <= now() + 10 {
+            // Invalid app credentials and dependency failures are not a user logout.
             return Err(unavailable());
         }
-        let inspected = self.inspect(&session).await?;
-        self.session(id)?;
-        Ok((session, inspected))
-    }
-    pub async fn authenticate(&self, token: &str, headers: &HeaderMap) -> Result<Principal> {
-        let id = Self::session_id(token)?;
-        let (session, _) = self.live(&id).await?;
-        if let Some(test) = self.test_headers(headers).await?
-            && session.test.as_ref().is_none_or(|s| {
-                s.id != test.id
-                    || s.secret != test.secret
-                    || s.key != test.key
-                    || s.generation != test.generation
-            })
-        {
-            return Err(Error::new(
-                403,
-                "test_context_mismatch",
-                "Test headers do not match this session.",
-                "Use the session's original current testing credentials.",
-            ));
-        }
-        Ok(Principal {
-            context: session.context,
-            id: session.id,
-            kind: session.kind,
-            session: id,
-        })
-    }
-    pub async fn login(&self, slt: &str, key: &str, headers: &HeaderMap) -> Result<(u16, Value)> {
-        self.login_as(slt, key, headers, None).await
-    }
-    pub async fn login_as(
-        &self,
-        slt: &str,
-        key: &str,
-        headers: &HeaderMap,
-        expected_kind: Option<&str>,
-    ) -> Result<(u16, Value)> {
-        if expected_kind.is_some_and(|kind| !matches!(kind, "carbon" | "silicon")) {
-            return Err(forbidden());
-        }
-        mutation(key)?;
-        if slt.is_empty() || slt.len() > 8192 {
-            return Err(Error::invalid(
-                "slt must be a nonempty short-lived IAM token.",
-            ));
-        }
-        let test = self.test_headers(headers).await?;
-        let context = test
-            .as_ref()
-            .map(|t| t.id.clone())
-            .unwrap_or("production".into());
-        let binding = match &test {
-            Some(t) => format!("{context}:{}:{key}", t.generation.ok_or_else(expired)?),
-            None => format!("{context}:{key}"),
-        };
-        let operation = hash(binding.as_bytes());
-        let slt_hash = hash(slt.as_bytes());
-        let lock = self.lock(&operation);
-        let _guard = lock.lock().await;
-        let slt_lock = self.lock(&format!("slt:{slt_hash}"));
-        let _slt_guard = slt_lock.lock().await;
-        let invalidated: bool = self
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM invalidated_logins WHERE id=?)",
-                [&operation],
-                |r| r.get(0),
-            )
-            .map_err(storage)?;
-        if invalidated {
-            return Err(Error::new(
-                410,
-                "login_migrated",
-                "This login attempt was invalidated during the identifier migration.",
-                "Obtain a fresh IAM short-lived token and start a new login attempt.",
-            ));
-        }
-        let prior: Option<LoginReceiptRow> = self
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT slt_hash,created,payload,response FROM logins WHERE id=?",
-                [&operation],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()
-            .map_err(storage)?;
-        let mut restored = None;
-        let mut exchanged_at = now();
-        let recovering = prior.is_some();
-        if let Some((original, created, payload, response)) = prior {
-            exchanged_at = created;
-            if original != slt_hash {
-                return Err(Error::new(
-                    409,
-                    "idempotency_conflict",
-                    "This login key was used for a different short-lived token.",
-                    "Retry the original token or obtain a fresh login attempt.",
-                ));
-            }
-            if let Some(response) = response {
-                let response: Value = self.open(&operation, &response)?;
-                if expected_kind.is_some_and(|kind| response["kind"].as_str() != Some(kind)) {
-                    return Err(forbidden());
-                }
-                self.login_result(&response, &context).await?;
-                return Ok((200, response));
-            }
-            restored = payload;
-        }
-        // An SLT is one-use even when a clean changes the local operation namespace.
-        // Old completed receipts can recover only their original fixed session above.
-        let reused: bool = self
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM logins WHERE slt_hash=? AND id<>?)",
-                params![slt_hash, operation],
-                |row| row.get(0),
-            )
-            .map_err(storage)?;
-        if reused {
-            return Err(Error::new(
-                409,
-                "login_context_conflict",
-                "This short-lived token is already bound to another login operation or environment generation.",
-                "Recover the original operation in its original context, or obtain a fresh IAM short-lived token and operation key.",
-            ));
-        }
-        if !recovering {
-            self.db
-                .lock()
-                .unwrap()
-                .execute(
-                    "INSERT INTO logins(id,slt_hash,created) VALUES(?,?,?)",
-                    params![operation, slt_hash, now()],
-                )
-                .map_err(storage)?;
-        }
-        let tokens: models::OAuthTokenResponse = if let Some(bytes) = restored {
-            self.open(&operation, &bytes)?
-        } else {
-            let tokens = self
-                .client(test.as_ref())?
-                .oauth()
-                .login(&self.app_id, slt, &mutation(key)?)
-                .await
-                .map_err(|error| {
-                    let error = iam_error(error);
-                    if recovering && matches!(error.status, 401 | 403) {
-                        Error::new(409, "login_recovery_unresolved",
-                            "The original login result could not be recovered; its earlier outcome remains unknown.",
-                            "Retain the original operation and credentials for recovery or operator cleanup. A fresh login does not cancel the earlier operation.")
-                    } else {
-                        error
-                    }
-                })?;
-            let encrypted = self.seal(&operation, &tokens)?;
-            self.db
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE logins SET payload=? WHERE id=?",
-                    params![encrypted, operation],
-                )
-                .map_err(storage)?;
-            tokens
-        };
-        let actor_missing = tokens.actor.is_none();
-        let actor = match tokens.actor {
-            Some(actor) => actor,
-            None => {
-                let identity = self
-                    .client(test.as_ref())?
-                    .oauth()
-                    .introspect(
-                        &models::TokenIntrospectionRequest {
-                            token: tokens.access_token.clone(),
-                            token_type_hint: None,
-                        },
-                        None,
-                    )
-                    .await
-                    .map_err(iam_error)?;
-                if !identity.active {
-                    return Err(expired());
-                }
-                models::ActorRef {
-                    public_id: identity
-                        .public_id
-                        .filter(|id| !id.is_empty())
-                        .ok_or_else(expired)?,
-                    type_field: match identity.actor_type {
-                        Some(models::TokenIntrospectionActorType::Carbon) => {
-                            models::ActorRefType::Carbon
-                        }
-                        Some(models::TokenIntrospectionActorType::Silicon) => {
-                            models::ActorRefType::Silicon
-                        }
-                        _ => return Err(forbidden()),
-                    },
-                }
-            }
-        };
-        let kind = serde_json::to_value(&actor.type_field)
-            .map_err(storage)?
-            .as_str()
-            .filter(|k| matches!(*k, "carbon" | "silicon"))
-            .ok_or_else(unavailable)?
-            .to_owned();
-        if expected_kind.is_some_and(|expected| expected != kind) {
-            return Err(forbidden());
-        }
-        let session = Session {
-            context,
-            id: actor.public_id.clone(),
-            kind,
-            access: tokens.access_token,
-            refresh: tokens.refresh_token,
-            // A recovered exchange must not extend the upstream token's lifetime.
-            expires: exchanged_at + tokens.expires_in,
-            test,
-            refresh_key: None,
-            refresh_started: None,
-            revoke_key: secret(),
-        };
-        // Verify browser kind selection and introspection-derived identity, including
-        // application, organization and testing bindings, before a local session exists.
-        if expected_kind.is_some() || actor_missing {
-            self.inspect(&session).await?;
-        }
-        let token = format!("ting_{}", secret());
-        let id = hash(token.as_bytes());
-        let response =
-            json!({"authenticated":true,"id":session.id,"kind":session.kind,"session_token":token});
-        let payload = self.seal(&id, &session)?;
-        let replay = self.seal(&operation, &response)?;
-        {
-            let mut db = self.db.lock().unwrap();
-            let tx = db.transaction().map_err(storage)?;
-            tx.execute(
-                "INSERT INTO sessions(id,payload) VALUES(?,?)",
-                params![id, payload],
-            )
-            .map_err(storage)?;
-            tx.execute(
-                "UPDATE logins SET response=?,payload=NULL WHERE id=?",
-                params![replay, operation],
-            )
-            .map_err(storage)?;
-            tx.commit().map_err(storage)?;
-        }
-        // Persist the exchange and opaque result before validation so a failure/crash
-        // neither loses rotated credentials nor creates a second session on recovery.
-        self.login_result(&response, &session.context).await?;
-        Ok((201, response))
-    }
-    async fn login_result(&self, response: &Value, context: &str) -> Result<()> {
-        let token = response["session_token"]
-            .as_str()
-            .ok_or_else(|| storage("missing login token"))?;
-        let id = hash(token.as_bytes());
-        let checked = self.live(&id).await.and_then(|(session, _)| {
-            if session.context != context
-                || response["id"] != session.id
-                || response["kind"] != session.kind
-            {
-                Err(expired())
-            } else {
-                Ok(())
-            }
-        });
-        if checked
-            .as_ref()
-            .is_err_and(|error| matches!(error.status, 401 | 403))
-        {
-            self.db
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE sessions SET revoked=1,revoke_pending=1 WHERE id=? AND revoked=0",
-                    [&id],
-                )
-                .map_err(storage)?;
-        }
-        checked
+        Ok(value)
     }
     pub fn session_id(token: &str) -> Result<String> {
-        if !token.strip_prefix("ting_").is_some_and(|value| {
-            value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        }) {
+        if !token
+            .strip_prefix("ting_")
+            .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
             return Err(expired());
         }
         Ok(hash(token.as_bytes()))
     }
-    #[cfg(test)]
-    pub async fn logout(&self, p: &Principal) -> Result<Value> {
-        self.logout_by_id(&p.session).await
-    }
-    /// Possession of the opaque local token authorizes cleanup even after IAM authority expires.
-    pub async fn logout_by_id(&self, id: &str) -> Result<Value> {
+    async fn live(&self, id: &str) -> Result<Session> {
         let lock = self.lock(id);
         let _guard = lock.lock().await;
-        let row: Option<(Vec<u8>, bool, bool)> = self
+        let mut s = self.session(id)?;
+        // Introspection accepts refresh tokens and checks the whole sign-in live.
+        // Ting needs identity only; no rotation means a lost refresh response cannot end a session.
+        let value = self
+            .upstream(
+                self.request(reqwest::Method::POST, "/v1/oauth/introspect")
+                    .form(&[("token", &s.refresh)]),
+            )
+            .await?;
+        match value["active"].as_bool() {
+            Some(true) => {}
+            Some(false) => return Err(expired()),
+            None => return Err(unavailable()),
+        }
+        if value["sub"] != s.uuid
+            || value["aud"] != self.app_id
+            || value["kind"] != s.kind
+            || value["token_type"] != "refresh_token"
+            || !value["exp"].as_i64().is_some_and(|exp| exp > now())
+        {
+            return Err(unavailable());
+        }
+        if let Some(handle) = value["id"]
+            .as_str()
+            .filter(|id| v::actor_kind(id) == Some(s.kind.as_str()))
+            && handle != s.id
+        {
+            s.id = handle.into();
+            self.save(id, &s)?;
+        }
+        self.session(id)?;
+        Ok(s)
+    }
+    fn principal(id: &str, s: &Session) -> Principal {
+        Principal {
+            context: "accounts".into(),
+            id: s.uuid.clone(),
+            kind: s.kind.clone(),
+            session: id.into(),
+        }
+    }
+    pub async fn authenticate(&self, token: &str, _headers: &HeaderMap) -> Result<Principal> {
+        let id = Self::session_id(token)?;
+        let s = self.live(&id).await?;
+        Ok(Self::principal(&id, &s))
+    }
+    pub async fn revalidate(&self, p: &Principal) -> Result<Principal> {
+        let s = self.live(&p.session).await?;
+        if s.uuid != p.id || s.kind != p.kind {
+            return Err(expired());
+        }
+        Ok(Self::principal(&p.session, &s))
+    }
+    pub async fn authenticate_session(&self, id: &str) -> Result<Principal> {
+        let s = self.live(id).await?;
+        Ok(Self::principal(id, &s))
+    }
+    pub fn check_session_id(&self, id: &str) -> Result<()> {
+        self.session(id).map(|_| ())
+    }
+    pub fn check_session(&self, p: &Principal) -> Result<()> {
+        let s = self.session(&p.session)?;
+        if s.uuid != p.id || s.kind != p.kind {
+            return Err(expired());
+        }
+        Ok(())
+    }
+    pub fn check_proof(&self, p: &Proof) -> Result<()> {
+        if p.expires_at <= now() {
+            Err(expired())
+        } else {
+            Ok(())
+        }
+    }
+    pub fn check_app(&self, p: &AppAuthority) -> Result<()> {
+        if p.expires_at <= now() {
+            Err(expired())
+        } else {
+            Ok(())
+        }
+    }
+    fn tokens(value: &Value, _started: i64) -> Result<Session> {
+        let (uuid, id, kind) = identity(&value["account"])?;
+        let refresh = value["refresh_token"]
+            .as_str()
+            .filter(|s| s.starts_with("sar_"))
+            .ok_or_else(unavailable)?;
+        let expires = timestamp(&value["refresh_token_expires_at"])?;
+        if expires <= now() {
+            return Err(expired());
+        }
+        Ok(Session {
+            uuid: uuid.into(),
+            id: id.into(),
+            kind: kind.into(),
+            refresh: refresh.into(),
+            expires,
+        })
+    }
+    pub async fn login(&self, slt: &str, key: &str, _headers: &HeaderMap) -> Result<(u16, Value)> {
+        if !slt.starts_with("slt_") || slt.len() > 8192 {
+            return Err(Error::invalid(
+                "Supply a Silicon Accounts short-lived token for Ting.",
+            ));
+        }
+        self.exchange(
+            key,
+            slt,
+            &[
+                ("grant_type", "urn:silicon:params:oauth:grant-type:slt"),
+                ("slt", slt),
+            ],
+        )
+        .await
+    }
+    pub async fn login_code(
+        &self,
+        code: &str,
+        key: &str,
+        redirect: &str,
+        verifier: &str,
+    ) -> Result<(u16, Value)> {
+        self.exchange(
+            key,
+            code,
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", redirect),
+                ("code_verifier", verifier),
+            ],
+        )
+        .await
+    }
+    async fn exchange(
+        &self,
+        key: &str,
+        credential: &str,
+        form: &[(&str, &str)],
+    ) -> Result<(u16, Value)> {
+        if !(16..=255).contains(&key.len()) || !key.bytes().all(|b| (33..=126).contains(&b)) {
+            return Err(Error::invalid(
+                "Idempotency-Key must contain 16–255 visible ASCII characters.",
+            ));
+        }
+        let operation = hash(key.as_bytes());
+        let credential_hash = hash(credential.as_bytes());
+        let lock = self.lock("login");
+        let _guard = lock.lock().await;
+        let old: Option<(String, Vec<u8>, String)> = self
             .db
             .lock()
             .unwrap()
             .query_row(
-                "SELECT payload,revoked,revoke_pending FROM sessions WHERE id=?",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT credential_hash,response,session FROM account_logins WHERE id=?",
+                [&operation],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()
             .map_err(storage)?;
-        let (payload, revoked, pending) = row.ok_or_else(expired)?;
-        if revoked && !pending {
-            return Ok(json!({"authenticated":false}));
+        if let Some((previous, bytes, session)) = old {
+            if previous != credential_hash {
+                return Err(Error::new(
+                    409,
+                    "idempotency_conflict",
+                    "This login key was used with another credential.",
+                    "Repeat the original login or use a new key.",
+                ));
+            }
+            self.session(&session)?;
+            return Ok((200, self.open(&operation, &bytes)?));
         }
-        let session: Session = self.open(id, &payload)?;
+        let used: bool = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM account_logins WHERE credential_hash=?)",
+                [&credential_hash],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        if used {
+            return Err(expired());
+        }
+        // Accounts exchanges are single-use and do not support idempotent replay.
+        // Save the attempt first so a lost upstream response never reuses a code and revokes its family.
+        let pending: bool = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM account_exchanges WHERE id=? OR credential_hash=?)",
+                params![operation, credential_hash],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        if pending {
+            return Err(Error::new(
+                409,
+                "login_outcome_unknown",
+                "The previous Accounts exchange has no saved result.",
+                "Keep your existing session. Obtain a fresh short-lived token or start a new browser sign-in.",
+            ));
+        }
         self.db
             .lock()
             .unwrap()
             .execute(
-                "UPDATE sessions SET revoked=1,revoke_pending=1 WHERE id=?",
-                [id],
+                "INSERT INTO account_exchanges VALUES(?,?)",
+                params![operation, credential_hash],
             )
             .map_err(storage)?;
-        self.revoke(id, &session).await?;
-        Ok(json!({"authenticated":false}))
-    }
-    async fn revoke(&self, id: &str, s: &Session) -> Result<()> {
-        self.client(s.test.as_ref())?
-            .oauth()
-            .revoke(
-                &models::OAuthRevocationRequest {
-                    token: s.refresh.clone(),
-                    token_type_hint: Some(
-                        models::OAuthRevocationRequestTokenTypeHint::RefreshToken,
-                    ),
-                },
-                &mutation(&s.revoke_key)?,
+        let started = now();
+        let value = self
+            .upstream(
+                self.request(reqwest::Method::POST, "/v1/oauth/token")
+                    .header("Idempotency-Key", key)
+                    .form(form),
             )
-            .await
-            .map_err(iam_error)?;
+            .await?;
+        let session = Self::tokens(&value, started)?;
+        let token = format!("ting_{}", secret());
+        let id = Self::session_id(&token)?;
+        let response = json!({"session_token":token,"expires_at":iso(session.expires),"identity":{"uuid":session.uuid,"id":session.id,"kind":session.kind}});
+        let encrypted = self.seal(&id, &session)?;
+        let receipt = self.seal(&operation, &response)?;
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute(
+            "INSERT INTO account_sessions(id,payload) VALUES(?,?)",
+            params![id, encrypted],
+        )
+        .map_err(storage)?;
+        tx.execute(
+            "INSERT INTO account_logins VALUES(?,?,?,?)",
+            params![operation, credential_hash, receipt, id],
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+        Ok((201, response))
+    }
+    pub fn me(&self, p: &Principal) -> Result<Value> {
+        let s = self.session(&p.session)?;
+        Ok(
+            json!({"authenticated":true,"uuid":s.uuid,"id":s.id,"kind":s.kind,"expires_at":iso(s.expires)}),
+        )
+    }
+    pub async fn logout_by_id(&self, id: &str) -> Result<Value> {
+        let lock = self.lock(id);
+        let _guard = lock.lock().await;
         self.db
             .lock()
             .unwrap()
-            .execute("UPDATE sessions SET revoke_pending=0 WHERE id=?", [id])
+            .execute(
+                "UPDATE account_sessions SET revoked=1,revoke_pending=1 WHERE id=?",
+                [id],
+            )
             .map_err(storage)?;
+        let _ = self.revoke(id).await;
+        Ok(json!({"authenticated":false}))
+    }
+    async fn revoke(&self, id: &str) -> Result<()> {
+        let bytes: Option<Vec<u8>> = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM account_sessions WHERE id=? AND revoke_pending=1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        if let Some(bytes) = bytes {
+            let s: Session = self.open(id, &bytes)?;
+            self.upstream(
+                self.request(reqwest::Method::POST, "/v1/oauth/revoke")
+                    .form(&[("token", &s.refresh)]),
+            )
+            .await?;
+            self.db
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE account_sessions SET revoke_pending=0 WHERE id=?",
+                    [id],
+                )
+                .map_err(storage)?;
+        }
         Ok(())
     }
-    /// Called by the server's maintenance task; logout is already locally final.
     pub async fn retry_revocations(&self) {
-        let pending: Vec<String> = {
+        let ids: Vec<String> = {
             let db = self.db.lock().unwrap();
-            let Ok(mut q) = db.prepare("SELECT id FROM sessions WHERE revoke_pending=1 LIMIT 100")
+            let Ok(mut q) =
+                db.prepare("SELECT id FROM account_sessions WHERE revoke_pending=1 LIMIT 100")
             else {
                 return;
             };
@@ -1047,229 +589,204 @@ impl Auth {
             };
             rows.filter_map(std::result::Result::ok).collect()
         };
-        for id in pending {
+        for id in ids {
             let lock = self.lock(&id);
             let _guard = lock.lock().await;
-            // A refresh may have completed while this cleanup waited for the session.
-            let bytes: rusqlite::Result<Option<Vec<u8>>> = self
-                .db
-                .lock()
-                .unwrap()
-                .query_row(
-                    "SELECT payload FROM sessions WHERE id=? AND revoke_pending=1",
-                    [&id],
-                    |r| r.get(0),
-                )
-                .optional();
-            if let Ok(Some(bytes)) = bytes
-                && let Ok(s) = self.open::<Session>(&id, &bytes)
-            {
-                let _ = self.revoke(&id, &s).await;
-            }
+            let _ = self.revoke(&id).await;
         }
-        // ponytail: encrypted login receipts live with session rows; collect both together
-        // if session garbage collection is added. SLT expiry must not strand a live session.
     }
-    async fn authority(
-        &self,
-        p: &Principal,
-        org: &str,
-    ) -> Result<(Session, models::ApplicationAuthorization)> {
-        let (s, t) = self.live(&p.session).await?;
-        if s.id != p.id || s.context != p.context || s.kind != p.kind {
-            return Err(expired());
+    pub async fn resolve_account(&self, account: &str) -> Result<String> {
+        let path = if uuid::Uuid::parse_str(account).is_ok() {
+            format!("/v1/accounts/{account}")
+        } else if v::actor_kind(account).is_some() {
+            format!("/v1/accounts/by-id/{account}")
+        } else {
+            return Err(Error::invalid("Use an account UUID or c:/si: identity."));
+        };
+        let value = self
+            .upstream(self.request(reqwest::Method::GET, &path))
+            .await?;
+        let (uuid, _, _) = identity(&value)?;
+        if value["status"] != "active" {
+            return Err(forbidden());
         }
-        Ok((s, Self::org_authorization(t, org)?))
+        Ok(uuid.into())
     }
-    fn org_authorization(
-        token: models::TokenIntrospection,
-        org: &str,
-    ) -> Result<models::ApplicationAuthorization> {
-        token
-            .authorization
-            .into_iter()
-            .chain(token.authorizations.unwrap_or_default())
-            .find(|a| a.org_id == org || a.organization_id.to_string() == org)
-            .ok_or_else(forbidden)
-    }
-    pub async fn orgs(&self, p: &Principal) -> Result<Value> {
-        let (s, t) = self.live(&p.session).await?;
-        let client = self
-            .client(s.test.as_ref())?
-            .with_credential(Credential::bearer(s.access));
-        let mut items = Vec::new();
-        for org in t
-            .authorization
-            .into_iter()
-            .chain(t.authorizations.unwrap_or_default())
-        {
-            let details = client
-                .application_reads()
-                .organization(&org.org_id)
-                .await
-                .map_err(iam_error)?;
-            items.push(json!({"id":org.organization_id,"name":details["name"].as_str().unwrap_or(&org.org_id),"handle":org.org_id}));
-        }
-        Ok(json!({"items":items}))
-    }
-    pub async fn org(&self, p: &Principal, org: &str) -> Result<String> {
-        Ok(self.authority(p, org).await?.1.organization_id.to_string())
-    }
-    pub async fn apps(&self, p: &Principal, org: &str) -> Result<Value> {
-        let (s, a) = self.authority(p, org).await?;
-        let proof = self.catalog_token(p, &s, &a.org_id).await?;
-        let mut items = Vec::new();
-        let mut after: Option<String> = None;
+    pub async fn apps(&self, p: &Principal) -> Result<Value> {
+        let mut rows = Vec::new();
+        let mut offset = 0u64;
+        let mut total = None;
         loop {
-            let mut body = json!({"org_id":a.org_id,"limit":100});
-            if let Some(after) = &after {
-                body["after"] = json!(after);
+            let value = self
+                .upstream(
+                    self.http
+                        .get(format!("{}/v1/apps", self.apps_url))
+                        .query(&[("limit", 100u64), ("offset", offset)]),
+                )
+                .await?;
+            let items = value["items"].as_array().ok_or_else(unavailable)?;
+            let total = *total.get_or_insert(value["total"].as_u64().ok_or_else(unavailable)?);
+            for item in items {
+                let app = item["app_id"]
+                    .as_str()
+                    .filter(|s| v::app_id(s))
+                    .ok_or_else(unavailable)?;
+                let can_manage = item["authors"]
+                    .as_array()
+                    .is_some_and(|authors| authors.iter().any(|author| author["uuid"] == p.id));
+                rows.push(json!({"app_id":app,"name":item["name"].as_str().unwrap_or(app),"can_manage_tings":can_manage}));
             }
-            let raw = serde_json::to_vec(&body).map_err(storage)?;
-            let mut request = self
-                .http
-                .post(format!("{}/api/v1/obo/apps/list", self.honeycomb))
-                .header("Content-Type", "application/json")
-                .header("X-IAM-OBO-Access-Token", &proof.access_token)
-                .body(raw);
-            if let Some(test) = &proof.testing_context {
-                request = request
-                    .header("X-Testing-Environment-Key", &test.iam_test_key)
-                    .header("IAM_TEST_APP_SECRET", &test.app_secret);
+            offset += items.len() as u64;
+            if offset >= total {
+                break;
             }
-            let response = request.send().await.map_err(|_| unavailable())?;
-            if matches!(response.status().as_u16(), 401 | 403) {
-                self.forget_catalog(&s, &a.org_id, &proof.access_token)
-                    .await?;
-                return Err(catalog::required());
-            }
-            if !response.status().is_success() {
+            if items.is_empty() {
                 return Err(unavailable());
             }
-            let body: Value = response.json().await.map_err(|_| unavailable())?;
-            let page = body["items"].as_array().ok_or_else(unavailable)?;
-            for app in page {
-                let app_id = app["app_id"].as_str().ok_or_else(unavailable)?;
-                if !v::app_id(app_id) || app["org_id"].as_str() != Some(&a.org_id) {
-                    return Err(unavailable());
-                }
-                items.push(json!({"app_id":app_id,"name":app["name"],"can_manage_tings":matches!(a.org_role.as_deref(),Some("owner"|"admin"))}));
-            }
-            match body["next_cursor"].as_str() {
-                Some(next) if Some(next) != after.as_deref() => after = Some(next.into()),
-                Some(_) => return Err(unavailable()),
-                None => break,
+        }
+        Ok(json!({"items":rows}))
+    }
+    pub async fn permission(&self, p: &Principal, app: &str, write: bool) -> Result<()> {
+        if !v::app_id(app) {
+            return Err(Error::invalid("Invalid app ID."));
+        }
+        if write {
+            let value = self
+                .upstream(
+                    self.http
+                        .get(format!("{}/v1/apps/{app}/authors", self.apps_url)),
+                )
+                .await?;
+            if !value["items"]
+                .as_array()
+                .is_some_and(|authors| authors.iter().any(|a| a["uuid"] == p.id))
+            {
+                return Err(forbidden());
             }
         }
-        Ok(json!({"items":items}))
+        Ok(())
     }
-    pub async fn permission(
-        &self,
-        p: &Principal,
-        org: &str,
-        app: &str,
-        manage: bool,
-    ) -> Result<()> {
-        let apps = self.apps(p, org).await?;
-        if apps["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|a| a["app_id"] == app && (!manage || a["can_manage_tings"] == true))
-        {
-            Ok(())
-        } else {
-            Err(forbidden())
-        }
-    }
-    pub async fn proof(&self, headers: &HeaderMap, path: &str, raw: &[u8]) -> Result<Proof> {
-        let proof = bearer(headers)?;
-        let endpoint = match path {
+    async fn verified(&self, headers: &HeaderMap, path: &str) -> Result<Value> {
+        let token = headers
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer "))
+            .filter(|s| s.starts_with("sap_") && s.len() <= 8192)
+            .ok_or_else(forbidden)?;
+        let value = self
+            .upstream(
+                self.request(reqwest::Method::POST, "/v1/proofs/verify")
+                    .json(&json!({"proof_token":token})),
+            )
+            .await?;
+        let scope = match path {
             "/v1/tings" => "tings.send",
-            "/v1/receivers/bootstrap" => "receivers.bootstrap",
             "/v1/subscriptions" => "subscriptions.register",
-            "/v1/subscriptions/query" => "subscriptions.query",
+            "/v1/subscriptions/query" => "subscriptions.read",
             "/v1/subscriptions/revoke" => "subscriptions.revoke",
-            "/v1/sent/query" => "sent.query",
-            "/v1/sent/read" => "sent.read",
-            _ => {
-                return Err(Error::invalid(
-                    "No IAM endpoint is registered for this path.",
-                ));
-            }
+            "/v1/sent/query" => "tings.read",
+            "/v1/sent/read" => "tings.read.update",
+            _ => return Err(forbidden()),
         };
-        let body: Value = serde_json::from_slice(raw)
-            .map_err(|_| Error::invalid("The signed body must be JSON."))?;
-        let org = body["org_id"]
-            .as_str()
-            .ok_or_else(|| Error::invalid("org_id is required."))?;
-        let test = self.test_headers(headers).await?;
-        if !proof.starts_with("oba_") {
-            return Err(Error::new(
-                401,
-                "invalid_obo_token",
-                "A separately approved OBO access token is required.",
-                "Request and approve Ting endpoint permission in IAM.",
-            ));
-        }
-        let verified=self.client(test.as_ref())?.obo().verify(&models::OboTokenVerificationRequest {
-            access_token:proof.into(), endpoint_id:endpoint.into(),
-            request:models::OboTokenRequestBinding{method:"POST".into(),path:path.into()},
-        }).await.map_err(|e|match e {
-            silicon_iam_client::Error::Api(a) if matches!(a.status,400|401|403|404|409|410)=>Error::new(401,"invalid_obo_token","IAM rejected this OBO authority.","Refresh the dedicated token or request new endpoint approval if it was revoked."),
-            _=>Error::new(503,"obo_verification_uncertain","IAM verification could not be confirmed; nothing was executed.","Retry the same Ting operation and idempotency key."),
-        })?;
-        let a = &verified.authorization;
-        let actor_kind = serde_json::to_value(&verified.actor.type_field).map_err(storage)?;
-        if !verified.active
-            || verified.endpoint.app_id != self.app_id
-            || a.audience != self.app_id
-            || verified.endpoint.path != path
-            || verified.endpoint.endpoint_id != endpoint
-            || (verified.org_id != org && a.organization_id.to_string() != org)
-            || a.org_id != verified.org_id
-            || a.public_id.as_deref() != Some(&verified.actor.public_id)
-            || serde_json::to_value(&a.actor_type).map_err(storage)? != actor_kind
-            || actor_kind.as_str().is_none()
-            || v::actor_kind(&verified.actor.public_id) != actor_kind.as_str()
-            || verified.org_id.is_empty()
-            || a.testing_environment_id.map(|v| v.to_string()).as_deref()
-                != test.as_ref().map(|v| v.id.as_str())
-            || verified.expires_at.unix_timestamp() <= now()
-            || !v::app_id(&verified.issuer_app_id)
-            || !a
-                .scopes
-                .contains(&format!("obo:{}:{}", self.app_id, endpoint))
-        {
-            return Err(Error::new(
-                401,
-                "invalid_proof",
-                "The verified OBO token does not authorize this request.",
-                "Use the approved endpoint, provider account, organization and current grant.",
-            ));
-        }
-        if body
-            .get("app_id")
-            .is_some_and(|id| id != &json!(verified.issuer_app_id))
-            || body
-                .get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|kind| !kind.starts_with(&format!("{}.", verified.issuer_app_id)))
+        if value["valid"] != true
+            || value["receiving_app"]["app_id"] != self.app_id
+            || timestamp(&value["expires_at"])? <= now()
+            || !value["scopes"]
+                .as_array()
+                .is_some_and(|scopes| scopes.iter().any(|s| s == scope))
+            || !value["issuing_app"]["app_id"]
+                .as_str()
+                .is_some_and(v::app_id)
         {
             return Err(forbidden());
         }
+        Ok(value)
+    }
+    pub async fn proof(&self, headers: &HeaderMap, path: &str, _raw: &[u8]) -> Result<Proof> {
+        let value = self.verified(headers, path).await?;
+        if value["kind"] != "user_verification" {
+            return Err(forbidden());
+        }
+        let (uuid, _, _) = identity(&value["user"])?;
         Ok(Proof {
-            context: test
-                .as_ref()
-                .map(|t| t.id.clone())
-                .unwrap_or("production".into()),
-            org_id: a.organization_id.to_string(),
-            app_id: verified.issuer_app_id,
-            actor_id: verified.actor.public_id,
-            actor_kind: actor_kind.as_str().unwrap().into(),
-            expires_at: verified.expires_at.unix_timestamp(),
-            test,
+            context: "accounts".into(),
+            app_id: value["issuing_app"]["app_id"].as_str().unwrap().into(),
+            actor_id: uuid.into(),
+            expires_at: timestamp(&value["expires_at"])?,
         })
+    }
+    pub async fn app_authority(
+        &self,
+        headers: &HeaderMap,
+        path: &str,
+        _raw: &[u8],
+        body: &Value,
+    ) -> Result<AppAuthority> {
+        let value = self.verified(headers, path).await?;
+        if value["kind"] != "app_verification" {
+            return Err(forbidden());
+        }
+        let app = value["issuing_app"]["app_id"].as_str().unwrap();
+        if body.get("app_id").is_some_and(|v| v != app)
+            || body
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| v::type_parts(t).map_or(true, |p| p.0 != app))
+        {
+            return Err(forbidden());
+        }
+        Ok(AppAuthority {
+            context: "accounts".into(),
+            app_id: app.into(),
+            expires_at: timestamp(&value["expires_at"])?,
+        })
+    }
+    pub fn webhook(&self, headers: &HeaderMap, raw: &[u8]) -> Result<Value> {
+        use hmac::{Hmac, Mac};
+        let secret = std::env::var("TING_ACCOUNTS_WEBHOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(unavailable)?;
+        let timestamp = headers
+            .get("x-accounts-timestamp")
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(forbidden)?;
+        let seconds = timestamp.parse::<i64>().map_err(|_| forbidden())?;
+        if now().abs_diff(seconds) > 300 {
+            return Err(forbidden());
+        }
+        let signatures = headers
+            .get("x-accounts-signature")
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(forbidden)?;
+        let mut mac =
+            <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).map_err(|_| unavailable())?;
+        mac.update(timestamp.as_bytes());
+        mac.update(b".");
+        mac.update(raw);
+        let verified = signatures
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter_map(|s| s.strip_prefix("v1="))
+            .filter_map(|s| hex::decode(s).ok())
+            .any(|bytes| mac.clone().verify_slice(&bytes).is_ok());
+        if !verified {
+            return Err(forbidden());
+        }
+        let event = v::parse(raw, 1024 * 1024)?;
+        if event["app_id"] != self.app_id
+            || event["event_id"].as_str()
+                != headers
+                    .get("x-accounts-event-id")
+                    .and_then(|h| h.to_str().ok())
+            || event["type"].as_str()
+                != headers
+                    .get("x-accounts-event-type")
+                    .and_then(|h| h.to_str().ok())
+        {
+            return Err(forbidden());
+        }
+        // Introspection supplies live identity/revocation on every request; repeated events are harmless.
+        Ok(json!({"accepted":true}))
     }
     pub async fn report(&self, p: &Principal, body: Value, version: Option<&str>) -> Result<Value> {
         validate_report(&body)?;
@@ -1441,2106 +958,4 @@ fn validate_report(v: &Value) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-
-    #[tokio::test]
-    async fn migrated_login_attempt_never_reaches_iam_again() {
-        let f = fixture(false).await;
-        let key = uuid::Uuid::new_v4().to_string();
-        let operation = hash(format!("production:{key}").as_bytes());
-        f.app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .execute("INSERT INTO invalidated_logins VALUES(?)", [&operation])
-            .unwrap();
-        f.take_calls();
-        let error = f
-            .app
-            .auth
-            .login("original-slt", &key, &HeaderMap::new())
-            .await
-            .unwrap_err();
-        assert_eq!(error.status, 410);
-        assert!(f.take_calls().is_empty());
-    }
-    fn token_reply(access: &str, refresh: &str, expires_in: i64) -> Value {
-        json!({"access_token":access,"refresh_token":refresh,"expires_in":expires_in,
-            "token_type":"Bearer","scope":"","actor":{"type":"silicon","public_id":"si:fixture"}})
-    }
-
-    pub(crate) struct MockIam {
-        pub reply: Mutex<Value>,
-        pub ata_reply: Mutex<Value>,
-        pub ata_requests: Mutex<Vec<Value>>,
-        pub ata_status: AtomicU16,
-        pub obo_status: AtomicU16,
-        pub token_replies: Mutex<std::collections::VecDeque<Value>>,
-        pub token_requests: Mutex<Vec<(String, HashMap<String, String>)>>,
-        pub revoke_requests: Mutex<Vec<(String, Vec<u8>)>>,
-        pub proof_requests: Mutex<Vec<Value>>,
-        pub status: AtomicU16,
-        pub catalog_token_status: AtomicU16,
-        pub calls: Mutex<Vec<String>>,
-        pub block_next: AtomicBool,
-        pub block_path: Mutex<Option<String>>,
-        pub blocked: tokio::sync::Notify,
-        pub release: tokio::sync::Notify,
-        context: String,
-    }
-    pub(crate) struct Fixture {
-        pub app: crate::Shared,
-        pub principal: Principal,
-        pub proof: Proof,
-        owner_org: String,
-        pub token: String,
-        pub iam: Arc<MockIam>,
-        task: tokio::task::JoinHandle<()>,
-        _directory: tempfile::TempDir,
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            self.task.abort();
-        }
-    }
-    impl Fixture {
-        pub fn hook(&self, receiver: &str) -> String {
-            self.app
-                .store
-                .create_hook(
-                    &self.principal,
-                    &self.proof.org_id,
-                    receiver,
-                    &uuid::Uuid::new_v4().to_string(),
-                    &json!({"receiver_id":receiver}),
-                )
-                .unwrap()["id"]
-                .as_str()
-                .unwrap()
-                .into()
-        }
-        pub fn send(&self, key: &str) -> String {
-            self.app.store.send(&self.proof.application(), &json!({"org_id":self.proof.org_id,"type":"example.msg.received","data":{},"for":self.principal.id,"key":key})).unwrap().1["id"].as_str().unwrap().into()
-        }
-        pub fn receipt(&self, hook: &str, id: &str) -> (i64, i64) {
-            Connection::open(&self.app.config.database_path)
-                .unwrap()
-                .query_row(
-                    "SELECT delivery,read FROM deliveries WHERE hook=? AND message=?",
-                    params![hook, id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap()
-        }
-        pub fn take_calls(&self) -> Vec<String> {
-            std::mem::take(&mut *self.iam.calls.lock().unwrap())
-        }
-    }
-    pub(crate) async fn fixture(testing: bool) -> Fixture {
-        use axum::{
-            Json, Router,
-            extract::{Request, State},
-            response::IntoResponse,
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let context = uuid::Uuid::new_v4().to_string();
-        let environment_key = "k".repeat(32);
-        let org = uuid::Uuid::new_v4().to_string();
-        let owner_org = uuid::Uuid::new_v4().to_string();
-        let iam = Arc::new(MockIam {
-            reply: Mutex::new(
-                json!({"active":true,"public_id":"si:fixture","actor_type":"silicon","client_id":"ting","authorization":{
-                "organization_id":org,"org_id":"tos","membership_id":"fixture-member","membership_version":1,"authorization_epoch":1,
-                "audience":"ting","public_id":"si:fixture","actor_type":"silicon","scopes":[],
-                "testing_environment_id":if testing {Some(&context)} else {None},"org_role":null,"tags":null}}),
-            ),
-            ata_reply: Mutex::new(
-                json!({"verified":true,"valid_till":(chrono::Utc::now()+chrono::Duration::minutes(5)).format("%Y%m%d%H%M%S").to_string().parse::<i64>().unwrap()}),
-            ),
-            ata_requests: Mutex::new(vec![]),
-            ata_status: AtomicU16::new(200),
-            obo_status: AtomicU16::new(200),
-            status: AtomicU16::new(200),
-            catalog_token_status: AtomicU16::new(200),
-            token_replies: Mutex::new(std::collections::VecDeque::new()),
-            token_requests: Mutex::new(vec![]),
-            revoke_requests: Mutex::new(vec![]),
-            proof_requests: Mutex::new(vec![]),
-            calls: Mutex::new(vec![]),
-            block_next: AtomicBool::new(false),
-            block_path: Mutex::new(None),
-            blocked: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-            context: context.clone(),
-        });
-        async fn respond(
-            State(iam): State<Arc<MockIam>>,
-            request: Request,
-        ) -> axum::response::Response {
-            let path = request.uri().path().to_owned();
-            iam.calls.lock().unwrap().push(path.clone());
-            if iam.block_next.swap(false, Ordering::SeqCst)
-                || iam
-                    .block_path
-                    .lock()
-                    .unwrap()
-                    .take_if(|wanted| wanted == &path)
-                    .is_some()
-            {
-                iam.blocked.notify_one();
-                iam.release.notified().await;
-            }
-            let body = match path.as_str() {
-                "/api/v1/oauth/introspect" => iam.reply.lock().unwrap().clone(),
-                "/api/v1/ata-access/verify" => {
-                    assert_eq!(
-                        request.headers()["authorization"],
-                        "Basic dGluZzpmaXh0dXJlLXNlY3JldA=="
-                    );
-                    let testing = request.headers().contains_key("x-testing-environment-key");
-                    let raw = axum::body::to_bytes(request.into_body(), 65536)
-                        .await
-                        .unwrap();
-                    let body: Value = serde_json::from_slice(&raw).unwrap();
-                    iam.ata_requests.lock().unwrap().push(body.clone());
-                    let status = iam.ata_status.load(Ordering::SeqCst);
-                    if status != 200 {
-                        return (axum::http::StatusCode::from_u16(status).unwrap(), Json(json!({"error":{"code":"ata_fixture_error","message":"Mock ATA verification failed."}}))).into_response();
-                    }
-                    if body["app_id"] != "example"
-                        || body["app_proof_token"]
-                            != format!("ata_{}", if testing { "t" } else { "p" }.repeat(43))
-                        || !matches!(
-                            body["endpoint"].as_str(),
-                            Some(
-                                "/v1/tings"
-                                    | "/v1/sent/query"
-                                    | "/v1/sent/read"
-                                    | "/v1/subscriptions/query"
-                                    | "/v1/subscriptions/revoke"
-                            )
-                        )
-                    {
-                        json!({"verified":false})
-                    } else {
-                        iam.ata_reply.lock().unwrap().clone()
-                    }
-                }
-                "/api/v1/app-auth/tokens" => {
-                    let key = request.headers()["idempotency-key"]
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
-                    let raw = axum::body::to_bytes(request.into_body(), 65536)
-                        .await
-                        .unwrap();
-                    iam.token_requests.lock().unwrap().push((
-                        key,
-                        url::form_urlencoded::parse(&raw).into_owned().collect(),
-                    ));
-                    iam.token_replies
-                        .lock()
-                        .unwrap()
-                        .pop_front()
-                        .unwrap_or_else(|| token_reply("fixture-access", "fixture-refresh", 3600))
-                }
-                "/api/v1/oauth/revoke" => {
-                    let key = request.headers()["idempotency-key"]
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
-                    let raw = axum::body::to_bytes(request.into_body(), 65536)
-                        .await
-                        .unwrap();
-                    iam.revoke_requests
-                        .lock()
-                        .unwrap()
-                        .push((key, raw.to_vec()));
-                    json!({})
-                }
-                "/api/v1/obo-access/token-verifications" => {
-                    let status = iam.obo_status.load(Ordering::SeqCst);
-                    if status != 200 {
-                        return (axum::http::StatusCode::from_u16(status).unwrap(), Json(json!({"error":{"code":"invalid_grant","message":"Mock OBO authority revoked."}}))).into_response();
-                    }
-                    let raw = axum::body::to_bytes(request.into_body(), 1024 * 1024)
-                        .await
-                        .unwrap();
-                    let request: Value = serde_json::from_slice(&raw).unwrap();
-                    iam.proof_requests.lock().unwrap().push(request.clone());
-                    let target = request["request"]["path"].as_str().unwrap();
-                    let endpoint = match target {
-                        "/v1/tings" => "tings.send",
-                        "/v1/receivers/bootstrap" => "receivers.bootstrap",
-                        "/v1/subscriptions" => "subscriptions.register",
-                        "/v1/subscriptions/query" => "subscriptions.query",
-                        "/v1/subscriptions/revoke" => "subscriptions.revoke",
-                        "/v1/sent/query" => "sent.query",
-                        "/v1/sent/read" => "sent.read",
-                        _ => panic!("unexpected proof path: {target}"),
-                    };
-                    let reply = iam.reply.lock().unwrap().clone();
-                    let mut authorization = reply["authorization"].clone();
-                    authorization["scopes"] = json!([format!("obo:ting:{endpoint}")]);
-                    json!({"active":true,"token_id":uuid::Uuid::new_v4(),"grant_id":uuid::Uuid::new_v4(),"issuer_app_id":"example","originating_app_id":"example","chain":[],
-                        "actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":authorization["org_id"],"authorization":authorization,
-                        "endpoint":{"app_id":"ting","endpoint_id":endpoint,"path":target},
-                        "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(30)).to_rfc3339()})
-                }
-                path if path.starts_with("/api/v1/obo-access/applications/")
-                    && path.ends_with("/endpoints") =>
-                {
-                    json!({"application":{"app_id":"honeycomb","org_id":"tos"},
-                        "endpoints":[{"endpoint_id":"honeycomb.apps.list","path":"/api/v1/obo/apps/list","critical":false,"metadata":{}}]})
-                }
-                "/api/v1/obo-access/authorizations" => {
-                    let reply = iam.reply.lock().unwrap().clone();
-                    json!({"id":"00000000-0000-4000-8000-000000000010","app_id":"ting","app_name":"Ting","actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"org_id":reply["authorization"]["org_id"],"status":"pending","version":1,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(10)).to_rfc3339(),"endpoints":[],"authorization_url":"https://auth.iam.teamofsilicons.com/obo/consent?request=00000000-0000-4000-8000-000000000010"})
-                }
-                "/api/v1/obo-access/tokens" => {
-                    let key = request.headers()["idempotency-key"]
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
-                    let raw = axum::body::to_bytes(request.into_body(), 65536)
-                        .await
-                        .unwrap();
-                    let body: Value = serde_json::from_slice(&raw).unwrap();
-                    iam.proof_requests
-                        .lock()
-                        .unwrap()
-                        .push(json!({"key":key,"catalog_token_request":body}));
-                    let token_status = iam.catalog_token_status.load(Ordering::SeqCst);
-                    if token_status != 200 {
-                        return (axum::http::StatusCode::from_u16(token_status).unwrap(), Json(json!({"error":{"code":"invalid_grant","message":"Mock catalog token rejected."}}))).into_response();
-                    }
-                    let reply = iam.reply.lock().unwrap().clone();
-                    let mut pair = json!({"grant_id":"00000000-0000-4000-8000-000000000011","access_token":"oba_catalog_fixture","refresh_token":"obr_catalog_fixture","token_type":"Bearer","expires_in":1800,"expires_at":(chrono::Utc::now()+chrono::Duration::minutes(30)).to_rfc3339(),"audience":"honeycomb","endpoint_id":"honeycomb.apps.list","org_id":reply["authorization"]["org_id"],"actor":{"type":reply["actor_type"],"public_id":reply["public_id"]},"scope":"obo:honeycomb:honeycomb.apps.list"});
-                    if reply["authorization"]["testing_environment_id"].is_string() {
-                        pair["testing_context"] = json!({"app_id":"honeycomb","app_secret":"ask_catalog_fixture","iam_test_key":"k".repeat(32)});
-                    }
-                    json!({"items":[pair]})
-                }
-                "/api/v1/obo/apps/list" => {
-                    assert_eq!(
-                        request.headers()["X-IAM-OBO-Access-Token"],
-                        "oba_catalog_fixture"
-                    );
-                    assert!(!request.headers().contains_key("X-IAM-OBO-Access-Proof"));
-                    let raw = axum::body::to_bytes(request.into_body(), 65536)
-                        .await
-                        .unwrap();
-                    let body: Value = serde_json::from_slice(&raw).unwrap();
-                    let items = if body["org_id"] == "tos" {
-                        json!([{"app_id":"example","org_id":"tos","name":"Example"}])
-                    } else {
-                        json!([])
-                    };
-                    json!({"items":items})
-                }
-                "/api/v1/application/testing-context" => {
-                    json!({"environment_id":iam.context,"application":{
-                    "app_id":"ting","base_url":"https://ting.example","app_scope":{"iam":[],"external":[]},"webhook_scope":[],"testing_idle_days":30}})
-                }
-                _ => panic!("unexpected IAM route: {path}"),
-            };
-            let status =
-                axum::http::StatusCode::from_u16(iam.status.load(Ordering::SeqCst)).unwrap();
-            let body = if status.is_success() {
-                body
-            } else {
-                json!({"error":{"code":"fixture_error","message":"Mock IAM rejected this request."}})
-            };
-            (status, Json(body)).into_response()
-        }
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let iam_url = format!("http://{}", listener.local_addr().unwrap());
-        let router = Router::new().fallback(respond).with_state(iam.clone());
-        let task = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        let config = crate::Config {
-            database_path: directory
-                .path()
-                .join("ting.sqlite")
-                .to_string_lossy()
-                .into_owned(),
-            encryption_key: "ab".repeat(32),
-            honeycomb_url: iam_url.clone(),
-            iam_url,
-            iam_app_id: "ting".into(),
-            iam_app_secret: "fixture-secret".into(),
-            spacestation_url: "http://127.0.0.1:1".into(),
-            spacestation_key: String::new(),
-            spacestation_table: String::new(),
-            frontend_origin: "http://127.0.0.1:1".into(),
-            public_origin: "http://127.0.0.1:1".into(),
-            browser_origins: vec![],
-            repository_url: String::new(),
-            docs_url: String::new(),
-            rust_package: String::new(),
-        };
-        let auth = Auth::new(&config).unwrap();
-        let token = format!("ting_{}", "a".repeat(64));
-        let id = hash(token.as_bytes());
-        let session = Session {
-            context: if testing {
-                context.clone()
-            } else {
-                "production".into()
-            },
-            id: "si:fixture".into(),
-            kind: "silicon".into(),
-            access: "fixture-access".into(),
-            refresh: "fixture-refresh".into(),
-            expires: now() + 3600,
-            test: testing.then(|| TestContext {
-                id: context.clone(),
-                secret: "fixture-secret".into(),
-                key: environment_key.clone(),
-                generation: Some(1),
-            }),
-            refresh_key: None,
-            refresh_started: None,
-            revoke_key: secret(),
-        };
-        auth.db
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO sessions(id,payload) VALUES(?,?)",
-                params![id, auth.seal(&id, &session).unwrap()],
-            )
-            .unwrap();
-        let principal = Principal {
-            context: session.context.clone(),
-            id: session.id,
-            kind: session.kind,
-            session: id,
-        };
-        let proof = Proof {
-            context: principal.context.clone(),
-            org_id: org,
-            app_id: "example".into(),
-            actor_id: principal.id.clone(),
-            actor_kind: principal.kind.clone(),
-            expires_at: now() + 60,
-            test: session.test,
-        };
-        let store = crate::store::Store::open(&config.database_path).unwrap();
-        if testing {
-            auth.fence_context(&context, "active", &hash(environment_key.as_bytes()), false)
-                .unwrap();
-            Connection::open(&config.database_path)
-                .unwrap()
-                .execute(
-                    "INSERT INTO lifecycle_environments VALUES(?1,1,1,1,?2,'active')",
-                    params![context, hash(environment_key.as_bytes())],
-                )
-                .unwrap();
-        }
-        store
-            .register_type(
-                &principal,
-                &owner_org,
-                &proof.app_id,
-                &json!({"type":"example.msg.received","description":"Fixture"}),
-                false,
-            )
-            .unwrap();
-        store
-            .subscribe_app(
-                &proof,
-                &json!({"org_id":proof.org_id,"app_id":proof.app_id}),
-            )
-            .unwrap();
-        let app = Arc::new(crate::App {
-            config,
-            auth,
-            store,
-            hub: crate::ws::Hub::default(),
-            changed: tokio::sync::Notify::new(),
-            mutations: AsyncMutex::new(()),
-        });
-        Fixture {
-            app,
-            principal,
-            proof,
-            owner_org,
-            token,
-            iam,
-            task,
-            _directory: directory,
-        }
-    }
-    #[tokio::test]
-    async fn login_without_exchange_actor_uses_verified_introspection() {
-        for testing in [false, true] {
-            for (kind, id) in [("carbon", "c:fixture"), ("silicon", "si:fixture")] {
-                let f = fixture(testing).await;
-                let mut headers = HeaderMap::new();
-                if let Some(test) = &f.proof.test {
-                    headers.insert("iam_test_app_secret", test.secret.parse().unwrap());
-                    headers.insert("x-testing-environment-key", test.key.parse().unwrap());
-                }
-                {
-                    let mut identity = f.iam.reply.lock().unwrap();
-                    identity["public_id"] = json!(id);
-                    identity["actor_type"] = json!(kind);
-                    identity["authorization"]["public_id"] = json!(id);
-                    identity["authorization"]["actor_type"] = json!(kind);
-                }
-                let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
-                tokens.as_object_mut().unwrap().remove("actor");
-                f.iam.token_replies.lock().unwrap().push_back(tokens);
-                let key = uuid::Uuid::new_v4().to_string();
-                let (_, response) = f
-                    .app
-                    .auth
-                    .login_as("actorless-slt", &key, &headers, Some(kind))
-                    .await
-                    .unwrap();
-                assert_eq!(response["id"], id);
-                assert_eq!(response["kind"], kind);
-                assert_eq!(
-                    f.app
-                        .auth
-                        .login_as("actorless-slt", &key, &headers, Some(kind))
-                        .await
-                        .unwrap()
-                        .1,
-                    response
-                );
-                assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn actorless_login_rejects_invalid_identity_before_session_creation() {
-        for (path, value, expected_kind) in [
-            ("/active", json!(false), None),
-            ("/public_id", Value::Null, None),
-            ("/actor_type", json!("application"), None),
-            ("/client_id", json!("another-app"), None),
-            ("/authorization/public_id", json!("si:someone-else"), None),
-            ("/authorization/org_id", json!(""), None),
-            (
-                "/authorization/testing_environment_id",
-                json!(uuid::Uuid::new_v4()),
-                None,
-            ),
-            ("/actor_type", json!("silicon"), Some("carbon")),
-        ] {
-            let f = fixture(false).await;
-            *f.iam.reply.lock().unwrap().pointer_mut(path).unwrap() = value;
-            let mut tokens = token_reply("fixture-access", "fixture-refresh", 3600);
-            tokens.as_object_mut().unwrap().remove("actor");
-            f.iam.token_replies.lock().unwrap().push_back(tokens);
-            assert!(
-                f.app
-                    .auth
-                    .login_as(
-                        "actorless-rejected-slt",
-                        &uuid::Uuid::new_v4().to_string(),
-                        &HeaderMap::new(),
-                        expected_kind,
-                    )
-                    .await
-                    .is_err(),
-                "accepted invalid identity at {path}"
-            );
-            let sessions: i64 = f
-                .app
-                .auth
-                .db
-                .lock()
-                .unwrap()
-                .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(
-                sessions, 1,
-                "created session for invalid identity at {path}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn browser_kind_selection_rejects_a_different_actor_before_session_creation() {
-        let f = fixture(false).await;
-        let key = uuid::Uuid::new_v4().to_string();
-        let before: i64 = f
-            .app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .unwrap();
-        let error = f
-            .app
-            .auth
-            .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
-            .await
-            .unwrap_err();
-        assert_eq!(error.status, 403);
-        let after: i64 = f
-            .app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(after, before);
-        let (_, response) = f
-            .app
-            .auth
-            .login_as("popup-slt", &key, &HeaderMap::new(), Some("silicon"))
-            .await
-            .unwrap();
-        assert_eq!(response["kind"], "silicon");
-        assert_eq!(
-            f.app
-                .auth
-                .login_as("popup-slt", &key, &HeaderMap::new(), Some("carbon"))
-                .await
-                .unwrap_err()
-                .status,
-            403
-        );
-        let start = crate::browser_login(
-            &f.app,
-            &json!({"identity_kind":"silicon","popup_nonce":"a".repeat(64)}),
-        )
-        .unwrap();
-        let destination = url::Url::parse(start.headers()["Location"].to_str().unwrap()).unwrap();
-        assert!(
-            destination
-                .query_pairs()
-                .any(|(key, value)| key == "identity_kind" && value == "silicon")
-        );
-        assert!(
-            destination
-                .query_pairs()
-                .any(|(key, value)| key == "display" && value == "popup")
-        );
-        let callback = url::Url::parse(
-            &destination
-                .query_pairs()
-                .find(|(key, _)| key == "redirect_uri")
-                .unwrap()
-                .1,
-        )
-        .unwrap();
-        let state = callback
-            .query_pairs()
-            .find(|(key, _)| key == "state")
-            .unwrap()
-            .1
-            .to_string();
-        let attempt: crate::BrowserLoginAttempt =
-            serde_json::from_str(&f.app.store.read_login_attempt(&state).unwrap()).unwrap();
-        assert_eq!(attempt.identity_kind.as_deref(), Some("silicon"));
-        assert_eq!(attempt.popup_nonce, Some("a".repeat(64)));
-    }
-
-    #[tokio::test]
-    async fn browser_callback_recovers_the_same_login_after_an_uncertain_exchange() {
-        let f = fixture(false).await;
-        let attempt = crate::BrowserLoginAttempt {
-            next: "/".into(),
-            identity_kind: Some("silicon".into()),
-            popup_nonce: Some("a".repeat(64)),
-        };
-        let state = f
-            .app
-            .store
-            .login_attempt(&serde_json::to_string(&attempt).unwrap())
-            .unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("cookie", format!("ting_login={state}").parse().unwrap());
-        let callback = json!({"state":state,"slt":"browser-original"});
-        f.iam.status.store(503, Ordering::SeqCst);
-        let temporary = crate::browser_callback(&f.app, &headers, &callback)
-            .await
-            .unwrap();
-        assert_eq!(temporary.status(), 503);
-        assert!(!f.app.store.read_login_attempt(&state).unwrap().is_empty());
-        f.iam.status.store(200, Ordering::SeqCst);
-        let recovered = crate::browser_callback(&f.app, &headers, &callback)
-            .await
-            .unwrap();
-        assert_eq!(recovered.status(), 303);
-        assert!(
-            recovered.headers()["location"]
-                .to_str()
-                .unwrap()
-                .contains("result=ok")
-        );
-        let calls = f.iam.token_requests.lock().unwrap().clone();
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0], calls[1]);
-        // Lost browser responses replay only the original session, never a changed SLT.
-        let replay = crate::browser_callback(&f.app, &headers, &callback)
-            .await
-            .unwrap();
-        assert_eq!(
-            replay.headers()["set-cookie"],
-            recovered.headers()["set-cookie"]
-        );
-        let changed = crate::browser_callback(
-            &f.app,
-            &headers,
-            &json!({"state":state,"slt":"browser-changed"}),
-        )
-        .await
-        .unwrap();
-        assert!(
-            changed.headers()["location"]
-                .to_str()
-                .unwrap()
-                .contains("result=error")
-        );
-        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn canonical_actors_require_matching_iam_kind_org_and_world() {
-        for testing in [false, true] {
-            let f = fixture(testing).await;
-            let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
-            if testing {
-                headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-                headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-            }
-            let raw =
-                serde_json::to_vec(&json!({"org_id":f.proof.org_id,"app_id":"example"})).unwrap();
-            for (actor, kind) in [("c:alice0", "carbon"), ("si:assistant", "silicon")] {
-                {
-                    let mut reply = f.iam.reply.lock().unwrap();
-                    reply["public_id"] = actor.into();
-                    reply["actor_type"] = kind.into();
-                    reply["authorization"]["public_id"] = actor.into();
-                    reply["authorization"]["actor_type"] = kind.into();
-                }
-                let mut tokens = token_reply("canonical-access", "canonical-refresh", 3600);
-                tokens["actor"] = json!({"type":kind,"public_id":actor});
-                f.iam.token_replies.lock().unwrap().push_back(tokens);
-                let key = uuid::Uuid::new_v4().to_string();
-                let slt = format!("canonical-slt-{kind}");
-                let login = f.app.auth.login(&slt, &key, &headers).await.unwrap().1;
-                assert_eq!(login["id"], actor);
-                assert_eq!(login["kind"], kind);
-                assert_eq!(
-                    f.app.auth.login(&slt, &key, &headers).await.unwrap(),
-                    (200, login.clone())
-                );
-                assert_eq!(f.iam.token_requests.lock().unwrap().last().unwrap().0, key);
-                let p = f
-                    .app
-                    .auth
-                    .authenticate(login["session_token"].as_str().unwrap(), &headers)
-                    .await
-                    .unwrap();
-                assert_eq!(f.app.auth.org(&p, "tos").await.unwrap(), f.proof.org_id);
-                assert_eq!(
-                    f.app
-                        .auth
-                        .org(&p, "another-org")
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    403
-                );
-                let proof = f
-                    .app
-                    .auth
-                    .proof(&headers, "/v1/subscriptions", &raw)
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    (
-                        proof.actor_id.as_str(),
-                        proof.actor_kind.as_str(),
-                        proof.app_id.as_str()
-                    ),
-                    (actor, kind, "example")
-                );
-
-                let opposite = if kind == "carbon" {
-                    "silicon"
-                } else {
-                    "carbon"
-                };
-                f.iam.reply.lock().unwrap()["authorization"]["actor_type"] = opposite.into();
-                assert_eq!(
-                    f.app
-                        .auth
-                        .authenticate(login["session_token"].as_str().unwrap(), &headers)
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    403
-                );
-                assert_eq!(
-                    f.app
-                        .auth
-                        .proof(&headers, "/v1/subscriptions", &raw)
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    401
-                );
-                f.iam.reply.lock().unwrap()["authorization"]["actor_type"] = kind.into();
-                let other_world = uuid::Uuid::new_v4().to_string();
-                f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] =
-                    other_world.into();
-                assert_eq!(
-                    f.app
-                        .auth
-                        .proof(&headers, "/v1/subscriptions", &raw)
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    401
-                );
-                f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] = if testing
-                {
-                    f.principal.context.clone().into()
-                } else {
-                    Value::Null
-                };
-                let wrong_org =
-                    serde_json::to_vec(&json!({"org_id":"another-org","app_id":"example"}))
-                        .unwrap();
-                assert_eq!(
-                    f.app
-                        .auth
-                        .proof(&headers, "/v1/subscriptions", &wrong_org)
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    401
-                );
-            }
-            for (actor, kind) in [
-                ("alice", "carbon"),
-                ("assistant:tos", "silicon"),
-                ("c:alice", "silicon"),
-                ("si:assistant", "carbon"),
-            ] {
-                {
-                    let mut reply = f.iam.reply.lock().unwrap();
-                    reply["public_id"] = actor.into();
-                    reply["actor_type"] = kind.into();
-                    reply["authorization"]["public_id"] = actor.into();
-                    reply["authorization"]["actor_type"] = kind.into();
-                }
-                assert_eq!(
-                    f.app
-                        .auth
-                        .proof(&headers, "/v1/subscriptions", &raw)
-                        .await
-                        .err()
-                        .unwrap()
-                        .status,
-                    401
-                );
-            }
-            let mut stale = f.app.auth.session(&f.principal.session).unwrap();
-            stale.id = "fixture:tos".into();
-            stale.expires = 0;
-            f.app.auth.save(&f.principal.session, &stale).unwrap();
-            f.take_calls();
-            assert_eq!(
-                f.app
-                    .auth
-                    .authenticate(&f.token, &headers)
-                    .await
-                    .err()
-                    .unwrap()
-                    .status,
-                401
-            );
-            assert!(
-                f.take_calls().is_empty(),
-                "legacy claims must not reach refresh under a new audience"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn aged_login_replay_survives_maintenance_restart_and_never_revives_revoked_authority() {
-        let f = fixture(false).await;
-        let key = uuid::Uuid::new_v4().to_string();
-        let operation = hash(format!("production:{key}").as_bytes());
-        let (status, original) = f
-            .app
-            .auth
-            .login("original-slt", &key, &HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(status, 201);
-        f.app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE logins SET created=? WHERE id=?",
-                params![now() - 7200, operation],
-            )
-            .unwrap();
-        f.app.auth.retry_revocations().await;
-        let reopened = Auth::new(&f.app.config).unwrap();
-        assert_eq!(
-            reopened
-                .login("original-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap(),
-            (200, original.clone())
-        );
-        assert_eq!(
-            reopened
-                .login("changed-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap_err()
-                .status,
-            409
-        );
-        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
-
-        f.iam.reply.lock().unwrap()["active"] = false.into();
-        assert_eq!(
-            reopened
-                .login("original-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap_err()
-                .status,
-            401
-        );
-        let session_id = hash(original["session_token"].as_str().unwrap().as_bytes());
-        let flags: (bool, bool) = reopened
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT revoked,revoke_pending FROM sessions WHERE id=?",
-                [&session_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(flags, (true, true));
-        f.iam.reply.lock().unwrap()["active"] = true.into();
-        reopened.retry_revocations().await;
-        assert_eq!(
-            reopened
-                .login("original-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap_err()
-                .status,
-            401
-        );
-        assert!(f.take_calls().iter().any(|p| p == "/api/v1/oauth/revoke"));
-        let pending: bool = reopened
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT revoke_pending FROM sessions WHERE id=?",
-                [&session_id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(!pending);
-    }
-
-    #[tokio::test]
-    async fn login_replay_cannot_relabel_a_consumed_slt_after_environment_clean() {
-        let f = fixture(true).await;
-        let mut headers = HeaderMap::new();
-        headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-        headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-        let key = uuid::Uuid::new_v4().to_string();
-        let original = f
-            .app
-            .auth
-            .login("before-clean-slt", &key, &headers)
-            .await
-            .unwrap()
-            .1;
-        let original_token = original["session_token"].as_str().unwrap();
-        f.app
-            .auth
-            .fence_context(
-                &f.principal.context,
-                "active",
-                &hash("k".repeat(32).as_bytes()),
-                true,
-            )
-            .unwrap();
-        Connection::open(&f.app.config.database_path)
-            .unwrap()
-            .execute(
-                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
-                [&f.principal.context],
-            )
-            .unwrap();
-        // IAM can still return the old exchange while upstream revocation is pending.
-        let reopened = Auth::new(&f.app.config).unwrap();
-        for retry_key in [&key, &uuid::Uuid::new_v4().to_string()] {
-            assert_eq!(
-                reopened
-                    .login("before-clean-slt", retry_key, &headers)
-                    .await
-                    .unwrap_err()
-                    .status,
-                409
-            );
-        }
-        // Pre-upgrade duplicates cannot turn a saved old result or exchange into new authority.
-        let new_operation = hash(format!("{}:2:{key}", f.principal.context).as_bytes());
-        reopened
-            .db
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO logins(id,slt_hash,created,response) VALUES(?,?,?,?)",
-                params![
-                    new_operation,
-                    hash(b"before-clean-slt"),
-                    now(),
-                    reopened.seal(&new_operation, &original).unwrap()
-                ],
-            )
-            .unwrap();
-        assert_eq!(
-            reopened
-                .login("before-clean-slt", &key, &headers)
-                .await
-                .unwrap_err()
-                .status,
-            401
-        );
-        reopened
-            .db
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE logins SET response=NULL,payload=? WHERE id=?",
-                params![
-                    reopened
-                        .seal(
-                            &new_operation,
-                            &token_reply("fixture-access", "fixture-refresh", 3600)
-                        )
-                        .unwrap(),
-                    new_operation
-                ],
-            )
-            .unwrap();
-        assert_eq!(
-            reopened
-                .login("before-clean-slt", &key, &headers)
-                .await
-                .unwrap_err()
-                .status,
-            409
-        );
-        assert_eq!(f.iam.token_requests.lock().unwrap().len(), 1);
-        assert_eq!(
-            reopened
-                .authenticate(original_token, &HeaderMap::new())
-                .await
-                .err()
-                .unwrap()
-                .status,
-            401
-        );
-        let fresh = reopened
-            .login(
-                "after-clean-slt",
-                &uuid::Uuid::new_v4().to_string(),
-                &headers,
-            )
-            .await
-            .unwrap()
-            .1;
-        let principal = reopened
-            .authenticate(fresh["session_token"].as_str().unwrap(), &HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(
-            reopened.me(&principal).unwrap()["environment"]["generation"],
-            2
-        );
-    }
-
-    #[tokio::test]
-    async fn aged_exchanged_login_recovers_expired_access_and_keeps_uncertain_results() {
-        let f = fixture(false).await;
-        let key = uuid::Uuid::new_v4().to_string();
-        let operation = hash(format!("production:{key}").as_bytes());
-        let tokens: models::OAuthTokenResponse =
-            serde_json::from_value(token_reply("old-access", "old-refresh", 3600)).unwrap();
-        f.app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO logins(id,slt_hash,created,payload) VALUES(?,?,?,?)",
-                params![
-                    operation,
-                    hash(b"original-slt"),
-                    now() - 7200,
-                    f.app.auth.seal(&operation, &tokens).unwrap()
-                ],
-            )
-            .unwrap();
-        f.app.auth.retry_revocations().await;
-        let reopened = Auth::new(&f.app.config).unwrap();
-        let (status, response) = reopened
-            .login("original-slt", &key, &HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(status, 201);
-        {
-            let requests = f.iam.token_requests.lock().unwrap();
-            assert_eq!(requests.len(), 1);
-            assert_eq!(
-                requests[0].1.get("refresh_token").map(String::as_str),
-                Some("old-refresh")
-            );
-            assert!(!requests[0].1.contains_key("slt"));
-        }
-        let session_id = hash(response["session_token"].as_str().unwrap().as_bytes());
-        assert_eq!(
-            reopened.session(&session_id).unwrap().refresh,
-            "fixture-refresh"
-        );
-        f.iam.status.store(503, Ordering::SeqCst);
-        assert_eq!(
-            reopened
-                .login("original-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap_err()
-                .status,
-            503
-        );
-        reopened.retry_revocations().await;
-        f.iam.status.store(200, Ordering::SeqCst);
-        assert_eq!(
-            reopened
-                .login("original-slt", &key, &HeaderMap::new())
-                .await
-                .unwrap(),
-            (200, response)
-        );
-
-        let good = f.iam.reply.lock().unwrap().clone();
-        *f.iam.reply.lock().unwrap() = json!({"invalid_introspection":"fixture"});
-        let uncertain_key = uuid::Uuid::new_v4().to_string();
-        assert_eq!(
-            reopened
-                .login("uncertain-slt", &uncertain_key, &HeaderMap::new())
-                .await
-                .unwrap_err()
-                .status,
-            503
-        );
-        let op = hash(format!("production:{uncertain_key}").as_bytes());
-        let bytes: Vec<u8> = reopened
-            .db
-            .lock()
-            .unwrap()
-            .query_row("SELECT response FROM logins WHERE id=?", [&op], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        let retained: Value = reopened.open(&op, &bytes).unwrap();
-        reopened.retry_revocations().await;
-        *f.iam.reply.lock().unwrap() = good;
-        let restarted = Auth::new(&f.app.config).unwrap();
-        assert_eq!(
-            restarted
-                .login("uncertain-slt", &uncertain_key, &HeaderMap::new())
-                .await
-                .unwrap(),
-            (200, retained)
-        );
-
-        // An old row whose credentials were erased by an earlier release cannot prove cleanup.
-        let missing_key = uuid::Uuid::new_v4().to_string();
-        reopened
-            .db
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO logins(id,slt_hash,created) VALUES(?,?,?)",
-                params![
-                    hash(format!("production:{missing_key}").as_bytes()),
-                    hash(b"lost-slt"),
-                    now() - 7200
-                ],
-            )
-            .unwrap();
-        f.iam.status.store(401, Ordering::SeqCst);
-        let error = reopened
-            .login("lost-slt", &missing_key, &HeaderMap::new())
-            .await
-            .unwrap_err();
-        assert_eq!(error.body["error"]["code"], "login_recovery_unresolved");
-    }
-
-    #[tokio::test]
-    async fn refresh_recovery_uses_original_attempt_time_and_rotates_expired_or_legacy_results() {
-        for started in [Some(now() - 7200), None, Some(now() - 100)] {
-            let f = fixture(false).await;
-            let mut session = f.app.auth.session(&f.principal.session).unwrap();
-            let original_key = uuid::Uuid::new_v4().to_string();
-            session.refresh_key = Some(original_key.clone());
-            session.refresh_started = started;
-            session.expires = now() - 3600;
-            f.app.auth.save(&f.principal.session, &session).unwrap();
-            f.iam.token_replies.lock().unwrap().extend([
-                token_reply("recovered-access", "recovered-refresh", 3600),
-                token_reply("fresh-access", "fresh-refresh", 3600),
-            ]);
-            let reopened = Auth::new(&f.app.config).unwrap();
-            let before = now();
-            reopened
-                .authenticate(&f.token, &HeaderMap::new())
-                .await
-                .unwrap();
-            let saved = reopened.session(&f.principal.session).unwrap();
-            let expired = started.is_none_or(|start| start + 3600 <= before);
-            assert_eq!(
-                saved.access,
-                if expired {
-                    "fresh-access"
-                } else {
-                    "recovered-access"
-                }
-            );
-            assert_eq!(
-                saved.refresh,
-                if expired {
-                    "fresh-refresh"
-                } else {
-                    "recovered-refresh"
-                }
-            );
-            if expired {
-                assert!(saved.expires >= before + 3600 && saved.expires <= now() + 3600);
-            } else {
-                assert_eq!(saved.expires, started.unwrap() + 3600);
-            }
-            assert!(saved.refresh_key.is_none() && saved.refresh_started.is_none());
-            let requests = f.iam.token_requests.lock().unwrap();
-            assert_eq!(requests.len(), if expired { 2 } else { 1 });
-            assert_eq!(requests[0].0, original_key);
-            assert_eq!(
-                requests[0].1.get("refresh_token").map(String::as_str),
-                Some("fixture-refresh")
-            );
-            if expired {
-                assert_ne!(requests[1].0, original_key);
-                assert_eq!(
-                    requests[1].1.get("refresh_token").map(String::as_str),
-                    Some("recovered-refresh")
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn logout_needs_only_local_token_and_retries_durable_cleanup_without_restarting_it() {
-        for unavailable in [false, true] {
-            let f = fixture(false).await;
-            let id = Auth::session_id(&f.token).unwrap();
-            let original = f.app.auth.session(&id).unwrap();
-            f.iam.reply.lock().unwrap()["active"] = false.into();
-            assert_eq!(
-                f.app
-                    .auth
-                    .authenticate(&f.token, &HeaderMap::new())
-                    .await
-                    .err()
-                    .unwrap()
-                    .status,
-                401
-            );
-            f.iam.calls.lock().unwrap().clear();
-            if unavailable {
-                f.iam.status.store(503, Ordering::SeqCst);
-            }
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "authorization",
-                format!("Bearer {}", f.token).parse().unwrap(),
-            );
-            let result = crate::http(
-                axum::extract::State(f.app.clone()),
-                axum::extract::Path("session".into()),
-                axum::extract::RawQuery(None),
-                axum::http::Method::DELETE,
-                headers,
-                Ok(axum::body::Bytes::new()),
-            )
-            .await;
-            if unavailable {
-                assert_eq!(result.unwrap_err().status, 503);
-            } else {
-                assert_eq!(result.unwrap().status(), 200);
-            }
-            let state = || {
-                f.app
-                    .auth
-                    .db
-                    .lock()
-                    .unwrap()
-                    .query_row(
-                        "SELECT revoked,revoke_pending FROM sessions WHERE id=?",
-                        [&id],
-                        |r| Ok((r.get::<_, bool>(0)?, r.get::<_, bool>(1)?)),
-                    )
-                    .unwrap()
-            };
-            assert_eq!(state(), (true, unavailable));
-            assert!(
-                f.iam
-                    .calls
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .all(|path| path == "/api/v1/oauth/revoke")
-            );
-            let reopened = Auth::new(&f.app.config).unwrap();
-            f.iam.status.store(200, Ordering::SeqCst);
-            assert_eq!(
-                reopened.logout_by_id(&id).await.unwrap(),
-                json!({"authenticated":false})
-            );
-            assert_eq!(state(), (true, false));
-            {
-                let requests = f.iam.revoke_requests.lock().unwrap();
-                assert_eq!(requests.len(), if unavailable { 2 } else { 1 });
-                assert_eq!(requests[0].0, original.revoke_key);
-                assert!(String::from_utf8_lossy(&requests[0].1).contains(&original.refresh));
-                if unavailable {
-                    assert_eq!(requests[0], requests[1]);
-                }
-            }
-            f.iam.status.store(503, Ordering::SeqCst);
-            assert_eq!(
-                reopened.logout(&f.principal).await.unwrap(),
-                json!({"authenticated":false})
-            );
-            assert_eq!(state(), (true, false));
-            assert_eq!(
-                f.iam.revoke_requests.lock().unwrap().len(),
-                if unavailable { 2 } else { 1 }
-            );
-            assert_eq!(
-                reopened
-                    .logout_by_id(&hash(b"missing"))
-                    .await
-                    .unwrap_err()
-                    .status,
-                401
-            );
-        }
-        for token in [
-            format!("ting_{}", "x".repeat(64)),
-            format!("ting_recv_{}", "a".repeat(64)),
-        ] {
-            assert_eq!(Auth::session_id(&token).unwrap_err().status, 401);
-        }
-    }
-
-    #[tokio::test]
-    async fn revocation_cleanup_waits_for_inflight_refresh_and_reads_rotated_credentials() {
-        let f = fixture(true).await;
-        let mut session = f.app.auth.session(&f.principal.session).unwrap();
-        session.expires = now() - 1;
-        f.app.auth.save(&f.principal.session, &session).unwrap();
-        f.iam.token_replies.lock().unwrap().push_back(token_reply(
-            "rotated-access",
-            "rotated-refresh",
-            3600,
-        ));
-        *f.iam.block_path.lock().unwrap() = Some("/api/v1/app-auth/tokens".into());
-        let app = f.app.clone();
-        let token = f.token.clone();
-        let refresh =
-            tokio::spawn(async move { app.auth.authenticate(&token, &HeaderMap::new()).await });
-        tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
-            .await
-            .unwrap();
-        f.app
-            .auth
-            .fence_context(
-                &f.principal.context,
-                "retired",
-                &hash(session.test.as_ref().unwrap().key.as_bytes()),
-                true,
-            )
-            .unwrap();
-        let app = f.app.clone();
-        let mut cleanup = tokio::spawn(async move { app.auth.retry_revocations().await });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), &mut cleanup)
-                .await
-                .is_err()
-        );
-        assert!(
-            !f.iam
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|path| path == "/api/v1/oauth/revoke")
-        );
-        f.iam.release.notify_one();
-        assert_eq!(refresh.await.unwrap().err().unwrap().status, 401);
-        cleanup.await.unwrap();
-        let (bytes, pending): (Vec<u8>, bool) = f
-            .app
-            .auth
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT payload,revoke_pending FROM sessions WHERE id=?",
-                [&f.principal.session],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            f.app
-                .auth
-                .open::<Session>(&f.principal.session, &bytes)
-                .unwrap()
-                .refresh,
-            "rotated-refresh"
-        );
-        assert!(!pending);
-        assert!(
-            f.iam
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|path| path == "/api/v1/oauth/revoke")
-        );
-    }
-
-    #[tokio::test]
-    async fn me_attests_the_live_session_environment_and_fences_stale_generations() {
-        use axum::{
-            extract::{Path, RawQuery, State},
-            http::Method,
-        };
-        async fn get_me(f: &Fixture) -> Result<Value> {
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "cookie",
-                format!("ting_session={}", f.token).parse().unwrap(),
-            );
-            let response = crate::http(
-                State(f.app.clone()),
-                Path("me".into()),
-                RawQuery(None),
-                Method::GET,
-                headers,
-                Ok(axum::body::Bytes::new()),
-            )
-            .await?;
-            assert_eq!(response.status(), 200);
-            let bytes = axum::body::to_bytes(response.into_body(), 4096)
-                .await
-                .unwrap();
-            Ok(serde_json::from_slice(&bytes).unwrap())
-        }
-
-        let production = fixture(false).await;
-        assert_eq!(
-            get_me(&production).await.unwrap(),
-            json!({
-                "id":"si:fixture", "kind":"silicon", "authenticated":true,
-                "environment":{"kind":"production"}
-            })
-        );
-        let auth = &production.app.auth;
-        let mut malformed = auth.session(&production.principal.session).unwrap();
-        malformed.context.clear();
-        auth.save(&production.principal.session, &malformed)
-            .unwrap();
-        assert_eq!(get_me(&production).await.unwrap_err().status, 401);
-
-        let mut testing = fixture(true).await;
-        let mut headers = HeaderMap::new();
-        headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-        headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-        let (status, login) = testing
-            .app
-            .auth
-            .login("fixture-slt", &uuid::Uuid::new_v4().to_string(), &headers)
-            .await
-            .unwrap();
-        assert_eq!(status, 201);
-        testing.token = login["session_token"].as_str().unwrap().into();
-        testing.principal = testing
-            .app
-            .auth
-            .authenticate(&testing.token, &HeaderMap::new())
-            .await
-            .unwrap();
-        assert_eq!(
-            get_me(&testing).await.unwrap(),
-            json!({
-                "id":"si:fixture", "kind":"silicon", "authenticated":true,
-                "environment":{"kind":"testing", "id":testing.principal.context, "generation":1}
-            })
-        );
-        let auth = &testing.app.auth;
-        let original = auth.session(&testing.principal.session).unwrap();
-        let mut legacy = original.clone();
-        legacy.test.as_mut().unwrap().generation = None;
-        auth.save(&testing.principal.session, &legacy).unwrap();
-        assert_eq!(get_me(&testing).await.unwrap_err().status, 401);
-        auth.save(&testing.principal.session, &original).unwrap();
-
-        // Even without a session revocation, a clean cannot relabel an old cookie.
-        Connection::open(&testing.app.config.database_path)
-            .unwrap()
-            .execute(
-                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
-                [&testing.principal.context],
-            )
-            .unwrap();
-        assert_eq!(get_me(&testing).await.unwrap_err().status, 401);
-        let mut fresh = original.clone();
-        fresh.test.as_mut().unwrap().generation = Some(2);
-        auth.save(&testing.principal.session, &fresh).unwrap();
-        assert_eq!(
-            get_me(&testing).await.unwrap()["environment"]["generation"],
-            2
-        );
-
-        let key_hash = hash(fresh.test.as_ref().unwrap().key.as_bytes());
-        for (state, key, status) in [
-            ("pending", key_hash.as_str(), 503),
-            ("active", "rotated-key-hash", 403),
-            ("retired", key_hash.as_str(), 403),
-        ] {
-            auth.fence_context(&testing.principal.context, state, key, false)
-                .unwrap();
-            assert_eq!(get_me(&testing).await.unwrap_err().status, status);
-        }
-        auth.fence_context(&testing.principal.context, "active", &key_hash, false)
-            .unwrap();
-        Connection::open(&testing.app.config.database_path)
-            .unwrap()
-            .execute(
-                "DELETE FROM lifecycle_environments WHERE id=?",
-                [&testing.principal.context],
-            )
-            .unwrap();
-        assert_eq!(get_me(&testing).await.unwrap_err().status, 503);
-    }
-
-    #[tokio::test]
-    async fn cross_org_proofs_deliver_and_update_read_without_granting_type_management() {
-        use axum::{
-            extract::{Path, RawQuery, State},
-            http::Method,
-        };
-
-        async fn request(
-            f: &Fixture,
-            headers: &HeaderMap,
-            method: Method,
-            path: &str,
-            body: Value,
-        ) -> Result<(u16, Value)> {
-            let bytes = if method == Method::GET {
-                Vec::new()
-            } else {
-                serde_json::to_vec(&body).unwrap()
-            };
-            let response = crate::http(
-                State(f.app.clone()),
-                Path(path.into()),
-                RawQuery(None),
-                method,
-                headers.clone(),
-                Ok(bytes.into()),
-            )
-            .await?;
-            let status = response.status().as_u16();
-            let bytes = axum::body::to_bytes(response.into_body(), 65536)
-                .await
-                .unwrap();
-            Ok((status, serde_json::from_slice(&bytes).unwrap()))
-        }
-
-        for testing in [false, true] {
-            let f = fixture(testing).await;
-            {
-                let mut reply = f.iam.reply.lock().unwrap();
-                reply["authorization"]["org_id"] = "bricks".into();
-                reply["authorization"]["org_role"] = "admin".into();
-            }
-            let mut proof_headers = HeaderMap::new();
-            proof_headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
-            proof_headers.insert("content-type", "application/json".parse().unwrap());
-            if testing {
-                proof_headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-                proof_headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-            }
-            let body = json!({"org_id":"bricks","type":"example.msg.received",
-                "data":{"text":"Retained notification"},"for":f.principal.id,"key":"cross-org"});
-            let (status, sent) = request(&f, &proof_headers, Method::POST, "tings", body.clone())
-                .await
-                .unwrap();
-            assert_eq!(status, 202);
-            let (_, history) = request(
-                &f,
-                &proof_headers,
-                Method::POST,
-                "sent/query",
-                json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
-            )
-            .await
-            .unwrap();
-            assert_eq!(history["id"], sent["id"]);
-            for (field, value, status) in
-                [("org_id", "tos", 401), ("type", "other.msg.received", 403)]
-            {
-                let mut invalid = body.clone();
-                invalid[field] = value.into();
-                assert_eq!(
-                    request(&f, &proof_headers, Method::POST, "tings", invalid)
-                        .await
-                        .unwrap_err()
-                        .status,
-                    status
-                );
-            }
-
-            let mut session_headers = proof_headers.clone();
-            session_headers.insert(
-                "authorization",
-                format!("Bearer {}", f.token).parse().unwrap(),
-            );
-            let read_request = json!({"org_id":"bricks","app_id":"example",
-                "message_ids":[sent["id"]],"read":true,"key":"mark-read"});
-            for read in [true, false] {
-                let mut update = read_request.clone();
-                update["read"] = read.into();
-                update["key"] = format!("mark-{read}").into();
-                f.take_calls();
-                let (status, result) = request(
-                    &f,
-                    &proof_headers,
-                    Method::POST,
-                    "sent/read",
-                    update.clone(),
-                )
-                .await
-                .unwrap();
-                assert_eq!(status, 200);
-                assert_eq!(result, json!({"message_ids":[sent["id"]],"read":read}));
-                assert!(
-                    !f.take_calls()
-                        .iter()
-                        .any(|path| path == "/api/v1/oauth/introspect"),
-                    "app read changes must not require a Ting session"
-                );
-                let verified = f.iam.proof_requests.lock().unwrap().last().unwrap().clone();
-                assert_eq!(
-                    verified["request"],
-                    json!({
-                        "method":"POST", "path":"/v1/sent/read"
-                    })
-                );
-                for (headers, method, path, query) in [
-                    (
-                        &proof_headers,
-                        Method::POST,
-                        "sent/query".to_owned(),
-                        json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
-                    ),
-                    (
-                        &session_headers,
-                        Method::GET,
-                        format!("orgs/bricks/inbox/{}", sent["id"].as_str().unwrap()),
-                        json!({}),
-                    ),
-                ] {
-                    let (_, retained) = request(&f, headers, method, &path, query).await.unwrap();
-                    assert_eq!(retained["id"], sent["id"]);
-                    assert_eq!(retained["read"], read);
-                    assert_eq!(retained["data"], body["data"]);
-                    assert_eq!(retained["created_at"], sent["created_at"]);
-                }
-            }
-            for (field, value, status) in [("app_id", "other", 403), ("org_id", "tos", 401)] {
-                let mut invalid = read_request.clone();
-                invalid[field] = value.into();
-                assert_eq!(
-                    request(&f, &proof_headers, Method::POST, "sent/read", invalid)
-                        .await
-                        .unwrap_err()
-                        .status,
-                    status
-                );
-            }
-            f.iam.reply.lock().unwrap()["authorization"]["organization_id"] =
-                uuid::Uuid::new_v4().to_string().into();
-            assert_eq!(
-                request(
-                    &f,
-                    &proof_headers,
-                    Method::POST,
-                    "sent/read",
-                    read_request.clone()
-                )
-                .await
-                .unwrap_err()
-                .status,
-                404,
-                "a valid proof for another organization cannot change the original ting"
-            );
-            f.iam.reply.lock().unwrap()["authorization"]["organization_id"] =
-                f.proof.org_id.clone().into();
-            f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] =
-                uuid::Uuid::new_v4().to_string().into();
-            assert_eq!(
-                request(
-                    &f,
-                    &proof_headers,
-                    Method::POST,
-                    "sent/read",
-                    read_request.clone()
-                )
-                .await
-                .unwrap_err()
-                .status,
-                401
-            );
-            f.iam.reply.lock().unwrap()["authorization"]["testing_environment_id"] = if testing {
-                f.principal.context.clone().into()
-            } else {
-                Value::Null
-            };
-            for rejected in [401, 503] {
-                f.iam.status.store(rejected, Ordering::SeqCst);
-                for key in ["mark-true", "rejected-new-operation"] {
-                    let mut denied = read_request.clone();
-                    denied["key"] = key.into();
-                    assert_eq!(
-                        request(&f, &proof_headers, Method::POST, "sent/read", denied)
-                            .await
-                            .unwrap_err()
-                            .status,
-                        rejected,
-                        "IAM failures must reject both new updates and accepted-key replays"
-                    );
-                }
-                f.iam.status.store(200, Ordering::SeqCst);
-                let (_, retained) = request(
-                    &f,
-                    &proof_headers,
-                    Method::POST,
-                    "sent/query",
-                    json!({"org_id":"bricks","app_id":"example","id":sent["id"]}),
-                )
-                .await
-                .unwrap();
-                assert_eq!(retained["read"], false);
-            }
-            let consent = f
-                .app
-                .auth
-                .catalog_start(&f.principal, "bricks", "bricks-catalog-test")
-                .await
-                .unwrap();
-            f.app
-                .auth
-                .catalog_complete(
-                    &f.principal,
-                    "bricks",
-                    consent["authorization_id"].as_str().unwrap(),
-                    "obc_bricks",
-                    consent["state"].as_str().unwrap(),
-                )
-                .await
-                .unwrap();
-            for (method, path, body) in [
-                (Method::GET, "orgs/bricks/apps/example/types", json!({})),
-                (
-                    Method::POST,
-                    "orgs/bricks/apps/example/types",
-                    json!({"type":"example.msg.received","description":"Hijack"}),
-                ),
-                (
-                    Method::PATCH,
-                    "orgs/bricks/apps/example/types/example.msg.received",
-                    json!({"description":"Hijack"}),
-                ),
-            ] {
-                assert_eq!(
-                    request(&f, &session_headers, method, path, body)
-                        .await
-                        .unwrap_err()
-                        .status,
-                    403
-                );
-            }
-            {
-                let mut reply = f.iam.reply.lock().unwrap();
-                reply["authorization"]["org_id"] = "tos".into();
-                reply["authorization"]["organization_id"] = f.owner_org.clone().into();
-            }
-            let consent = f
-                .app
-                .auth
-                .catalog_start(&f.principal, "tos", "tos-catalog-test")
-                .await
-                .unwrap();
-            f.app
-                .auth
-                .catalog_complete(
-                    &f.principal,
-                    "tos",
-                    consent["authorization_id"].as_str().unwrap(),
-                    "obc_tos",
-                    consent["state"].as_str().unwrap(),
-                )
-                .await
-                .unwrap();
-            let (_, types) = request(
-                &f,
-                &session_headers,
-                Method::GET,
-                "orgs/tos/apps/example/types",
-                json!({}),
-            )
-            .await
-            .unwrap();
-            assert_eq!(types["items"][0]["description"], "Fixture");
-            assert_eq!(
-                request(
-                    &f,
-                    &session_headers,
-                    Method::PATCH,
-                    "orgs/tos/apps/example/types/example.msg.received",
-                    json!({"description":"Owner update"}),
-                )
-                .await
-                .unwrap()
-                .0,
-                200
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn session_mutation_rechecks_generation_after_waiting_for_gate() {
-        use axum::{
-            extract::{Path, RawQuery, State},
-            http::Method,
-        };
-        let f = fixture(true).await;
-        let gate = f.app.mutations.lock().await;
-        let app = f.app.clone();
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            format!("Bearer {}", f.token).parse().unwrap(),
-        );
-        headers.insert("content-type", "application/json".parse().unwrap());
-        let mut pending = tokio::spawn(async move {
-            crate::http(
-                State(app),
-                Path("orgs/tos/preferences".into()),
-                RawQuery(None),
-                Method::PUT,
-                headers,
-                Ok(
-                    serde_json::to_vec(&json!({"app_id":"example","enabled":false}))
-                        .unwrap()
-                        .into(),
-                ),
-            )
-            .await
-        });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), &mut pending)
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            f.take_calls(),
-            vec![
-                "/api/v1/application/testing-context",
-                "/api/v1/oauth/introspect",
-                "/api/v1/application/testing-context",
-                "/api/v1/oauth/introspect",
-            ]
-        );
-        Connection::open(&f.app.config.database_path)
-            .unwrap()
-            .execute(
-                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
-                [&f.principal.context],
-            )
-            .unwrap();
-        drop(gate);
-        assert_eq!(pending.await.unwrap().unwrap_err().status, 401);
-        assert!(
-            f.app
-                .store
-                .preferences(&f.principal, &f.proof.org_id, &json!({}))
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[tokio::test]
-    async fn proof_operations_recheck_generation_after_iam_and_before_storage() {
-        for path in [
-            "/v1/tings",
-            "/v1/subscriptions",
-            "/v1/subscriptions/query",
-            "/v1/sent/query",
-            "/v1/sent/read",
-        ] {
-            let f = fixture(true).await;
-            let body = if path == "/v1/tings" {
-                json!({"org_id":f.proof.org_id,"type":"example.msg.received","data":{},"for":f.principal.id,"key":"stale-proof"})
-            } else if path == "/v1/sent/read" {
-                json!({"org_id":f.proof.org_id,"app_id":"example","message_ids":[f.send("read-target")],"read":true,"key":"stale-read-proof"})
-            } else {
-                json!({"org_id":f.proof.org_id,"app_id":"example"})
-            };
-            let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer oba_fixture".parse().unwrap());
-            headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-            headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-            *f.iam.block_path.lock().unwrap() =
-                Some("/api/v1/obo-access/token-verifications".into());
-            let gate = f.app.mutations.lock().await;
-            let app = f.app.clone();
-            let (h, b) = (headers.clone(), body.clone());
-            let pending = tokio::spawn(async move {
-                crate::app_call(&app, &h, path, &serde_json::to_vec(&b).unwrap(), &b).await
-            });
-            tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
-                .await
-                .unwrap();
-            Connection::open(&f.app.config.database_path)
-                .unwrap()
-                .execute(
-                    "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
-                    [&f.principal.context],
-                )
-                .unwrap();
-            f.iam.release.notify_one();
-            drop(gate);
-            assert_eq!(pending.await.unwrap().unwrap_err().status, 403, "{path}");
-            // The same operation freshly verified in the new generation remains usable.
-            assert!(
-                crate::app_call(
-                    &f.app,
-                    &headers,
-                    path,
-                    &serde_json::to_vec(&body).unwrap(),
-                    &body
-                )
-                .await
-                .is_ok(),
-                "{path}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn session_revalidation_rejects_a_clean_during_iam_verification() {
-        let f = fixture(true).await;
-        f.iam.block_next.store(true, Ordering::SeqCst);
-        let app = f.app.clone();
-        let token = f.token.clone();
-        let pending =
-            tokio::spawn(async move { app.auth.authenticate(&token, &HeaderMap::new()).await });
-        tokio::time::timeout(Duration::from_secs(2), f.iam.blocked.notified())
-            .await
-            .unwrap();
-        Connection::open(&f.app.config.database_path)
-            .unwrap()
-            .execute(
-                "UPDATE lifecycle_environments SET generation=2 WHERE id=?",
-                [&f.principal.context],
-            )
-            .unwrap();
-        f.iam.release.notify_one();
-        assert_eq!(pending.await.unwrap().err().unwrap().status, 401);
-    }
-
-    #[test]
-    fn encrypted_sessions_bind_rows_and_lifecycle_revocation_is_durable() {
-        let database =
-            std::env::temp_dir().join(format!("ting-auth-test-{}", uuid::Uuid::new_v4()));
-        let config = crate::Config {
-            database_path: database.to_string_lossy().into_owned(),
-            encryption_key: "ab".repeat(32),
-            iam_url: "http://127.0.0.1:1".into(),
-            iam_app_id: "ting".into(),
-            iam_app_secret: "test-only-secret".into(),
-            honeycomb_url: "http://127.0.0.1:1".into(),
-            spacestation_url: "http://127.0.0.1:1".into(),
-            spacestation_key: String::new(),
-            spacestation_table: String::new(),
-            frontend_origin: "http://127.0.0.1:1".into(),
-            public_origin: "http://127.0.0.1:1".into(),
-            browser_origins: vec![],
-            repository_url: String::new(),
-            docs_url: String::new(),
-            rust_package: String::new(),
-        };
-        let auth = Auth::new(&config).unwrap();
-        let context = uuid::Uuid::new_v4().to_string();
-        let session = Session {
-            context: context.clone(),
-            id: "c:test-actor".into(),
-            kind: "carbon".into(),
-            access: "sensitive-access-token".into(),
-            refresh: "sensitive-refresh-token".into(),
-            expires: now() + 3600,
-            test: None,
-            refresh_key: None,
-            refresh_started: None,
-            revoke_key: secret(),
-        };
-        let id = hash(b"opaque-test-session");
-        let encrypted = auth.seal(&id, &session).unwrap();
-        assert!(
-            !encrypted
-                .windows(session.access.len())
-                .any(|bytes| bytes == session.access.as_bytes())
-        );
-        assert!(auth.open::<Session>("different-row", &encrypted).is_err());
-        let mut altered = encrypted.clone();
-        *altered.last_mut().unwrap() ^= 1;
-        assert!(auth.open::<Session>(&id, &altered).is_err());
-        auth.db
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO sessions(id,payload) VALUES(?,?)",
-                params![id, encrypted],
-            )
-            .unwrap();
-        assert!(auth.session(&id).is_ok());
-        auth.fence_context(&context, "disabled", &hash(b"test-key"), true)
-            .unwrap();
-        assert!(auth.session(&id).is_err());
-        drop(auth);
-        let reopened = Auth::new(&config).unwrap();
-        assert!(reopened.session(&id).is_err());
-        let pending: i64 = reopened
-            .db
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT revoke_pending FROM sessions WHERE id=?",
-                [&id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(pending, 1);
-        drop(reopened);
-        for suffix in ["", ".auth", ".auth-wal", ".auth-shm"] {
-            let _ = std::fs::remove_file(format!("{}{suffix}", database.display()));
-        }
-    }
-    #[test]
-    fn reports_reject_lossy_or_invalid_attachments() {
-        assert!(validate_report(&json!({"title":"Bug","body":"Exact content","attachments":[{"name":"log.txt","encoding":"base64","content":"YWJj"}]})).is_ok());
-        assert!(validate_report(&json!({"title":"Bug","body":"Exact content","attachments":[{"name":"../log","encoding":"base64","content":"YWJj"}]})).is_err());
-        assert!(validate_report(&json!({"title":"Bug","body":"Exact content","attachments":[{"name":"log","encoding":"base64","content":"YWJj\n"}]})).is_err());
-        assert!(validate_report(&json!({"title":"Bug","body":"a".repeat(192*1024)})).is_err());
-    }
-    #[tokio::test]
-    async fn reusable_obo_is_verified_each_time_and_never_accepts_legacy_proofs() {
-        for testing in [false, true] {
-            let f = fixture(testing).await;
-            let mut headers = HeaderMap::new();
-            headers.insert("authorization", "Bearer oba_reusable".parse().unwrap());
-            if testing {
-                headers.insert("iam_test_app_secret", "fixture-secret".parse().unwrap());
-                headers.insert("x-testing-environment-key", "k".repeat(32).parse().unwrap());
-            }
-            let raw = serde_json::to_vec(&json!({"org_id":"tos","app_id":"example"})).unwrap();
-            for _ in 0..2 {
-                let proof = f
-                    .app
-                    .auth
-                    .proof(&headers, "/v1/subscriptions", &raw)
-                    .await
-                    .unwrap();
-                assert_eq!(proof.actor_id, "si:fixture");
-            }
-            let requests = f.iam.proof_requests.lock().unwrap().clone();
-            assert_eq!(requests.len(), 2);
-            assert_eq!(requests[0], requests[1]);
-            assert_eq!(requests[0]["access_token"], "oba_reusable");
-            assert_eq!(requests[0]["endpoint_id"], "subscriptions.register");
-            assert_eq!(
-                requests[0]["request"],
-                json!({"method":"POST","path":"/v1/subscriptions"})
-            );
-            assert!(requests[0]["request"].get("body_sha256").is_none());
-            headers.insert("authorization", "Bearer obp_retired".parse().unwrap());
-            assert_eq!(
-                f.app
-                    .auth
-                    .proof(&headers, "/v1/subscriptions", &raw)
-                    .await
-                    .err()
-                    .unwrap()
-                    .status,
-                401
-            );
-            assert_eq!(f.iam.proof_requests.lock().unwrap().len(), 2);
-            headers.insert("authorization", "Bearer oba_reusable".parse().unwrap());
-            f.iam.status.store(403, Ordering::SeqCst);
-            assert!(matches!(
-                f.app
-                    .auth
-                    .proof(&headers, "/v1/subscriptions", &raw)
-                    .await
-                    .err()
-                    .unwrap()
-                    .status,
-                401 | 403
-            ));
-        }
-    }
 }

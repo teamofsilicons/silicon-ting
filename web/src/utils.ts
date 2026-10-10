@@ -1,12 +1,12 @@
 export const enc = encodeURIComponent;
-export const orgPath = (org: string, path: string) => `/v1/orgs/${enc(org)}/${path}`;
+export const apiPath = (path: string) => `/v1/${path}`;
 export function query(values: Record<string, string | number | boolean | undefined | null>) {
   const result = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== '') result.set(key, String(value));
   return result.size ? `?${result}` : '';
 }
 export function typeError(app: string, type: string, description: string): string | undefined {
-  if (!/^[a-z][a-z0-9_-]{0,79}$/.test(app)) return 'Use the bare IAM application ID. Refresh application metadata after identifier migration.';
+  if (!/^[a-z][a-z0-9_-]{0,79}$/.test(app)) return 'Use the Silicon Apps application ID.';
   const suffix = type.slice(app.length + 1);
   if (!type.startsWith(`${app}.`) || !/^[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*$/.test(suffix)) return 'Use app_id.service.event, with lowercase service and event names.';
   if (new TextEncoder().encode(type).length > 255) return 'Type names must be at most 255 UTF-8 bytes.';

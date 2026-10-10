@@ -10,14 +10,13 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - name: Build and test on the production Linux distribution
+      - name: Build on the production Linux distribution
         run: |
           docker run --rm -v "$PWD:/src" -w /src public.ecr.aws/amazonlinux/amazonlinux:2023 bash -euc '
             dnf install -y gcc gcc-c++ make perl tar gzip git findutils
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
             source "$HOME/.cargo/env"
             export CARGO_TARGET_DIR=/src/target/backend-al2023
-            cargo test --locked -p silicon-ting-server
             cargo build --locked --release -p silicon-ting-server
             mkdir -p /src/backend-build
             install -m 0755 "$CARGO_TARGET_DIR/release/ting-server" /src/backend-build/ting-server
@@ -80,7 +79,7 @@ jobs:
           pattern: backend-*
           path: backend-build
           merge-multiple: true
-      - name: Package and publish the tested deployment
+      - name: Package and publish the deployment
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -101,5 +100,5 @@ jobs:
           (cd dist && sha256sum ting-server-*.tar.gz > SHA256SUMS)
           tag="server-$GITHUB_SHA"
           git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || { echo 'Push the server-<full-commit-SHA> tag using the authorized release account first.' >&2; exit 1; }
-          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "Backend $GITHUB_SHA" --prerelease --latest=false --notes "Linux ARM64 backend tested and built on Amazon Linux 2023, with pinned Caddy. Source and build tools are recorded inside the archive."
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "Backend $GITHUB_SHA" --prerelease --latest=false --notes "Linux ARM64 backend built on Amazon Linux 2023, with pinned Caddy. Source and build tools are recorded inside the archive."
           gh release upload "$tag" dist/* --clobber

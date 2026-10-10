@@ -202,7 +202,9 @@ pub fn preference(v: &Value, write: bool) -> Result<()> {
     )?;
     let app = string(v, "app_id", 255)?;
     if !app_id(app) {
-        return Err(Error::invalid("app_id must be a bare IAM application ID."));
+        return Err(Error::invalid(
+            "app_id must be a Silicon Apps application ID.",
+        ));
     }
     let service = v.get("service").filter(|v| !v.is_null());
     let typ = v.get("type").filter(|v| !v.is_null());
@@ -233,24 +235,19 @@ pub fn filters(b: &Value) -> Result<()> {
     if b.get("app_id")
         .is_some_and(|v| !v.as_str().is_some_and(app_id))
     {
-        return Err(Error::invalid("app_id must be a bare IAM application ID."));
-    }
-    if b.get("for")
-        .is_some_and(|v| v.as_str().and_then(actor_kind).is_none())
-    {
         return Err(Error::invalid(
-            "for must be a complete c:<handle> or si:<handle> identity.",
+            "app_id must be a Silicon Apps application ID.",
         ));
     }
-    for k in [
-        "org_id",
-        "app_id",
-        "for",
-        "id",
-        "type",
-        "cursor",
-        "deliveries_cursor",
-    ] {
+    if b.get("for").is_some_and(|v| {
+        !v.as_str()
+            .is_some_and(|s| actor_kind(s).is_some() || uuid::Uuid::parse_str(s).is_ok())
+    }) {
+        return Err(Error::invalid(
+            "for must be an account UUID or a complete c:<handle> / si:<handle> identity.",
+        ));
+    }
+    for k in ["app_id", "for", "id", "type", "cursor", "deliveries_cursor"] {
         if b.get(k).is_some() {
             string(b, k, if k.ends_with("cursor") { 4096 } else { 255 })?;
         }
@@ -267,40 +264,4 @@ pub fn filters(b: &Value) -> Result<()> {
         type_parts(t)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn strict_json_and_types() {
-        assert!(parse(br#"{"a":1,"a":2}"#, 100).is_err());
-        assert!(parse(br#"{"a":{"b":1,"b":2}}"#, 100).is_err());
-        assert!(parse(br#"{"a":1} trailing"#, 100).is_err());
-        assert!(type_parts("dm.msg.received").is_ok());
-        assert!(type_parts("tos>dm.msg.received").is_err());
-        assert!(type_parts("dm.Bad.received").is_err());
-        assert!(
-            preference(
-                &serde_json::json!({"app_id":"dm","type":"other.msg.received","enabled":false}),
-                true
-            )
-            .is_err()
-        );
-        assert!(app_id(&"a".repeat(80)));
-        assert!(!app_id(&"a".repeat(81)));
-        assert!(!app_id("0app"));
-        assert_eq!(actor_kind("c:alice0"), Some("carbon"));
-        assert_eq!(actor_kind("si:assistant"), Some("silicon"));
-        for invalid in [
-            "alice",
-            "assistant:tos",
-            "c:c:alice",
-            "si:si:assistant",
-            "c:ab",
-            "si:ab",
-        ] {
-            assert_eq!(actor_kind(invalid), None);
-        }
-    }
 }

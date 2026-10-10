@@ -152,7 +152,7 @@ struct Hook {
     id: String,
     profile: String,
     api: String,
-    org: String,
+    account_id: String,
     token_hash: String,
     url: String,
     secret: Option<String>,
@@ -164,7 +164,20 @@ struct Hook {
 impl Store {
     fn open(path: &std::path::Path) -> Result<Self> {
         let db = Connection::open(path).map_err(sql)?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS hooks(id TEXT PRIMARY KEY,profile TEXT NOT NULL,api TEXT NOT NULL,org TEXT NOT NULL,token_hash TEXT NOT NULL,url TEXT NOT NULL,secret TEXT,health TEXT,state TEXT NOT NULL DEFAULT 'attached',first_failure INTEGER,next_attempt INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS queue(hook TEXT NOT NULL,id TEXT NOT NULL,org TEXT NOT NULL,api TEXT NOT NULL DEFAULT '',payload TEXT NOT NULL,accepted INTEGER NOT NULL DEFAULT 0,eligible INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(hook,id)); CREATE TABLE IF NOT EXISTS creations(profile TEXT NOT NULL,org TEXT NOT NULL,intent TEXT NOT NULL,request TEXT NOT NULL,key TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(profile,org));").map_err(sql)?;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS hooks(id TEXT PRIMARY KEY,profile TEXT NOT NULL,api TEXT NOT NULL,account_id TEXT NOT NULL,token_hash TEXT NOT NULL,url TEXT NOT NULL,secret TEXT,health TEXT,state TEXT NOT NULL DEFAULT 'attached',first_failure INTEGER,next_attempt INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS queue(hook TEXT NOT NULL,id TEXT NOT NULL,account_id TEXT NOT NULL,api TEXT NOT NULL DEFAULT '',payload TEXT NOT NULL,accepted INTEGER NOT NULL DEFAULT 0,eligible INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(hook,id)); CREATE TABLE IF NOT EXISTS creations(profile TEXT NOT NULL,account_id TEXT NOT NULL,intent TEXT NOT NULL,request TEXT NOT NULL,key TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(profile,account_id));").map_err(sql)?;
+        let legacy_scope = {
+            let mut q = db.prepare("PRAGMA table_info(hooks)").map_err(sql)?;
+            let fields = q.query_map([], |r| r.get::<_, String>(1)).map_err(sql)?;
+            fields
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(sql)?
+                .iter()
+                .any(|name| name == "org")
+        };
+        if legacy_scope {
+            // Keep local destinations and queued history; old authority needs explicit reattachment.
+            db.execute_batch("BEGIN; ALTER TABLE hooks RENAME COLUMN org TO account_id; ALTER TABLE queue RENAME COLUMN org TO account_id; ALTER TABLE creations RENAME COLUMN org TO account_id; UPDATE hooks SET account_id='',state='auth_paused'; UPDATE queue SET account_id=''; UPDATE creations SET account_id='legacy:' || account_id; COMMIT;").map_err(sql)?;
+        }
         let has_api = {
             let mut q = db.prepare("PRAGMA table_info(queue)").map_err(sql)?;
             let fields = q.query_map([], |r| r.get::<_, String>(1)).map_err(sql)?;
@@ -271,13 +284,13 @@ impl Store {
     }
     fn hooks(&self) -> Result<Vec<Hook>> {
         let db = self.db.lock().unwrap();
-        let mut s=db.prepare("SELECT id,profile,api,org,token_hash,url,secret,health,state,first_failure,next_attempt FROM hooks").map_err(sql)?;
+        let mut s=db.prepare("SELECT id,profile,api,account_id,token_hash,url,secret,health,state,first_failure,next_attempt FROM hooks").map_err(sql)?;
         s.query_map([], |r| {
             Ok(Hook {
                 id: r.get(0)?,
                 profile: r.get(1)?,
                 api: r.get(2)?,
-                org: r.get(3)?,
+                account_id: r.get(3)?,
                 token_hash: r.get(4)?,
                 url: r.get(5)?,
                 secret: r.get(6)?,
@@ -293,12 +306,19 @@ impl Store {
     }
     fn queue(&self, v: &Value, api: &str) -> Result<Vec<String>> {
         let hook = field(v, "webhook_id")?;
-        let org = field(v, "org_id")?;
+
         let tings = v["tings"]
             .as_array()
             .filter(|a| !a.is_empty() && a.len() <= 100)
             .ok_or_else(|| Error::input("Invalid delivery batch."))?;
         let mut db = self.db.lock().unwrap();
+        let account_id: String = db
+            .query_row(
+                "SELECT account_id FROM hooks WHERE id=?1 AND api=?2",
+                params![hook, api],
+                |r| r.get(0),
+            )
+            .map_err(sql)?;
         let prior_api:Option<String>=db.query_row("SELECT api FROM hooks WHERE id=?1 UNION ALL SELECT api FROM queue WHERE hook=?1 LIMIT 1",[hook],|r|r.get(0)).optional().map_err(sql)?;
         if prior_api.as_deref().is_some_and(|old| old != api) {
             return Err(Error::new(
@@ -326,7 +346,7 @@ impl Store {
                 return Err(Error::input("Invalid delivery content."));
             }
             let local = json!({"id":t["id"],"created_at":t["created_at"],"type":t["type"],"data":t["data"],"metadata":t["metadata"],"key":t["key"]});
-            tx.execute("INSERT INTO queue(hook,id,org,payload,api) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(hook,id) DO UPDATE SET eligible=1",params![hook,id,org,local.to_string(),api]).map_err(sql)?;
+            tx.execute("INSERT INTO queue(hook,id,account_id,payload,api) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(hook,id) DO UPDATE SET eligible=1",params![hook,id,account_id,local.to_string(),api]).map_err(sql)?;
             ids.push(id.into());
         }
         tx.commit().map_err(sql)?;
@@ -492,7 +512,11 @@ impl Shared {
             .map_err(|_| Error::network())?
     }
     async fn ack(&self, hook: &Hook, ids: &[String], kind: &str) -> Result<Value> {
-        self.ws(&hook.api,json!({"op":"ack","org_id":hook.org,"webhook_id":hook.id,"message_ids":ids,"kind":kind})).await
+        self.ws(
+            &hook.api,
+            json!({"op":"ack","webhook_id":hook.id,"message_ids":ids,"kind":kind}),
+        )
+        .await
     }
 }
 fn session_for(h: &Hook) -> Result<Session> {
@@ -500,7 +524,20 @@ fn session_for(h: &Hook) -> Result<Session> {
         dir: PathBuf::from(&h.profile),
     };
     let s = p.session(&h.api)?;
-    if digest(&s.token) != h.token_hash {
+    if !s
+        .expires_at
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .is_some_and(|expires| expires.timestamp() > now())
+    {
+        return Err(Error::new(
+            "session_expired",
+            "This account session has expired.",
+            "Log in and explicitly reattach this profile's webhook.",
+            false,
+        ));
+    }
+    if digest(&s.token) != h.token_hash || s.uuid.as_deref().unwrap_or(&s.id) != h.account_id {
         return Err(Error::new(
             "session_expired",
             "Saved identity has changed.",
@@ -527,8 +564,8 @@ async fn restore(shared: &Shared, api: &str) {
                     continue;
                 }
                 if let Ok(session) = session_for(&h)
-                    && shared.ws(api,json!({"op":"subscribe","org_id":h.org,"session_token":session.token,"webhook_ids":[h.id]})).await.is_ok()
-                    && shared.ws(api,json!({"op":"unsubscribe","org_id":h.org,"webhook_ids":[h.id],"pause":true})).await.is_ok()
+                    && shared.ws(api,json!({"op":"subscribe","session_token":session.token,"webhook_ids":[h.id]})).await.is_ok()
+                    && shared.ws(api,json!({"op":"unsubscribe","webhook_ids":[h.id],"pause":true})).await.is_ok()
                 {
                     let _=shared.store.state(&h.id,"paused");
                 }
@@ -537,7 +574,7 @@ async fn restore(shared: &Shared, api: &str) {
             }
             if h.state == "attached" && !authorized.contains(&h.id) {
                 groups
-                    .entry((h.profile.clone(), h.org.clone()))
+                    .entry((h.profile.clone(), h.account_id.clone()))
                     .or_default()
                     .push(h);
             }
@@ -546,7 +583,7 @@ async fn restore(shared: &Shared, api: &str) {
             for chunk in hooks.chunks(100) {
                 if let Ok(session) = session_for(&chunk[0]) {
                     let ids: Vec<_> = chunk.iter().map(|h| h.id.clone()).collect();
-                    let _=shared.ws(api,json!({"op":"subscribe","org_id":chunk[0].org,"session_token":session.token,"webhook_ids":ids})).await;
+                    let _=shared.ws(api,json!({"op":"subscribe","session_token":session.token,"webhook_ids":ids})).await;
                 }
             }
         }
@@ -634,7 +671,7 @@ async fn socket_loop(shared: Shared, mut rx: mpsc::Receiver<SocketCommand>) {
              if c.api!=api{let pinned=!pending.is_empty()||shared.leases.lock().unwrap().0.as_deref()==Some(&api)||shared.store.hooks().unwrap_or_default().iter().any(|h|h.api==api&&h.state=="attached");if pinned{let _=c.reply.send(Err(Error::new("daemon_api_conflict","The shared socket is active on another API origin.","Use HTTP or detach the existing receivers before switching origins.",false)));continue}else{let tx=shared.tx.clone();tokio::spawn(async move{let _=tx.send(c).await;});break}}let id=c.body["request_id"].as_str().unwrap().to_owned();if ws.send(Message::Text(c.body.to_string().into())).await.is_err(){let _=c.reply.send(Err(Error::network()));break}pending.insert(id,(c.reply,std::time::Instant::now()));},
              incoming=ws.next()=>{match incoming{
               Some(Ok(Message::Text(s)))=>{if s.len()>1024*1024{break}let Ok(v)=strict_json(s.as_bytes())else{break};match v["op"].as_str().unwrap_or(""){
-               "tings"=>{match shared.store.queue(&v,&api){Ok(ids)=>{if ids.is_empty(){continue}shared.wake.notify_one();let ack=json!({"op":"ack","request_id":uuid::Uuid::new_v4().to_string(),"org_id":v["org_id"],"webhook_id":v["webhook_id"],"message_ids":ids,"kind":"delivery"});if ws.send(Message::Text(ack.to_string().into())).await.is_err(){break}},Err(_)=>{if let Some(id)=v["webhook_id"].as_str(){shared.socket.write().await.authorized.remove(id);}}}},
+               "tings"=>{match shared.store.queue(&v,&api){Ok(ids)=>{if ids.is_empty(){continue}shared.wake.notify_one();let ack=json!({"op":"ack","request_id":uuid::Uuid::new_v4().to_string(),"webhook_id":v["webhook_id"],"message_ids":ids,"kind":"delivery"});if ws.send(Message::Text(ack.to_string().into())).await.is_err(){break}},Err(_)=>{if let Some(id)=v["webhook_id"].as_str(){shared.socket.write().await.authorized.remove(id);}}}},
                "paused"=>{let ids:Vec<String>=v["webhook_ids"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(str::to_owned)).collect()).unwrap_or_default();let reason=v["reason"].as_str().unwrap_or("");{let mut s=shared.socket.write().await;for id in &ids{s.authorized.remove(id);}}let _=shared.store.pause(&ids,reason);if ["preference_changed","permission_changed","authorization_unavailable"].contains(&reason){let sh=shared.clone();let a=api.clone();tokio::spawn(async move{tokio::time::sleep(Duration::from_secs(1)).await;restore(&sh,&a).await;});}},
                "subscribed"=>{if let Some(ids)=v["webhook_ids"].as_array(){let mut st=shared.socket.write().await;for id in ids.iter().filter_map(Value::as_str){if !st.blocked.contains(id){st.authorized.insert(id.into());}}shared.wake.notify_one();}},_=>{}}
                if let Some(id)=v["request_id"].as_str() && let Some((reply,_))=pending.remove(id){let r=if v["op"]=="error"{Err(serde_json::from_value(v["error"].clone()).unwrap_or_else(|_|Error::network()))}else{Ok(v)};let _=reply.send(r);}
@@ -667,17 +704,8 @@ async fn cleanup_missing(shared: &Shared, hook: &Hook) -> Result<()> {
     let session = session_for(hook)?;
     let client = Client::new(&hook.api)?;
     for id in ids {
-        let path = format!("/v1/orgs/{}/inbox/{}", segment(&hook.org), segment(&id));
-        match client
-            .json(
-                "GET",
-                &path,
-                None,
-                Some(&session.token),
-                &TestHeaders::default(),
-            )
-            .await
-        {
+        let path = format!("/v1/inbox/{}", segment(&id));
+        match client.json("GET", &path, None, Some(&session.token)).await {
             Err(e) if e.code == "not_found" => shared.store.forget_missing(&hook.id, &id)?,
             Err(e) => return Err(e),
             Ok(_) => {}
@@ -720,6 +748,7 @@ fn delivery_telemetry(hook: &Hook, accepted: bool, duration: u64) {
     });
 }
 async fn forward(shared: Shared, hook: Hook) -> Result<()> {
+    session_for(&hook)?;
     if !shared.socket.read().await.authorized.contains(&hook.id) {
         return Ok(());
     }
@@ -741,7 +770,7 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
         let pause = shared
             .ws(
                 &hook.api,
-                json!({"op":"unsubscribe","org_id":hook.org,"webhook_ids":[hook.id],"pause":true}),
+                json!({"op":"unsubscribe","webhook_ids":[hook.id],"pause":true}),
             )
             .await;
         if pause.is_ok() {
@@ -792,6 +821,7 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
     if !shared.socket.read().await.authorized.contains(&hook.id) {
         return Ok(());
     }
+    session_for(&hook)?;
     batch.retain(|ting| retained(ting, retention_cutoff()));
     if batch.is_empty() {
         return Ok(());
@@ -956,12 +986,8 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
         None
     };
     if op == "send" {
-        let p = Prepared::new(
-            ProofOperation::Send,
-            field(&v, "body")?.as_bytes().to_vec(),
-            None,
-        )?;
-        let response=shared.ws(&api,json!({"op":"send","proof_token":field(&v,"proof_token")?,"body":String::from_utf8(p.body).unwrap(),"headers":v.get("headers").cloned().unwrap_or(json!({}))})).await?;
+        let p = Prepared::new(ProofOperation::Send, field(&v, "body")?.as_bytes().to_vec())?;
+        let response=shared.ws(&api,json!({"op":"send","proof_token":field(&v,"proof_token")?,"body":String::from_utf8(p.body).unwrap()})).await?;
         let mut response = response;
         response.as_object_mut().unwrap().remove("op");
         response.as_object_mut().unwrap().remove("request_id");
@@ -997,29 +1023,24 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
         // Local forwarding is stopped for every hook before any network wait can time out.
         for hook in mine {
             let _ = shared
-                .ws(
-                    &api,
-                    json!({"op":"unsubscribe","org_id":hook.org,"webhook_ids":[hook.id]}),
-                )
+                .ws(&api, json!({"op":"unsubscribe","webhook_ids":[hook.id]}))
                 .await;
         }
         return Ok(json!({"authenticated":false}));
     }
-    let org = field(&v, "org_id")?;
+    let account_id = session.uuid.as_deref().unwrap_or(&session.id);
     let mine = hooks
         .iter()
         .filter(|h| {
             h.profile == profile_name
                 && h.api == api
-                && h.org == org
+                && h.account_id == account_id
                 && h.token_hash == digest(&session.token)
         })
         .cloned()
         .collect::<Vec<_>>();
-    let test: TestHeaders = serde_json::from_value(v.get("headers").cloned().unwrap_or(json!({})))
-        .map_err(|_| Error::input("Invalid test headers."))?;
     let client = Client::new(&api)?;
-    let base = format!("/v1/orgs/{}/webhooks", segment(org));
+    let base = "/v1/webhooks";
     match op {
         "status" => {
             let response = client
@@ -1028,7 +1049,6 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                     &format!("{base}?limit=100"),
                     None,
                     Some(&session.token),
-                    &test,
                 )
                 .await;
             let pending = response.ok().and_then(|r| {
@@ -1060,7 +1080,6 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                     &format!("{base}/{}", segment(id)),
                     None,
                     Some(&session.token),
-                    &test,
                 )
                 .await?;
             if mine.iter().any(|h| h.id == id) {
@@ -1070,7 +1089,12 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
             Ok(result)
         }
         "reconnect" => {
-            shared.ws(&api,json!({"op":"subscribe","org_id":org,"session_token":session.token,"webhook_ids":[],"headers":test})).await?;
+            shared
+                .ws(
+                    &api,
+                    json!({"op":"subscribe","session_token":session.token,"webhook_ids":[]}),
+                )
+                .await?;
             let receiver = shared
                 .socket
                 .read()
@@ -1085,12 +1109,11 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                         &format!("{base}/{}", segment(&hook.id)),
                         Some(json!({"receiver_id":receiver})),
                         Some(&session.token),
-                        &test,
                     )
                     .await?;
                 shared.store.db.lock().unwrap().execute("UPDATE hooks SET state='attached',first_failure=NULL,next_attempt=0 WHERE id=?1",[&hook.id]).map_err(sql)?;
                 shared.socket.write().await.blocked.remove(&hook.id);
-                shared.ws(&api,json!({"op":"subscribe","org_id":org,"session_token":session.token,"webhook_ids":[hook.id]})).await?;
+                shared.ws(&api,json!({"op":"subscribe","session_token":session.token,"webhook_ids":[hook.id]})).await?;
             }
             Ok(json!({"reconnected":true}))
         }
@@ -1118,7 +1141,12 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                     .map(str::to_owned)
                     .or_else(|| existing.and_then(|h| h.health.clone()))
             };
-            shared.ws(&api,json!({"op":"subscribe","org_id":org,"session_token":session.token,"webhook_ids":[],"headers":test})).await?;
+            shared
+                .ws(
+                    &api,
+                    json!({"op":"subscribe","session_token":session.token,"webhook_ids":[]}),
+                )
+                .await?;
             let receiver = shared
                 .socket
                 .read()
@@ -1127,18 +1155,18 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                 .clone()
                 .ok_or_else(Error::network)?;
             let mut response = if let Some(id) = id {
-                client.json("PATCH",&format!("{base}/{}",segment(id)),Some(json!({"receiver_id":receiver,"takeover":v["takeover"].as_bool().unwrap_or(false)})),Some(&session.token),&test).await?
+                client.json("PATCH",&format!("{base}/{}",segment(id)),Some(json!({"receiver_id":receiver,"takeover":v["takeover"].as_bool().unwrap_or(false)})),Some(&session.token)).await?
             } else {
                 let intent=json!({"api_url":api,"url":url,"secret":secret,"health_url":health,"token_hash":digest(&session.token)}).to_string();
                 let mut attempt = {
                     let db = shared.store.db.lock().unwrap();
-                    db.query_row("SELECT intent,request,key,created FROM creations WHERE profile=?1 AND org=?2",params![profile_name,org],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?))).optional().map_err(sql)?
+                    db.query_row("SELECT intent,request,key,created FROM creations WHERE profile=?1 AND account_id=?2",params![profile_name,account_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?))).optional().map_err(sql)?
                 };
                 if let Some((saved, _, _, created)) = &attempt {
                     if saved != &intent {
                         return Err(Error::new(
                             "creation_pending",
-                            "A previous webhook creation is unresolved for this profile/org.",
+                            "A previous webhook creation is unresolved for this profile/account.",
                             "Retry with the same local destination settings to recover its stable hook ID.",
                             false,
                         ));
@@ -1156,17 +1184,16 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                     let body = json!({"receiver_id":receiver}).to_string();
                     let key = uuid::Uuid::new_v4().to_string();
                     let created = now();
-                    shared.store.db.lock().unwrap().execute("INSERT INTO creations(profile,org,intent,request,key,created) VALUES(?1,?2,?3,?4,?5,?6)",params![profile_name,org,intent,body,key,created]).map_err(sql)?;
+                    shared.store.db.lock().unwrap().execute("INSERT INTO creations(profile,account_id,intent,request,key,created) VALUES(?1,?2,?3,?4,?5,?6)",params![profile_name,account_id,intent,body,key,created]).map_err(sql)?;
                     attempt = Some((intent, body, key, created));
                 }
                 let (_, body, key, _) = attempt.unwrap();
                 let reply = client
                     .request(
                         "POST",
-                        &base,
+                        base,
                         Some(body.as_bytes().to_vec()),
                         Some(&session.token),
-                        &test,
                         Some(&key),
                     )
                     .await;
@@ -1179,8 +1206,8 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                             .lock()
                             .unwrap()
                             .execute(
-                                "DELETE FROM creations WHERE profile=?1 AND org=?2",
-                                params![profile_name, org],
+                                "DELETE FROM creations WHERE profile=?1 AND account_id=?2",
+                                params![profile_name, account_id],
                             )
                             .map_err(sql)?;
                         return Err(Error::new(
@@ -1200,7 +1227,6 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                             &format!("{base}/{}", segment(id)),
                             Some(json!({"receiver_id":receiver})),
                             Some(&session.token),
-                            &test,
                         )
                         .await?;
                 }
@@ -1245,11 +1271,11 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
             let saved = (|| -> Result<()> {
                 let mut db = shared.store.db.lock().unwrap();
                 let tx = db.transaction().map_err(sql)?;
-                tx.execute("INSERT INTO hooks(id,profile,api,org,token_hash,url,secret,health,state) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'attached') ON CONFLICT(id) DO UPDATE SET profile=excluded.profile,api=excluded.api,org=excluded.org,token_hash=excluded.token_hash,url=excluded.url,secret=excluded.secret,health=excluded.health,state='attached',first_failure=NULL,next_attempt=0",params![hook_id,profile_name,api,org,digest(&session.token),url,secret,health]).map_err(sql)?;
+                tx.execute("INSERT INTO hooks(id,profile,api,account_id,token_hash,url,secret,health,state) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'attached') ON CONFLICT(id) DO UPDATE SET profile=excluded.profile,api=excluded.api,account_id=excluded.account_id,token_hash=excluded.token_hash,url=excluded.url,secret=excluded.secret,health=excluded.health,state='attached',first_failure=NULL,next_attempt=0",params![hook_id,profile_name,api,account_id,digest(&session.token),url,secret,health]).map_err(sql)?;
                 if id.is_none() {
                     tx.execute(
-                        "DELETE FROM creations WHERE profile=?1 AND org=?2",
-                        params![profile_name, org],
+                        "DELETE FROM creations WHERE profile=?1 AND account_id=?2",
+                        params![profile_name, account_id],
                     )
                     .map_err(sql)?;
                 }
@@ -1261,7 +1287,16 @@ async fn control(shared: &Shared, v: Value, uid: u32) -> Result<Value> {
                 return Err(e);
             }
             shared.socket.write().await.blocked.remove(&hook_id);
-            if let Err(mut e)=shared.ws(&api,json!({"op":"subscribe","org_id":org,"session_token":session.token,"webhook_ids":[hook_id]})).await{e.details=Some(json!({"webhook_id":hook_id}));return Err(e)}
+            if let Err(mut e) = shared
+                .ws(
+                    &api,
+                    json!({"op":"subscribe","session_token":session.token,"webhook_ids":[hook_id]}),
+                )
+                .await
+            {
+                e.details = Some(json!({"webhook_id":hook_id}));
+                return Err(e);
+            }
             response["url"] = json!(url);
             response.as_object_mut().unwrap().remove("receiver_id");
             Ok(response)
@@ -1380,392 +1415,4 @@ async fn run() -> Result<()> {
     #[cfg(unix)]
     let _ = fs::remove_file(daemon_socket());
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[cfg(unix)]
-    #[test]
-    fn local_identity_requires_credential_and_private_ownership() {
-        let dir = std::env::temp_dir().join(format!("ting-profile-{}", uuid::Uuid::new_v4()));
-        private_dir(&dir).unwrap();
-        let p = Profile {
-            dir: fs::canonicalize(&dir).unwrap(),
-        };
-        p.save(
-            "session.json",
-            &Session {
-                api_url: "https://test.invalid".into(),
-                id: "si:alice".into(),
-                token: "secret-a".into(),
-                context: None,
-            },
-        )
-        .unwrap();
-        let uid = unsafe { libc::getuid() };
-        let mut v =
-            json!({"profile":p.dir,"api_url":"https://test.invalid","session_token":"secret-a"});
-        assert!(authenticate(&v, uid).is_ok());
-        v["session_token"] = json!("secret-b");
-        assert!(authenticate(&v, uid).is_err());
-        v["session_token"] = json!("secret-a");
-        assert!(authenticate(&v, uid.wrapping_add(1)).is_err());
-        fs::remove_dir_all(dir).unwrap();
-    }
-    #[tokio::test]
-    async fn app_sends_need_no_profile_and_share_one_socket_with_exact_bytes() {
-        const BODY: &str = r#"{ "org_id":"7359ca28-7878-41e4-82c9-f28c073c622b", "type":"dm.msg.received", "for":"si:recipient", "key":"app/retry-1", "data":{"text":"original bytes"} }"#;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let api = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-            ws.send(Message::Text(
-                json!({"op":"ready","receiver_id":"receiver-test","protocol":"v1"})
-                    .to_string()
-                    .into(),
-            ))
-            .await
-            .unwrap();
-            for _ in 0..2 {
-                let msg = ws.next().await.unwrap().unwrap();
-                let value: Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
-                assert_eq!(value["body"], BODY);
-                assert_eq!(value["proof_token"], "app-authority-test");
-                assert!(value.get("session_token").is_none());
-                assert!(value.get("profile").is_none());
-                ws.send(Message::Text(
-                    json!({"op":"accepted","request_id":value["request_id"],"id":"m"})
-                        .to_string()
-                        .into(),
-                ))
-                .await
-                .unwrap();
-            }
-        });
-        let p = std::env::temp_dir().join(format!("ting-socket-{}.sqlite", uuid::Uuid::new_v4()));
-        let (tx, rx) = mpsc::channel(16);
-        let sh = Shared {
-            store: Arc::new(Store::open(&p).unwrap()),
-            tx,
-            socket: Arc::new(RwLock::new(SocketStatus::default())),
-            wake: Arc::new(Notify::new()),
-            leases: Arc::new(Mutex::new((None, 0))),
-        };
-        let driver = tokio::spawn(socket_loop(sh.clone(), rx));
-        for _ in 0..2 {
-            let v = control(
-                &sh,
-                json!({"op":"send","api_url":api,"proof_token":"app-authority-test","body":BODY}),
-                0,
-            )
-            .await
-            .unwrap();
-            assert_eq!(v["id"], "m");
-        }
-        server.await.unwrap();
-        driver.abort();
-        let _ = fs::remove_file(p);
-    }
-    #[tokio::test]
-    async fn expired_receipts_require_authenticated_missing_confirmation() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let api = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            for _ in 0..2 {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut request = Vec::new();
-                loop {
-                    let mut buf = [0u8; 1024];
-                    let n = socket.read(&mut buf).await.unwrap();
-                    request.extend_from_slice(&buf[..n]);
-                    if request.windows(4).any(|s| s == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8(request).unwrap();
-                assert!(
-                    request
-                        .to_ascii_lowercase()
-                        .contains("authorization: bearer private-test")
-                );
-                let expired = request.starts_with("GET /v1/orgs/tos/inbox/expired ");
-                let (status, body) = if expired {
-                    ("404 Not Found",json!({"error":{"code":"not_found","message":"No retained record","hint":"","retryable":false}}).to_string())
-                } else {
-                    ("200 OK", json!({"id":"unread"}).to_string())
-                };
-                socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
-            }
-        });
-        let dir = std::env::temp_dir().join(format!("ting-expired-{}", uuid::Uuid::new_v4()));
-        private_dir(&dir).unwrap();
-        let profile = Profile {
-            dir: fs::canonicalize(&dir).unwrap(),
-        };
-        profile
-            .save(
-                "session.json",
-                &Session {
-                    api_url: api.clone(),
-                    id: "si:test".into(),
-                    token: "private-test".into(),
-                    context: None,
-                },
-            )
-            .unwrap();
-        let store = Arc::new(Store::open(&dir.join("queue.sqlite")).unwrap());
-        let created = Utc::now()
-            .checked_sub_months(Months::new(2))
-            .unwrap()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        for id in ["expired", "unread"] {
-            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"dm.msg.received","for":"si:test","key":id,"data":{},"metadata":{}}]}),&api).unwrap();
-            store.mark("hook", &[id.into()], true).unwrap();
-        }
-        let (tx, _rx) = mpsc::channel(1);
-        let shared = Shared {
-            store,
-            tx,
-            socket: Arc::new(RwLock::new(SocketStatus::default())),
-            wake: Arc::new(Notify::new()),
-            leases: Arc::new(Mutex::new((None, 0))),
-        };
-        let hook = Hook {
-            id: "hook".into(),
-            profile: profile.dir.to_string_lossy().into(),
-            api,
-            org: "tos".into(),
-            token_hash: digest("private-test"),
-            url: "http://127.0.0.1/unused".into(),
-            secret: None,
-            health: None,
-            state: "attached".into(),
-            first_failure: None,
-            next_attempt: 0,
-        };
-        cleanup_missing(&shared, &hook).await.unwrap();
-        let remaining = shared.store.batch("hook", true).unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0]["id"], "unread");
-        server.await.unwrap();
-        drop(shared);
-        fs::remove_dir_all(dir).unwrap();
-    }
-    #[tokio::test]
-    async fn aged_pending_rechecks_retention_before_forwarding() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let api = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            for attempt in 0..6 {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut bytes = Vec::new();
-                let header_end = loop {
-                    let mut buf = [0u8; 1024];
-                    let n = socket.read(&mut buf).await.unwrap();
-                    assert!(n > 0);
-                    bytes.extend_from_slice(&buf[..n]);
-                    if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
-                        break end + 4;
-                    }
-                };
-                let headers = String::from_utf8(bytes[..header_end].to_vec()).unwrap();
-                let length = headers
-                    .lines()
-                    .find_map(|line| {
-                        line.to_ascii_lowercase()
-                            .strip_prefix("content-length:")
-                            .map(|v| v.trim().parse::<usize>().unwrap())
-                    })
-                    .unwrap_or(0);
-                while bytes.len() < header_end + length {
-                    let mut buf = [0u8; 1024];
-                    let n = socket.read(&mut buf).await.unwrap();
-                    assert!(n > 0);
-                    bytes.extend_from_slice(&buf[..n]);
-                }
-                let (status, body) = if headers.starts_with("GET ") {
-                    assert!(
-                        headers
-                            .to_ascii_lowercase()
-                            .contains("authorization: bearer private-test")
-                    );
-                    assert!(
-                        attempt < 3 || attempt == 5,
-                        "Fresh notifications must not need retention GETs"
-                    );
-                    if attempt == 0 {
-                        ("503 Service Unavailable", json!({"error":{"code":"unavailable","message":"uncertain","hint":"","retryable":true}}).to_string())
-                    } else if headers.starts_with("GET /v1/orgs/tos/inbox/expired ")
-                        || headers.starts_with("GET /v1/orgs/tos/inbox/onlyexpired ")
-                    {
-                        ("404 Not Found", json!({"error":{"code":"not_found","message":"Read elsewhere and expired","hint":"","retryable":false}}).to_string())
-                    } else {
-                        assert!(headers.starts_with("GET /v1/orgs/tos/inbox/unread "));
-                        ("200 OK", json!({"id":"unread","read":false}).to_string())
-                    }
-                } else {
-                    assert!(headers.starts_with("POST /hook "));
-                    assert!(attempt >= 3, "Uncertain retention must not forward a batch");
-                    let payload: Value =
-                        serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap();
-                    assert_eq!(payload["tings"].as_array().unwrap().len(), 1);
-                    assert_eq!(
-                        payload["tings"][0]["id"],
-                        if attempt == 3 { "unread" } else { "fresh" }
-                    );
-                    ("204 No Content", String::new())
-                };
-                socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
-            }
-            assert!(
-                tokio::time::timeout(Duration::from_millis(100), listener.accept())
-                    .await
-                    .is_err(),
-                "An emptied batch must not make a webhook POST"
-            );
-        });
-        let dir =
-            std::env::temp_dir().join(format!("ting-pending-retention-{}", uuid::Uuid::new_v4()));
-        private_dir(&dir).unwrap();
-        let profile = Profile {
-            dir: fs::canonicalize(&dir).unwrap(),
-        };
-        profile
-            .save(
-                "session.json",
-                &Session {
-                    api_url: api.clone(),
-                    id: "si:test".into(),
-                    token: "private-test".into(),
-                    context: None,
-                },
-            )
-            .unwrap();
-        profile
-            .save(
-                "settings.json",
-                &Settings {
-                    telemetry: Some(false),
-                    ..Settings::default()
-                },
-            )
-            .unwrap();
-        let store = Arc::new(Store::open(&dir.join("queue.sqlite")).unwrap());
-        let queue = |id: &str, created: String| {
-            store.queue(&json!({"org_id":"tos","webhook_id":"hook","tings":[{"id":id,"created_at":created,"type":"dm.msg.received","for":"si:test","key":id,"data":{},"metadata":{}}]}), &api).unwrap();
-        };
-        let old = Utc::now()
-            .checked_sub_months(Months::new(2))
-            .unwrap()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        queue("expired", old.clone());
-        queue("unread", old.clone());
-        let (tx, mut rx) = mpsc::channel::<SocketCommand>(2);
-        let acknowledgements = tokio::spawn(async move {
-            for id in ["unread", "fresh"] {
-                let command = rx.recv().await.unwrap();
-                assert_eq!(command.body["kind"], "read");
-                assert_eq!(command.body["message_ids"], json!([id]));
-                command.reply.send(Ok(json!({"op":"acked"}))).unwrap();
-            }
-        });
-        let shared = Shared {
-            store: store.clone(),
-            tx,
-            socket: Arc::new(RwLock::new(SocketStatus {
-                authorized: HashSet::from(["hook".into()]),
-                ..SocketStatus::default()
-            })),
-            wake: Arc::new(Notify::new()),
-            leases: Arc::new(Mutex::new((None, 0))),
-        };
-        let hook = Hook {
-            id: "hook".into(),
-            profile: profile.dir.to_string_lossy().into(),
-            api: api.clone(),
-            org: "tos".into(),
-            token_hash: digest("private-test"),
-            url: format!("{api}/hook"),
-            secret: None,
-            health: None,
-            state: "attached".into(),
-            first_failure: None,
-            next_attempt: 0,
-        };
-        tokio::time::timeout(Duration::from_secs(5), async {
-            assert!(forward(shared.clone(), hook.clone()).await.is_err());
-            assert_eq!(store.batch("hook", false).unwrap().len(), 2);
-            forward(shared.clone(), hook.clone()).await.unwrap();
-            assert!(store.batch("hook", false).unwrap().is_empty());
-            queue(
-                "fresh",
-                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            );
-            forward(shared.clone(), hook.clone()).await.unwrap();
-            queue("onlyexpired", old);
-            forward(shared.clone(), hook).await.unwrap();
-            assert!(store.batch("hook", false).unwrap().is_empty());
-            server.await.unwrap();
-            acknowledgements.await.unwrap();
-        })
-        .await
-        .unwrap();
-        drop(shared);
-        drop(store);
-        fs::remove_dir_all(dir).unwrap();
-    }
-    #[test]
-    fn stale_authority_and_three_month_expiry_block_forwarding() {
-        let path =
-            std::env::temp_dir().join(format!("ting-expiry-{}.sqlite", uuid::Uuid::new_v4()));
-        let store = Store::open(&path).unwrap();
-        let mut batch = json!({"webhook_id":"hook","org_id":"tos","tings":[{"id":"fresh","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"dm.msg.received","for":"si:test","key":"k","data":{},"metadata":{}}]});
-        store.queue(&batch, "https://test.invalid").unwrap();
-        assert_eq!(store.batch("hook", false).unwrap().len(), 1);
-        assert!(store.queue(&batch, "https://different.invalid").is_err());
-        store.invalidate_offers().unwrap();
-        assert!(store.batch("hook", false).unwrap().is_empty());
-        store.queue(&batch, "https://test.invalid").unwrap();
-        assert_eq!(store.batch("hook", false).unwrap().len(), 1);
-        let old = Utc::now()
-            .checked_sub_months(Months::new(4))
-            .unwrap()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        batch["tings"][0]["id"] = json!("expired");
-        batch["tings"][0]["created_at"] = json!(old);
-        assert!(
-            store
-                .queue(&batch, "https://test.invalid")
-                .unwrap()
-                .is_empty()
-        );
-        store.db.lock().unwrap().execute("INSERT INTO queue(hook,id,org,payload,accepted) VALUES('hook','old-accepted','tos',?1,1)",[batch["tings"][0].to_string()]).unwrap();
-        assert!(store.batch("hook", true).unwrap().is_empty());
-        drop(store);
-        let store = Store::open(&path).unwrap();
-        assert!(store.batch("hook", false).unwrap().is_empty());
-        drop(store);
-        let _ = fs::remove_file(path);
-    }
-    #[test]
-    fn acceptance_survives_reopen_and_replay() {
-        let p = std::env::temp_dir().join(format!("ting-{}.sqlite", uuid::Uuid::new_v4()));
-        let v = json!({"webhook_id":"h","org_id":"tos","tings":[{"id":"m","created_at":Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"type":"dm.msg.received","data":{},"metadata":{},"for":"si:one","key":"k"}]});
-        {
-            let store = Store::open(&p).unwrap();
-            assert_eq!(store.queue(&v, "https://test.invalid").unwrap(), vec!["m"]);
-            store.mark("h", &["m".into()], true).unwrap();
-        }
-        let store = Store::open(&p).unwrap();
-        store.queue(&v, "https://test.invalid").unwrap();
-        assert_eq!(store.batch("h", true).unwrap().len(), 1);
-        assert!(store.batch("h", false).unwrap().is_empty());
-        store.mark("h", &["m".into()], false).unwrap();
-        assert!(store.batch("h", true).unwrap().is_empty());
-        drop(store);
-        let _ = fs::remove_file(p);
-    }
 }

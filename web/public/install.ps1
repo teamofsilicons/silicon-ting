@@ -32,5 +32,5 @@ try {
     Start-ScheduledTask -TaskName 'SiliconTingDaemon'
     $machinePath = [Environment]::GetEnvironmentVariable('Path','Machine')
     if (($machinePath -split ';') -notcontains $destination) { [Environment]::SetEnvironmentVariable('Path', "$machinePath;$destination", 'Machine') }
-    Write-Host "Installed Ting $Version and its shared system task. Open a new terminal and run ting --help. No IAM login was performed."
+    Write-Host "Installed Ting $Version and its shared system task. Open a new terminal and run ting --help. No Silicon Accounts login was performed."
 } finally { Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue }

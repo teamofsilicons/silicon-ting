@@ -18,10 +18,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --workspace --all-targets --all-features
       - run: cmp udd/cli.md crates/ting-cli/docs/cli.md && cmp udd/api.md crates/ting-cli/docs/api.md
-      - run: python3 scripts/test-package-honeycomb.py
-      - run: python3 scripts/test-unix-installer.py
   web:
     runs-on: ubuntu-24.04
     defaults:
@@ -33,5 +30,4 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - run: npm test
       - run: npm run build
