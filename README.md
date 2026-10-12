@@ -32,7 +32,7 @@ The CLI starts its shared daemon when needed. Each account keeps local credentia
 | `crates/ting-client` | Rust HTTP, WebSocket and local IPC client |
 | `crates/ting-cli` | `ting` command and bundled documentation |
 | `crates/ting-daemon` | Shared receiver, local queue and webhook forwarding |
-| `web` | Web inbox using components from [Silicon UI](https://ui.teamofsilicons.com) |
+| `web` | Next.js web inbox built from [Silicon UI](https://ui.teamofsilicons.com) components |
 | `udd` | API, CLI and integration documentation |
 | `deploy` | Production server deployment and backup configuration |
 

@@ -1,0 +1,56 @@
+.intro { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 360px; align-items: center; gap: var(--space-block); padding: var(--space-related) 0 var(--space-page); }
+.copy { position: relative; z-index: 1; }
+.eyebrow { display: inline-flex; align-items: center; gap: var(--space-related); color: var(--text-muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.eyebrow > i { corner-shape: round; width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--silicon-gradient-ink); }
+.copy h1 { margin: var(--space-comfort) 0; font-size: clamp(2.4rem, 4.2vw, 3.8rem); font-weight: 500; line-height: 1.08; }
+.serifWord { background: var(--silicon-gradient-ink); background-clip: text; color: transparent; font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -.02em; }
+.copy > p { max-width: 46ch; margin: 0; color: var(--text-secondary); font-size: var(--text-base); line-height: 1.7; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-section); margin: var(--space-block) 0 var(--space-comfort); }
+.note { display: inline-flex; align-items: center; gap: var(--space-related); color: var(--text-muted); font-size: var(--text-xs); }
+
+.art { position: relative; width: 360px; height: 360px; }
+.orbit { corner-shape: round; position: absolute; top: 50%; left: 50%; border: 1px solid var(--border); border-radius: var(--radius-full); transform: translate(-50%, -50%); }
+.orbitOne { width: 156px; height: 156px; background: var(--silicon-gradient-soft); box-shadow: 0 0 0 16px color-mix(in oklab, var(--surface-muted) 70%, transparent); }
+.orbitTwo { width: 248px; height: 248px; border-style: dashed; border-color: var(--border-strong); transform: translate(-50%, -50%) rotate(22deg); animation: turn 60s linear infinite; }
+.orbitThree { width: 336px; height: 336px; border-color: var(--border-subtle); }
+.center { position: absolute; top: 50%; left: 50%; display: flex; width: 100px; height: 100px; align-items: center; justify-content: center; border-radius: 28px; corner-shape: var(--corner-shape); background: var(--silicon-gradient); color: var(--silicon-gradient-foreground); box-shadow: var(--shadow-raised), 0 0 0 7px var(--background); transform: translate(-50%, -50%) rotate(-8deg); }
+.center > span { margin: -9px 0 0 1px; font-family: var(--font-display); font-size: 104px; font-weight: 650; letter-spacing: -10px; line-height: 1; }
+.center > span > span { position: relative; bottom: -8px; margin-left: -5px; font-size: 60px; }
+.satellite { position: absolute; display: flex; width: 46px; height: 46px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); corner-shape: var(--corner-shape); background: var(--surface); box-shadow: var(--shadow-raised); color: var(--text-secondary); }
+.satelliteOne { top: 40px; left: 64px; }
+.satelliteTwo { top: 86px; right: 8px; }
+.satelliteThree { bottom: 34px; left: 106px; }
+.label { corner-shape: round; position: absolute; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.label > i { corner-shape: round; width: 5px; height: 5px; border-radius: var(--radius-full); background: var(--success); }
+.labelOne { top: 150px; left: -6px; }
+.labelTwo { right: 22px; bottom: 82px; }
+
+.sectionLabel { display: flex; justify-content: space-between; gap: var(--space-inset); margin-bottom: var(--space-inset); padding-top: var(--space-section); border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.sectionLabel > span:last-child { display: inline-flex; align-items: center; gap: var(--space-tight); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-inset); }
+.featureMedia { display: flex; place-self: stretch; align-items: flex-start; justify-content: space-between; padding: var(--space-comfort); background: var(--silicon-gradient-soft); }
+.featureIcon { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-control); corner-shape: var(--corner-shape); background: var(--surface); color: var(--foreground); }
+.featureNumber { color: var(--text-muted); font-family: var(--mono); font-size: var(--text-xs); }
+.featureTag { color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; }
+
+.banner { display: flex; align-items: center; gap: var(--space-comfort); margin-top: var(--space-section); padding: var(--space-section); border: 1px solid var(--border); border-radius: var(--radius-container); corner-shape: var(--corner-shape); background: var(--silicon-gradient-soft); }
+.banner > div { flex: 1; }
+.banner h3 { margin: 0 0 var(--space-tight); font-size: var(--text-base); font-weight: 500; }
+.banner p { margin: 0; color: var(--text-secondary); }
+.bannerIcon { display: inline-flex; width: 48px; height: 48px; flex: none; align-items: center; justify-content: center; border-radius: var(--radius-control); corner-shape: var(--corner-shape); background: var(--foreground); color: var(--background); }
+
+.gate { display: flex; flex-direction: column; align-items: center; gap: var(--space-inset); padding: var(--space-page) 0; text-align: center; }
+.gateNote { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
+
+@keyframes turn { to { transform: translate(-50%, -50%) rotate(382deg); } }
+@media (prefers-reduced-motion: reduce) { .orbitTwo { animation: none; } }
+
+@media (max-width: 1080px) {
+  .intro { grid-template-columns: 1fr; }
+  .art { display: none; }
+}
+@media (max-width: 760px) {
+  .features { grid-template-columns: 1fr; }
+  .banner { flex-direction: column; align-items: flex-start; }
+  .sectionLabel { flex-direction: column; }
+}

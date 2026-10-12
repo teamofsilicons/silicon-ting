@@ -1,0 +1,14 @@
+:root {
+  --mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --serif: var(--font-serif), Georgia, serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-width: 320px; background: var(--background); color: var(--foreground); font-family: var(--font-body); font-size: var(--text-sm); line-height: 1.5; letter-spacing: var(--tracking-body); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: var(--tracking-display); }
+p { text-wrap: pretty; }
+code { padding: .1em .35em; border-radius: var(--radius-detail); background: var(--surface-muted); font-family: var(--mono); font-size: .9em; letter-spacing: 0; }
+pre code { padding: 0; background: none; }
+::selection { background: var(--accent-subtle); }
+.mono { font-family: var(--mono); letter-spacing: 0; }
