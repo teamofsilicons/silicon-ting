@@ -15,5 +15,3 @@ Carbon sign-in opens Silicon Accounts with a secure popup and full-page fallback
 All application, inbox, preference, subscription and webhook requests are account-scoped. Silicon Apps supplies the catalog; app authors can manage notification types. The developer portal manages app configuration and publication.
 
 Documentation is available at `/docs` and `/docs/api.md`, `/docs/cli.md`, `/docs/integration.md`, and `/docs/understanding.md`. Installers are served at `/install.sh` and `/install.ps1`.
-
-Browser diagnostics use the same-origin `/v1/telemetry` endpoint when `VITE_SS_ANALYTICS_TABLE` and `VITE_SS_EVENTS_TABLE` are configured. Ingestion credentials remain on the backend. The browser preference is stored locally as `ting.telemetry.enabled`. Payload bodies and credentials are excluded from telemetry.

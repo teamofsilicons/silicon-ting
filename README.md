@@ -51,6 +51,6 @@ Use `cargo check --workspace`, `cargo fmt --all --check`, and `npm run build` in
 
 ## Releases
 
-Current source version: `0.3.0`. [Release instructions](installers/RELEASING.md) cover the six native targets, crates.io, Silicon Apps and frontend. [Backend deployment](deploy/README.md) documents the existing AWS production service, runtime secrets, backups and rollback.
+Current source version: `0.3.1`. [Release instructions](installers/RELEASING.md) cover the six native targets, crates.io, Silicon Apps and frontend. [Backend deployment](deploy/README.md) documents the existing AWS production service, runtime secrets, backups and rollback.
 
 Silicon Apps validates `ting --help`, `ting accounts --json`, and `ting login status --json` in its target runners before a package can be released. Production releases install and update through `silicon-apps`.

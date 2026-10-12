@@ -16,7 +16,7 @@ cargo publish -p silicon-ting-client --locked
 cargo publish -p silicon-ting-cli --locked
 ```
 
-Push a version tag such as `v0.3.0` after committing to main. `.github/workflows/release.yml` builds x86_64 and ARM64 packages on Linux, macOS and Windows and publishes six archives plus `SHA256SUMS`. The version tag must match the binary version. Each archive contains `ting` and its companion `ting-daemon`.
+Push a version tag such as `v0.3.1` after committing to main. `.github/workflows/release.yml` builds x86_64 and ARM64 packages on Linux, macOS and Windows and publishes six archives plus `SHA256SUMS`. The version tag must match the binary version. Each archive contains `ting` and its companion `ting-daemon`.
 
 ## Silicon Apps
 
@@ -24,16 +24,16 @@ Sign in to `silicon-apps` as an author of `ting`. Current publication uses `si:t
 
 ```sh
 mkdir -p target/release-assets
-gh release download v0.3.0 --repo teamofsilicons/silicon-ting --dir target/release-assets --pattern 'ting-v0.3.0-*' --pattern SHA256SUMS
-python3 scripts/package-apps.py --assets target/release-assets --output target/ting-apps-0.3.0.tar.gz
-silicon-apps upload ting --target linux-x86_64 target/ting-apps-0.3.0.tar.gz --json
+gh release download v0.3.1 --repo teamofsilicons/silicon-ting --dir target/release-assets --pattern 'ting-v0.3.1-*' --pattern SHA256SUMS
+python3 scripts/package-apps.py --assets target/release-assets --output target/ting-apps-0.3.1.tar.gz
+silicon-apps upload ting --target linux-x86_64 target/ting-apps-0.3.1.tar.gz --json
 ```
 
 Repeat upload for each available target. `silicon-apps targets --json` reports configured validation runners; the Apps capabilities endpoint checks whether they are live. Each upload validates the target's `--help`, `accounts --json` and `login status --json` commands. A target without a runner cannot currently be uploaded through the public API; keep its native GitHub archive available through the optional installer. Record each accepted package ID, then create and promote the release:
 
 ```sh
-silicon-apps release ting --version 0.3.0 --package PACKAGE_ID --package ANOTHER_PACKAGE_ID
-silicon-apps promote ting DEVELOPMENT_RELEASE_ID --version 0.3.0
+silicon-apps release ting --version 0.3.1 --package PACKAGE_ID --package ANOTHER_PACKAGE_ID
+silicon-apps promote ting DEVELOPMENT_RELEASE_ID --version 0.3.1
 silicon-apps readiness ting
 silicon-apps publish ting
 ```
@@ -48,7 +48,7 @@ Use [backend deployment](../deploy/README.md) for the production AWS service. De
 
 ```sh
 cd web
-npx vercel deploy --prod --yes --build-env VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics --build-env VITE_SS_EVENTS_TABLE=tingfrontendevents
+npx vercel deploy --prod --yes
 ```
 
 Verify the live sign-in, persistent browser and CLI sessions, logout, public docs and installed package version. Keep GitHub native archives available because optional system service installers download those versioned files and verify `SHA256SUMS`.

@@ -297,8 +297,7 @@ impl Client {
             .map_err(|_| Error::input("Invalid HTTP method."))?;
         let mut req = self
             .http
-            .request(method, format!("{}{}", self.origin, path))
-            .header("Ting-Client-Version", env!("CARGO_PKG_VERSION"));
+            .request(method, format!("{}{}", self.origin, path));
         if let Some(c) = credential {
             req = req.bearer_auth(c)
         }
@@ -515,10 +514,6 @@ pub struct Session {
     pub expires_at: Option<String>,
     #[serde(default)]
     pub context: Option<Value>,
-}
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct Settings {
-    pub telemetry: Option<bool>,
 }
 #[derive(Clone)]
 pub struct Profile {
@@ -819,19 +814,4 @@ pub fn unique_ids(ids: Vec<String>) -> Result<Vec<String>> {
             }
         })
         .collect()
-}
-/// Best-effort, bounded diagnostic events. Callers must pass categories and timings only.
-/// Credentials, user request bodies, attachment contents and local paths are never included.
-pub async fn telemetry(origin: &str, event: &str, data: Value) {
-    let Ok(origin) = api_origin(origin) else {
-        return;
-    };
-    let Ok(http) = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_millis(1500))
-        .build()
-    else {
-        return;
-    };
-    let _ = http.post(format!("{origin}/v1/telemetry")).json(&json!({"table":"tingclidaemon","events":[{"id":uuid::Uuid::new_v4().to_string(),"type":event,"data":data,"metadata":{"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS}}]})).send().await;
 }

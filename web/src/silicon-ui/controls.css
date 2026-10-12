@@ -31,8 +31,6 @@ h1,h2,h3 { font-family:var(--font-display); }
 .app-shell .ting-row:hover,.app-shell .app-selector>button.selected { background:var(--surface-muted);border-color:var(--border); }
 .app-shell .type-row p,.app-shell .app-selector small,.app-shell .form-stack label,.app-shell .detail-info,.app-shell .detail-body time { color:var(--text-secondary); }
 .app-shell .serif-word { font-family:var(--font-display);color:var(--foreground);font-style:normal; }
-.app-shell .switch { background:var(--control-track);border-color:transparent; }
-.app-shell .switch.enabled { background:var(--control-on); }
 .app-shell .tabs button { color:var(--text-secondary); }
 .app-shell .tabs button.active { color:var(--foreground);border-color:var(--foreground); }
 .app-shell .type-search { border-color:var(--border-strong); }

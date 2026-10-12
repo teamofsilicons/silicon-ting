@@ -79,8 +79,6 @@ fn cli() -> Command {
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
  .subcommand(command("unhook","Detach one destination while retaining its stable ID and pending history").arg(arg("id").required(true)))
  .subcommand(group("daemon","Start or inspect the local Ting receiver").subcommand(command("start","Start the local receiver if it is not running; needs no login")).subcommand(command("status","Report status without starting the daemon")).subcommand(command("reconnect","Resume this identity's attached or paused hooks for this account")))
- .subcommand(group("config","Manage private profile settings").subcommand(command("list","List settings")).subcommand(command("get","Get a setting").arg(arg("key").required(true))).subcommand(command("set","Set a setting").arg(arg("key").required(true)).arg(arg("value").required(true).value_parser(["true","false"]))))
- .subcommand(group("bug","Submit an explicit bug report").subcommand(command("report","Upload supplied report and attachments to Ting support storage").arg(a("title").required(true)).arg(a("body").conflicts_with("body-file")).arg(a("body-file")).arg(a("attach").action(ArgAction::Append)).arg(a("pr"))))
 }
 fn s<'a>(m: &'a ArgMatches, k: &str) -> Option<&'a str> {
     m.try_get_one::<String>(k)
@@ -292,37 +290,12 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         return Ok(json!({"running":true}));
     }
     let profile = Profile::current()?;
-    let profile_mutation = name == "logout"
-        || name == "login" && m.subcommand().is_none()
-        || name == "config" && m.subcommand_name() == Some("set");
+    let profile_mutation = name == "logout" || name == "login" && m.subcommand().is_none();
     let _profile_lock = if profile_mutation {
         Some(profile.lock()?)
     } else {
         None
     };
-    let mut settings: Settings = profile.read("settings.json")?.unwrap_or_default();
-    if name == "config" {
-        let (sub, m) = m.subcommand().unwrap();
-        let enabled = settings.telemetry.unwrap_or(true);
-        if sub == "list" {
-            return Ok(json!({"telemetry.enabled":enabled}));
-        }
-        let key = required(m, "key")?;
-        if key != "telemetry.enabled" {
-            return Err(Error::input(
-                "Unknown setting; only telemetry.enabled is supported.",
-            ));
-        }
-        let value = if sub == "set" {
-            let v = required(m, "value")? == "true";
-            settings.telemetry = Some(v);
-            profile.save("settings.json", &settings)?;
-            v
-        } else {
-            enabled
-        };
-        return Ok(json!({"key":key,"value":value}));
-    }
     if name == "send" {
         return execute_proof(ProofOperation::Send, m, root, None).await;
     }
@@ -508,54 +481,6 @@ async fn run(root: &ArgMatches) -> Result<Value> {
             return Err(error);
         }
         return Ok(json!({"authenticated":false}));
-    }
-    if name == "bug" {
-        use base64::Engine;
-        let (_, m) = m.subcommand().unwrap();
-        let title = required(m, "title")?;
-        if title.is_empty() || title.len() > 200 {
-            return Err(Error::input("Title must contain 1 to 200 UTF-8 bytes."));
-        }
-        let body = match (s(m, "body"), s(m, "body-file")) {
-            (Some(x), None) => x.to_owned(),
-            (None, Some(p)) => fs::read_to_string(p)
-                .map_err(|_| Error::input("Could not read UTF-8 report body."))?,
-            _ => return Err(Error::input("Supply exactly one --body or --body-file.")),
-        };
-        if body.is_empty() {
-            return Err(Error::input("Bug report body is required."));
-        }
-        let mut attachments = vec![];
-        for p in m.get_many::<String>("attach").into_iter().flatten() {
-            if attachments.len() == 8 {
-                return Err(Error::input("At most eight attachments are allowed."));
-            }
-            let bytes = fs::read(p).map_err(|_| Error::input("Could not read an attachment."))?;
-            let name = Path::new(p)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| Error::input("Attachment requires a UTF-8 basename."))?;
-            let (encoding, content) = match String::from_utf8(bytes) {
-                Ok(s) => ("utf-8", s),
-                Err(e) => (
-                    "base64",
-                    base64::engine::general_purpose::STANDARD.encode(e.into_bytes()),
-                ),
-            };
-            attachments.push(json!({"name":name,"encoding":encoding,"content":content}));
-        }
-        let pr = s(m, "pr");
-        if let Some(p) = pr {
-            webhook_url(p)?;
-            if !p.starts_with("https://") || p.len() > 2048 {
-                return Err(Error::input("PR URL must be HTTPS and at most 2048 bytes."));
-            }
-        }
-        let body = json!({"title":title,"body":body,"pr_ref":pr,"attachments":attachments});
-        if serde_json::to_vec(&body).unwrap().len() > 192 * 1024 {
-            return Err(Error::input("Complete bug report exceeds 192 KiB."));
-        }
-        return recipient(&client, &profile, "POST", "/v1/bugs", Some(body)).await;
     }
     let base = "/v1";
     match name {
@@ -817,28 +742,7 @@ async fn main() {
             }
         }
     };
-    let started = std::time::Instant::now();
     let result = run(&matches).await;
-    let mut leaf = &matches;
-    while let Some((_, sub)) = leaf.subcommand() {
-        leaf = sub;
-    }
-    if let Some((command, sub)) = matches.subcommand()
-        && result.is_ok()
-        && !["docs", "accounts", "config"].contains(&command)
-        && !(command == "daemon" && sub.subcommand_name() == Some("start"))
-        && s(leaf, "write-request").is_none()
-        && let (Ok(api), Ok(profile)) = (origin(&matches), Profile::current())
-        && profile
-            .read::<Settings>("settings.json")
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-            .telemetry
-            .unwrap_or(true)
-    {
-        telemetry(&api,"cli_command",json!({"command":command,"success":result.is_ok(),"duration_ms":started.elapsed().as_millis().min(u64::MAX as u128) as u64})).await;
-    }
     match result {
         Ok(v) => {
             if !json && v.get("content").is_some() {

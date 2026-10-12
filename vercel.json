@@ -1,5 +1,5 @@
 {
-  "buildCommand": "VITE_SS_ANALYTICS_TABLE=tingfrontendanalytics VITE_SS_EVENTS_TABLE=tingfrontendevents npm run build --prefix web",
+  "buildCommand": "npm run build --prefix web",
   "outputDirectory": "web/dist",
   "framework": null,
   "rewrites": [

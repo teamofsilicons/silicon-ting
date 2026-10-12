@@ -723,30 +723,6 @@ async fn read_ack(shared: &Shared, hook: &Hook, ids: &[String]) -> Result<()> {
         Err(e) => Err(e),
     }
 }
-fn delivery_telemetry(hook: &Hook, accepted: bool, duration: u64) {
-    let profile = Profile {
-        dir: PathBuf::from(&hook.profile),
-    };
-    if !profile
-        .read::<Settings>("settings.json")
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-        .telemetry
-        .unwrap_or(true)
-    {
-        return;
-    }
-    let api = hook.api.clone();
-    tokio::spawn(async move {
-        telemetry(
-            &api,
-            "webhook_delivery",
-            json!({"accepted":accepted,"duration_ms":duration}),
-        )
-        .await;
-    });
-}
 async fn forward(shared: Shared, hook: Hook) -> Result<()> {
     session_for(&hook)?;
     if !shared.socket.read().await.authorized.contains(&hook.id) {
@@ -837,16 +813,7 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
     if let Some(s) = &hook.secret {
         req = req.bearer_auth(s)
     }
-    let started = std::time::Instant::now();
-    let outcome = req.send().await;
-    delivery_telemetry(
-        &hook,
-        outcome
-            .as_ref()
-            .is_ok_and(|r| r.status() == reqwest::StatusCode::NO_CONTENT),
-        started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-    );
-    match outcome {
+    match req.send().await {
         Ok(r) if r.status() == reqwest::StatusCode::NO_CONTENT => {
             shared.store.mark(&hook.id, &ids, true)?;
             if shared.socket.read().await.authorized.contains(&hook.id) {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "app_id": "ting",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "command": "ting",
   "targets": {
     "linux-x86_64": {

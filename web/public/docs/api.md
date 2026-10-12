@@ -198,10 +198,10 @@ async fn receive(session: &str, hook: String) -> Result<()> {
 
 `Prepared::new` validates exact bytes and `Prepared::write` creates a private request file. `execute` sends those bytes once. `WebSocket::send(&request, token)` uses the same authorization and body. `watch_inbox(session)`, `unsubscribe(hooks, pause)` and `ack(hook, messages, kind)` are explicit operations. The client does not auto-acknowledge, auto-register recipients or retry uncertain mutations. It preserves events in a bounded queue and closes rather than dropping events on overflow.
 
-## Retention, errors and observability
+## Retention and errors
 
 Read or silent notifications live for one calendar month; unread non-silent notifications live for three calendar months from immutable `created_at`. Retries and read changes do not extend retention. Local queues prune expired copies and verify older queued records before forwarding.
 
 Errors use `{ "error": { "code", "message", "hint", "retryable", "details" } }`. Invalid input is rejected before mutation; auth and resource ownership are checked for every operation. A timeout may follow acceptance, so clients preserve original request bytes and keys. Temporary overload may return 429 or 503, and clients honor retry guidance without assuming acceptance.
 
-`POST /v1/bugs` submits explicitly supplied report fields and attachments. Telemetry contains operational counters and timing, never tokens, secrets or notification payloads. Accounts refresh credentials and browser session tokens remain private server state.
+Ting does not collect or send telemetry. Accounts refresh credentials and browser session tokens remain private server state.

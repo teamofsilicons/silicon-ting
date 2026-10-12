@@ -190,17 +190,10 @@ Upgrading old local receiver state preserves destinations and queued history, bu
 
 A recipient must explicitly enable required delivery on a subscription before its app can use `--delivery required`. This permits automation delivery despite an ordinary mute. Without that opt-in, Ting rejects the send. Subscription revocation and session authority still apply; the app token cannot opt the recipient in.
 
-## Retention, configuration and errors
+## Retention and errors
 
 Ting retains read or silent notifications for one calendar month and unread non-silent notifications for three calendar months, measured from immutable `created_at`. Read changes and retries do not restart those periods. The daemon prunes expired copies and checks older pending copies before forwarding.
 
-```sh
-ting config list
-ting config get telemetry.enabled
-ting config set telemetry.enabled false
-ting bug report --title 'Problem' --body-file report.txt --attach details.txt --pr https://github.com/teamofsilicons/silicon-ting/pull/123
-```
-
-Telemetry excludes credentials and notification content. Bug reports include only explicitly supplied body and attachments; keep credentials and private notification data out of them.
+Ting does not collect or send telemetry.
 
 Success exits 0, invalid arguments or input exit 2, and operational failures exit 1. With `--json`, success goes to stdout and an `{"error":{"code","message","hint","retryable","details"}}` envelope goes to stderr. A transport failure may follow server acceptance: use the preserved key and exact request when retrying.

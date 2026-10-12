@@ -2,7 +2,6 @@ mod auth;
 mod error;
 mod migration;
 mod store;
-mod telemetry;
 mod validation;
 mod ws;
 
@@ -29,9 +28,6 @@ pub struct Config {
     pub accounts_app_id: String,
     pub accounts_app_secret: String,
     pub apps_url: String,
-    pub spacestation_url: String,
-    pub spacestation_key: String,
-    pub spacestation_table: String,
     pub frontend_origin: String,
     pub public_origin: String,
     pub browser_origins: Vec<String>,
@@ -61,9 +57,6 @@ impl Config {
             accounts_app_secret: required("TING_ACCOUNTS_APP_SECRET")?,
             apps_url: env::var("TING_APPS_URL")
                 .unwrap_or_else(|_| "https://apps.teamofsilicons.com".into()),
-            spacestation_url: required("TING_SPACESTATION_URL")?,
-            spacestation_key: required("TING_SPACESTATION_KEY")?,
-            spacestation_table: required("TING_SPACESTATION_TABLE")?,
             frontend_origin,
             public_origin,
             browser_origins,
@@ -186,9 +179,6 @@ async fn request_id(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let started = std::time::Instant::now();
-    let method = request.method().as_str().to_owned();
-    let path = request.uri().path().to_owned();
     let browser_origin = request.headers().get("origin").cloned();
     let allowed = origin(&app, request.headers());
     let permitted = allowed.is_ok();
@@ -215,13 +205,6 @@ async fn request_id(
             HeaderValue::from_static("Ting-Request-Id"),
         );
     }
-    app.auth.diagnostic(
-        "http.request.completed",
-        &method,
-        &path,
-        response.status().as_u16(),
-        started.elapsed().as_millis() as u64,
-    );
     response.headers_mut().insert(
         "Ting-Request-Id",
         HeaderValue::from_str(&store::id("req")).unwrap(),
@@ -351,9 +334,7 @@ async fn http(
             );
             r.headers_mut().insert(
                 "Access-Control-Allow-Headers",
-                HeaderValue::from_static(
-                    "Content-Type,Authorization,Idempotency-Key,Ting-Client-Version",
-                ),
+                HeaderValue::from_static("Content-Type,Authorization,Idempotency-Key"),
             );
         }
         return Ok(r);
@@ -389,8 +370,6 @@ async fn http(
             &bytes,
             if path == "tings" {
                 256 * 1024
-            } else if path == "bugs" {
-                192 * 1024
             } else {
                 1024 * 1024
             },
@@ -440,17 +419,6 @@ async fn http(
             .await
             .map(|(s, v)| response(s, v));
     }
-    if path == "telemetry" && method == Method::POST {
-        if bytes.len() > 65536 {
-            return Err(Error::new(
-                413,
-                "payload_too_large",
-                "Telemetry batches are limited to 64 KiB.",
-                "Send a smaller batch.",
-            ));
-        }
-        return Ok(response(202, telemetry::ingest(&app, b).await?));
-    }
     if path == "session" && method == Method::DELETE {
         // Possession can revoke this exact opaque session even when Silicon Accounts access is
         // inactive; durable cleanup must not depend on live login authority.
@@ -471,20 +439,6 @@ async fn http(
     let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
     if path == "me" && method == Method::GET {
         return Ok(response(200, app.auth.me(&p)?));
-    }
-    if path == "bugs" && method == Method::POST {
-        return Ok(response(
-            201,
-            app.auth
-                .report(
-                    &p,
-                    b,
-                    headers
-                        .get("Ting-Client-Version")
-                        .and_then(|v| v.to_str().ok()),
-                )
-                .await?,
-        ));
     }
     let apps = match (method.as_str(), parts.as_slice()) {
         ("GET", ["apps"]) => Some(app.auth.apps(&p).await?),

@@ -8,7 +8,6 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use axum::http::HeaderMap;
-use futures_util::{SinkExt, StreamExt};
 use rand::RngCore;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -55,12 +54,8 @@ pub struct Auth {
     app_id: String,
     app_secret: String,
     apps_url: String,
-    station: String,
-    station_key: String,
-    station_table: String,
     http: reqwest::Client,
     locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
-    telemetry: Option<space_station::SpaceClient>,
 }
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
@@ -142,18 +137,6 @@ impl Auth {
           CREATE TABLE IF NOT EXISTS account_logins(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL,response BLOB NOT NULL,session TEXT NOT NULL);
           CREATE UNIQUE INDEX IF NOT EXISTS account_login_credential ON account_logins(credential_hash);
           CREATE TABLE IF NOT EXISTS account_exchanges(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL UNIQUE);")?;
-        let telemetry = if config.spacestation_key.is_empty() {
-            None
-        } else {
-            Some(
-                space_station::SpaceClient::builder(&config.spacestation_key)
-                    .url(&config.spacestation_url)
-                    .home(format!("{}.telemetry", config.database_path))
-                    .flush_timeout(Duration::from_millis(100))
-                    .on_error(|_| {})
-                    .build()?,
-            )
-        };
         Ok(Self {
             db: Mutex::new(db),
             cipher: Aes256Gcm::new_from_slice(&key)
@@ -162,10 +145,6 @@ impl Auth {
             app_id: config.accounts_app_id.clone(),
             app_secret: config.accounts_app_secret.clone(),
             apps_url: config.apps_url.trim_end_matches('/').into(),
-            station: config.spacestation_url.trim_end_matches('/').into(),
-            station_key: config.spacestation_key.clone(),
-            station_table: config.spacestation_table.clone(),
-            telemetry,
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(20))
                 .redirect(reqwest::redirect::Policy::none())
@@ -173,11 +152,6 @@ impl Auth {
                 .build()?,
             locks: Mutex::new(HashMap::new()),
         })
-    }
-    pub fn diagnostic(&self, event: &str, method: &str, path: &str, status: u16, elapsed_ms: u64) {
-        if let Some(t) = &self.telemetry {
-            t.record(json!({"source":"ting.backend","event":event,"method":method,"path":path,"status":status,"elapsed_ms":elapsed_ms,"version":env!("CARGO_PKG_VERSION")}));
-        }
     }
     fn lock(&self, id: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.locks.lock().unwrap();
@@ -788,174 +762,4 @@ impl Auth {
         // Introspection supplies live identity/revocation on every request; repeated events are harmless.
         Ok(json!({"accepted":true}))
     }
-    pub async fn report(&self, p: &Principal, body: Value, version: Option<&str>) -> Result<Value> {
-        validate_report(&body)?;
-        if self.station_key.is_empty() || self.station_table.is_empty() {
-            return Err(report_error());
-        }
-        let id = format!("bug_{}", uuid::Uuid::new_v4().simple());
-        let batch = uuid::Uuid::new_v4().to_string();
-        let mut record = body;
-        record["event"] = json!("bug_report");
-        record["report_id"] = json!(id);
-        record["reporter_id"] = json!(p.id);
-        record["context"] = json!(p.context);
-        record["source"] = json!("ting.backend");
-        if let Some(version) = version {
-            record["app_version"] = json!(version);
-        }
-        let pr = record.get("pr_ref").cloned().unwrap_or(Value::Null);
-        let raw=json!({"batch_id":batch,"records":[{"key":self.station_key,"metadata":{"record_id":uuid::Uuid::new_v4(),"table_id":self.station_table,"event_ts_ms":chrono::Utc::now().timestamp_millis()},"record":record}]}).to_string();
-        let url = format!(
-            "{}/api/ws/ingest",
-            self.station
-                .replacen("https://", "wss://", 1)
-                .replacen("http://", "ws://", 1)
-        );
-        tokio::time::timeout(Duration::from_secs(20), async {
-            use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-            let mut request = url.into_client_request().map_err(|_| report_error())?;
-            request.headers_mut().insert(
-                "User-Agent",
-                concat!("silicon-ting-server/", env!("CARGO_PKG_VERSION"))
-                    .parse()
-                    .map_err(|_| report_error())?,
-            );
-            let (mut socket, _) = tokio_tungstenite::connect_async(request)
-                .await
-                .map_err(|_| report_error())?;
-            socket
-                .send(tokio_tungstenite::tungstenite::Message::Text(raw.into()))
-                .await
-                .map_err(|_| report_error())?;
-            while let Some(message) = socket.next().await {
-                match message.map_err(|_| report_error())? {
-                    tokio_tungstenite::tungstenite::Message::Text(text) => {
-                        let ack: Value = serde_json::from_str(&text).map_err(|_| report_error())?;
-                        if ack["batch_id"] != batch
-                            || ack["status"] != "ok"
-                            || ack
-                                .get("rejected")
-                                .and_then(Value::as_array)
-                                .is_some_and(|r| !r.is_empty())
-                            || ack.get("code").is_some_and(|v| !v.is_null())
-                        {
-                            return Err(report_error());
-                        }
-                        let _ = socket.close(None).await;
-                        return Ok(json!({"id":id,"submitted":true,"pr_ref":pr}));
-                    }
-                    tokio_tungstenite::tungstenite::Message::Ping(data) => socket
-                        .send(tokio_tungstenite::tungstenite::Message::Pong(data))
-                        .await
-                        .map_err(|_| report_error())?,
-                    tokio_tungstenite::tungstenite::Message::Close(_) => break,
-                    _ => {}
-                }
-            }
-            Err(report_error())
-        })
-        .await
-        .map_err(|_| report_error())?
-    }
-}
-
-fn report_error() -> Error {
-    Error::new(
-        503,
-        "report_storage_unconfirmed",
-        "Space Station has not confirmed durable storage of this report.",
-        "Do not automatically retry: the report may already have been stored.",
-    )
-}
-fn validate_report(v: &Value) -> Result<()> {
-    use base64::Engine;
-    let object = v
-        .as_object()
-        .ok_or_else(|| Error::invalid("A bug report must be a JSON object."))?;
-    if object
-        .keys()
-        .any(|k| !matches!(k.as_str(), "title" | "body" | "pr_ref" | "attachments"))
-    {
-        return Err(Error::invalid("Unknown bug report field."));
-    }
-    if serde_json::to_vec(v).map_err(storage)?.len() > 192 * 1024 {
-        return Err(Error::new(
-            413,
-            "payload_too_large",
-            "Bug report exceeds 192 KiB.",
-            "Reduce the report or attachments; content is never truncated.",
-        ));
-    }
-    if !v["title"]
-        .as_str()
-        .is_some_and(|s| !s.is_empty() && s.len() <= 200)
-        || !v["body"].as_str().is_some_and(|s| !s.is_empty())
-    {
-        return Err(Error::invalid(
-            "title requires 1–200 UTF-8 bytes and body requires nonempty text.",
-        ));
-    }
-    if let Some(pr) = v.get("pr_ref").filter(|v| !v.is_null()) {
-        let valid = pr
-            .as_str()
-            .filter(|s| s.len() <= 2048)
-            .and_then(|s| url::Url::parse(s).ok())
-            .is_some_and(|u| {
-                u.scheme() == "https"
-                    && u.host_str().is_some()
-                    && u.username().is_empty()
-                    && u.password().is_none()
-            });
-        if !valid {
-            return Err(Error::invalid(
-                "pr_ref must be an absolute HTTPS pull-request URL.",
-            ));
-        }
-    }
-    if let Some(attachments) = v.get("attachments") {
-        let attachments = attachments
-            .as_array()
-            .filter(|a| a.len() <= 8)
-            .ok_or_else(|| Error::invalid("attachments must contain at most eight files."))?;
-        for a in attachments {
-            let fields = a
-                .as_object()
-                .ok_or_else(|| Error::invalid("Each attachment must be an object."))?;
-            if fields.len() != 3
-                || fields
-                    .keys()
-                    .any(|k| !matches!(k.as_str(), "name" | "encoding" | "content"))
-            {
-                return Err(Error::invalid(
-                    "Attachments require name, encoding and content only.",
-                ));
-            }
-            if !a["name"].as_str().is_some_and(|n| {
-                !n.is_empty()
-                    && !matches!(n, "." | "..")
-                    && !n.contains(['/', '\\'])
-                    && !n.chars().any(char::is_control)
-            }) {
-                return Err(Error::invalid("Attachment name must be a basename."));
-            }
-            let content = a["content"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("Attachment content must be a string."))?;
-            match a["encoding"].as_str() {
-                Some("utf-8") => {}
-                Some("base64") => {
-                    base64::engine::general_purpose::STANDARD
-                        .decode(content)
-                        .map_err(|_| Error::invalid("Attachment base64 is invalid."))?;
-                }
-                _ => {
-                    return Err(Error::invalid(
-                        "Attachment encoding must be utf-8 or base64.",
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
 }
