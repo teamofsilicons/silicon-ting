@@ -14,6 +14,8 @@ npm run dev
 npm run build
 ```
 
+The development and build scripts disable Next.js telemetry before loading the framework, including in CI and production builds.
+
 The development server proxies `/v1` and WebSockets to `127.0.0.1:8080`. Set `TING_DEV_API` to change that address. The production origin must route `/v1/*`, including WebSocket upgrades, to the backend and other paths to the frontend.
 
 `npm run build` writes a static export to `dist/`; every page is client-rendered against `/v1`. Vercel serves it with clean URLs, so `/apps` serves `apps.html`. Next.js bootstraps each page with inline scripts, so the build finishes with `scripts/csp.mjs`, which hashes them into a per-page `<meta>` Content-Security-Policy. The static hosting header allows inline scripts and the meta policy narrows that to the exact hashes, so only Ting's own scripts run. `npm run preview` serves `dist/` locally.
