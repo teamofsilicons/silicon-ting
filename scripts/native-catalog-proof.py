@@ -41,7 +41,7 @@ def main():
     contents=archive.extractfile(member).read();assert contents==expected
     path=root/name;path.write_bytes(contents);path.chmod(0o755)
   env={k:v for k,v in os.environ.items() if not k.startswith(('TING_','SILICON_'))}
-  home=root/'home';home.mkdir();env.update(SILICON_HOME=str(home),HOME=str(home),USERPROFILE=str(home))
+  home=root/'home';home.mkdir();env.update(SILICON_HOME=str(home))
   results=[]
   for args in [['--help'],['accounts','--json'],['login','status','--json'],['--version']]:
    result=subprocess.run([str(root/('ting'+suffix)),*args],capture_output=True,text=True,env=env,timeout=30)
