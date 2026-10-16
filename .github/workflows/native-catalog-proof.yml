@@ -1,0 +1,35 @@
+name: Native catalog proof
+on:
+  push:
+    branches: [fix/catalog-native-proof-031]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  proof:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, target: linux-x86_64}
+          - {runner: ubuntu-24.04-arm, target: linux-aarch64}
+          - {runner: macos-15-intel, target: macos-x86_64}
+          - {runner: macos-15, target: macos-aarch64}
+          - {runner: windows-2025, target: windows-x86_64}
+          - {runner: windows-11-arm, target: windows-aarch64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify published binaries and native discovery commands
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: python scripts/native-catalog-proof.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-proof-${{ matrix.target }}
+          path: proof/*.json
+          if-no-files-found: error
