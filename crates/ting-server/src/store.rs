@@ -45,16 +45,18 @@ fn conflict(code: &str, msg: &str) -> Error {
 }
 
 pub struct Store {
+    prefixes: crate::namespaces::Prefixes,
     db: Mutex<Connection>,
 }
 impl Store {
-    pub fn open(path: &str) -> anyhow::Result<Self> {
+    pub fn open(path: &str, prefixes: &crate::namespaces::Prefixes) -> anyhow::Result<Self> {
         let c = Connection::open(path)?;
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         crate::migration::ensure_current(&c)?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS types(ctx TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,name));
  CREATE INDEX IF NOT EXISTS accounts_types_app ON types(ctx,app,name);
+ CREATE TABLE IF NOT EXISTS type_namespaces(ctx TEXT NOT NULL,prefix TEXT NOT NULL,owner_app TEXT NOT NULL,PRIMARY KEY(ctx,prefix));
  CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,active INTEGER,UNIQUE(ctx,app,recipient));
  CREATE TABLE IF NOT EXISTS preferences(ctx TEXT,recipient TEXT,app TEXT,scope TEXT,enabled INTEGER,PRIMARY KEY(ctx,recipient,app,scope));
  CREATE TABLE IF NOT EXISTS tings(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,type TEXT,created TEXT,body TEXT,silent INTEGER,read INTEGER DEFAULT 0);
@@ -70,7 +72,11 @@ impl Store {
  UPDATE hooks SET receiver=NULL,session=NULL,state=CASE WHEN state='connected' THEN 'disconnected' ELSE state END;
  UPDATE deliveries SET delivery=0,offer_receiver=NULL,last_offer=0 WHERE read=0;")?;
         crate::migration::copy_types(&c)?;
-        let store = Self { db: Mutex::new(c) };
+        Self::initialize_namespaces(&c, prefixes)?;
+        let store = Self {
+            db: Mutex::new(c),
+            prefixes: prefixes.clone(),
+        };
         store.prune()?;
         Ok(store)
     }
@@ -80,8 +86,86 @@ impl Store {
             .lock()
             .map_err(|_| Error::unavailable("Database writer lock is unavailable."))
     }
-    fn enabled(db: &Connection, ctx: &str, recipient: &str, typ: &str) -> Result<bool> {
-        let (app, service, _) = v::type_parts(typ)?;
+    fn initialize_namespaces(
+        db: &Connection,
+        prefixes: &crate::namespaces::Prefixes,
+    ) -> anyhow::Result<()> {
+        let tx = db.unchecked_transaction()?;
+        let mut claims = std::collections::BTreeMap::<(String, String), String>::new();
+        {
+            let mut query=tx.prepare("SELECT ctx,prefix,owner_app FROM type_namespaces UNION SELECT ctx,name,app FROM types UNION SELECT DISTINCT ctx,type,app FROM tings")?;
+            let rows = query.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (ctx, name, owner) = row?;
+                let prefix = if name.contains('.') {
+                    v::type_parts(&name)?.0
+                } else {
+                    &name
+                };
+                anyhow::ensure!(
+                    v::app_id(prefix) && v::app_id(&owner),
+                    "Stored type namespace identity is invalid"
+                );
+                anyhow::ensure!(
+                    prefixes.owner(prefix) == owner,
+                    "Type prefix {prefix} is already owned by {owner}; aliases cannot transfer existing ownership"
+                );
+                if let Some(previous) = claims.insert((ctx, prefix.to_owned()), owner.clone()) {
+                    anyhow::ensure!(
+                        previous == owner,
+                        "Conflicting stored type namespace owners"
+                    );
+                }
+            }
+        }
+        for (prefix, owner) in prefixes.aliases() {
+            let key = ("accounts".to_owned(), prefix.to_owned());
+            if let Some(old) = claims.insert(key, owner.to_owned()) {
+                anyhow::ensure!(
+                    old == owner,
+                    "Configured type alias conflicts with existing ownership"
+                );
+            }
+        }
+        for ((ctx, prefix), owner) in claims {
+            tx.execute(
+                "INSERT OR IGNORE INTO type_namespaces(ctx,prefix,owner_app) VALUES(?,?,?)",
+                params![ctx, prefix, owner],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    fn claim_namespace(&self, db: &Connection, ctx: &str, app: &str, typ: &str) -> Result<()> {
+        let prefix = v::type_parts(typ)?.0;
+        if self.prefixes.owner(prefix) != app {
+            return Err(v_err("The type prefix is not owned by this app."));
+        }
+        db.execute(
+            "INSERT OR IGNORE INTO type_namespaces(ctx,prefix,owner_app) VALUES(?,?,?)",
+            params![ctx, prefix, app],
+        )?;
+        let owner: String = db.query_row(
+            "SELECT owner_app FROM type_namespaces WHERE ctx=? AND prefix=?",
+            params![ctx, prefix],
+            |r| r.get(0),
+        )?;
+        if owner != app {
+            return Err(conflict(
+                "type_prefix_owned",
+                "This type prefix is already owned by another app.",
+            ));
+        }
+        Ok(())
+    }
+    fn enabled(db: &Connection, ctx: &str, recipient: &str, app: &str, typ: &str) -> Result<bool> {
+        let (_, service, _) = v::type_parts(typ)?;
         for scope in [
             format!("type:{typ}"),
             format!("service:{service}"),
@@ -121,49 +205,55 @@ impl Store {
         p: &Principal,
         app: &str,
         b: &Value,
-        update: bool,
+        update: Option<&str>,
     ) -> Result<(u16, Value)> {
         v::fields(
             b,
-            if update {
+            if update.is_some() {
                 &["description"]
             } else {
                 &["type", "description"]
             },
-            if update {
+            if update.is_some() {
                 &["description"]
             } else {
                 &["type", "description"]
             },
         )?;
         let description = v::text(b, "description", 1000)?;
-        let typ = if update {
-            app
-        } else {
-            v::string(b, "type", 255)?
+        let typ = match update {
+            Some(typ) => typ,
+            None => v::string(b, "type", 255)?,
         };
-        let (owner, _, _) = v::type_parts(typ)?;
-        if !update && owner != app {
+        if !self.prefixes.owns(app, typ)? {
             return Err(v_err("The type must belong to the app in the URL."));
         }
-        let db = self.lock()?;
-        let old: Option<String> = db
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        self.claim_namespace(&tx, &p.context, app, typ)?;
+        let old: Option<(String, String)> = tx
             .query_row(
-                "SELECT description FROM types WHERE ctx=? AND name=?",
+                "SELECT app,description FROM types WHERE ctx=? AND name=?",
                 params![p.context, typ],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let status = if update {
+        if old.as_ref().is_some_and(|(owner, _)| owner != app) {
+            return Err(conflict(
+                "type_prefix_owned",
+                "This type already belongs to another app.",
+            ));
+        }
+        let status = if update.is_some() {
             if old.is_none() {
                 return Err(Error::not_found());
             }
-            db.execute(
-                "UPDATE types SET description=? WHERE ctx=? AND name=?",
-                params![description, p.context, typ],
+            tx.execute(
+                "UPDATE types SET description=? WHERE ctx=? AND app=? AND name=?",
+                params![description, p.context, app, typ],
             )?;
             200
-        } else if let Some(old) = old {
+        } else if let Some((_, old)) = old {
             if old != description {
                 return Err(conflict(
                     "type_exists",
@@ -172,12 +262,13 @@ impl Store {
             }
             200
         } else {
-            db.execute(
-                "INSERT INTO types VALUES(?,?,?,?)",
+            tx.execute(
+                "INSERT INTO types(ctx,app,name,description) VALUES(?,?,?,?)",
                 params![p.context, app, typ, description],
             )?;
             201
         };
+        tx.commit()?;
         Ok((
             status,
             json!({"type":typ,"description":description,"defaults":{"carbon":true,"silicon":true}}),
@@ -302,8 +393,8 @@ impl Store {
             &["type", "data", "for", "key"],
         )?;
         let typ = v::string(b, "type", 255)?;
-        let (app, _, _) = v::type_parts(typ)?;
-        if app != p.app_id {
+        let app = p.app_id.as_str();
+        if !self.prefixes.owns(app, typ)? {
             return Err(Error::new(
                 403,
                 "permission_denied",
@@ -354,7 +445,7 @@ impl Store {
                 "The recipient must explicitly enable required delivery on their subscription.",
             ));
         }
-        let silent = !Self::enabled(&tx, &p.context, recipient, typ)?;
+        let silent = !Self::enabled(&tx, &p.context, recipient, app, typ)?;
         let mid = id("msg");
         let created = stamp();
         let mut full = json!({"id":mid,"created_at":created,"type":typ,"data":b["data"],"metadata":normalized["metadata"],"for":recipient,"key":key,"silent":silent,"read":false});
@@ -591,6 +682,12 @@ impl Store {
     }
     pub fn preference(&self, p: &Principal, b: &Value, reset: bool) -> Result<Value> {
         v::preference(b, !reset)?;
+        if !reset
+            && let Some(typ) = b["type"].as_str()
+            && !self.prefixes.owns(v::string(b, "app_id", 255)?, typ)?
+        {
+            return Err(v_err("The type must belong to app_id."));
+        }
         let scope = if let Some(s) = b["type"].as_str() {
             format!("type:{s}")
         } else if let Some(s) = b["service"].as_str() {
@@ -770,7 +867,7 @@ impl Store {
         AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
         AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
         OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app
-          AND p.scope IN ('type:'||t.type,'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
+          AND p.scope IN ('type:'||t.type,'service:'||substr(t.type,instr(t.type,'.')+1,instr(substr(t.type,instr(t.type,'.')+1),'.')-1),'app')
           ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))",params![hid,p.context,p.id,retention_cutoff(3),retention_cutoff(1)])?;
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM deliveries WHERE hook=?",
@@ -940,7 +1037,7 @@ impl Store {
               AND EXISTS(SELECT 1 FROM grants g WHERE g.ctx=t.ctx AND g.app=t.app AND g.recipient=t.recipient AND g.active=1)
               AND ((json_extract(t.body,'$.delivery')='required' AND EXISTS(SELECT 1 FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app AND p.scope='delivery:required' AND p.enabled=1))
               OR (COALESCE(json_extract(t.body,'$.delivery'),'')<>'required' AND t.silent=0 AND COALESCE((SELECT p.enabled FROM preferences p WHERE p.ctx=t.ctx AND p.recipient=t.recipient AND p.app=t.app
-                AND p.scope IN ('type:'||t.type, 'service:'||substr(t.type,length(t.app)+2,instr(substr(t.type,length(t.app)+2),'.')-1),'app')
+                AND p.scope IN ('type:'||t.type, 'service:'||substr(t.type,instr(t.type,'.')+1,instr(substr(t.type,instr(t.type,'.')+1),'.')-1),'app')
                 ORDER BY CASE WHEN p.scope LIKE 'type:%' THEN 0 WHEN p.scope LIKE 'service:%' THEN 1 ELSE 2 END LIMIT 1),1)=1))
               ORDER BY t.created,t.id LIMIT 100")?;
             q.query_map(

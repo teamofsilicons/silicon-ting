@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod migration;
+mod namespaces;
 mod store;
 mod validation;
 mod ws;
@@ -22,6 +23,7 @@ use validation as v;
 
 #[derive(Clone)]
 pub struct Config {
+    pub type_prefix_aliases: namespaces::Prefixes,
     pub database_path: String,
     pub encryption_key: String,
     pub accounts_url: String,
@@ -49,6 +51,9 @@ impl Config {
         let browser_origins =
             browser_origins(&env::var("TING_BROWSER_ORIGINS").unwrap_or_default())?;
         Ok(Self {
+            type_prefix_aliases: namespaces::Prefixes::parse(
+                &env::var("TING_TYPE_PREFIX_ALIASES").unwrap_or_else(|_| "{}".into()),
+            )?,
             database_path: env::var("TING_DATABASE_PATH").unwrap_or("ting.sqlite".into()),
             encryption_key: required("TING_ENCRYPTION_KEY")?,
             accounts_url: env::var("TING_ACCOUNTS_URL")
@@ -106,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let config = Config::env()?;
     let auth = auth::Auth::new(&config)?;
-    let store = store::Store::open(&config.database_path)?;
+    let store = store::Store::open(&config.database_path, &config.type_prefix_aliases)?;
     let app = Arc::new(App {
         config,
         auth,
@@ -472,14 +477,14 @@ async fn http(
             ))
         }
         ("POST", ["apps", aid, "types"]) => {
-            let (s, b) = app.store.register_type(&p, aid, &b, false)?;
+            let (s, b) = app.store.register_type(&p, aid, &b, None)?;
             Ok(response(s, b))
         }
         ("PATCH", ["apps", aid, "types", typ]) => {
-            if v::type_parts(typ)?.0 != *aid {
+            if !app.config.type_prefix_aliases.owns(aid, typ)? {
                 return Err(Error::not_found());
             }
-            let (s, b) = app.store.register_type(&p, typ, &b, true)?;
+            let (s, b) = app.store.register_type(&p, aid, &b, Some(typ))?;
             Ok(response(s, b))
         }
         ("GET", ["subscriptions"]) => {
@@ -934,3 +939,6 @@ async fn upgrade(
         .max_frame_size(1024 * 1024)
         .on_upgrade(move |socket| ws::connection(app, socket, browser)))
 }
+
+#[cfg(test)]
+mod namespace_tests;
