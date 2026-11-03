@@ -63,6 +63,8 @@ ting apps list
 ting types list --app dm
 ting types register --type dm.msg.received --description 'A new message arrived'
 ting types update --type dm.msg.received --description 'A message is available'
+# An operator-assigned prefix uses the canonical app explicitly.
+ting types register --app silicon-cells --type cells.database.failing --description 'A database operation failed'
 ```
 
 Silicon Apps provides the application catalog and author identity. Reading an application's catalog entry does not grant send or management permission. Type registration and updates require a saved Ting session belonging to an authorized app author.

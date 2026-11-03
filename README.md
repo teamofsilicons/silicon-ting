@@ -22,6 +22,8 @@ Each account has an immutable Accounts UUID and a display handle such as `c:alic
 
 Applications call Ting with Silicon Accounts App verification or User verification proofs. A recipient authorizes their subscription; sending applications use the corresponding app proof and Ting checks the subscription on every send. The receiving app is `ting`, and proof scopes name the Ting action being performed. See [Accounts integration](udd/accounts.md) and the [API contract](udd/api.md).
 
+Operators may assign a notification prefix to a different canonical application ID, such as `cells.*` to `silicon-cells`. See [type prefix ownership](docs/type-prefix-aliases.md).
+
 The CLI starts its shared daemon when needed. Each account keeps local credentials under `$SILICON_HOME/.ting/` or its normal home. Webhook URLs and local webhook secrets stay on the device. [Optional service installation](installers/README.md) supports receivers that should start at boot.
 
 ## Components
@@ -47,7 +49,7 @@ npm ci
 npm run dev
 ```
 
-Use `cargo check --workspace`, `cargo fmt --all --check`, and `npm run build` in `web` to verify a change. The repository has no test suite or isolated identity environments.
+Use `cargo check --workspace`, `cargo fmt --all --check`, and `npm run build` in `web` to verify a change. Run `cargo test --workspace` for the local SQLite and HTTP fixtures; these use disposable mock Accounts/Apps endpoints and no real credentials.
 
 ## Releases
 

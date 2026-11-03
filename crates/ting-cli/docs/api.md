@@ -46,7 +46,7 @@ App calls use a scoped Accounts app token targeted at Ting. Registration also re
 | `/v1/sent/query` | POST | `tings.read` |
 | `/v1/sent/read` | POST | `tings.read.update` |
 
-Ting verifies these tokens with Silicon Accounts. It checks the source application against the type prefix or `app_id`, checks the target audience and required scope, and checks the delegated account when one is needed. Recipient ownership and active grants are enforced independently of app-token authority.
+Ting verifies these tokens with Silicon Accounts. It checks the source application against the configured owner of the type prefix or the canonical `app_id`, checks the target audience and required scope, and checks the delegated account when one is needed. Recipient ownership and active grants are enforced independently of app-token authority.
 
 Register a recipient:
 
@@ -72,7 +72,7 @@ Content-Type: application/json
 {"type":"dm.msg.received","for":"si:assistant","key":"message-456","data":{"message_id":"dm_456"},"metadata":{}}
 ```
 
-A type is `app.service.event`, with a bare Silicon Apps ID and lowercase service and event names. The recipient may be a canonical Carbon/Silicon ID or immutable account UUID. `data` and `metadata` must be JSON objects; metadata defaults to `{}`. A key is nonempty and at most 200 bytes. The complete send request is at most 256 KiB. Duplicate object keys and unknown fields are rejected.
+A type is `prefix.service.event`, with lowercase names. Its prefix defaults to the Silicon Apps ID; an operator can explicitly assign another prefix, such as `cells` to `silicon-cells`. Proof issuers, subscriptions, sent-history queries and preference `app_id` still use the canonical `silicon-cells` ID. The recipient may be a canonical Carbon/Silicon ID or immutable account UUID. `data` and `metadata` must be JSON objects; metadata defaults to `{}`. A key is nonempty and at most 200 bytes. The complete send request is at most 256 KiB. Duplicate object keys and unknown fields are rejected.
 
 An active recipient subscription and registered type are required. Preferences determine whether an ordinary notification is silent. `"delivery":"required"` is available only after the recipient explicitly opts that subscription in to required delivery.
 

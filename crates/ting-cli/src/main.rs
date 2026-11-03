@@ -70,7 +70,7 @@ fn cli() -> Command {
  .subcommand(command("login","Sign in with a Silicon Accounts short-lived token").arg(arg("token").conflicts_with_all(["token-stdin","slt"])).arg(a("slt").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","slt","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
  .subcommand(group("apps","Inspect Silicon Apps applications").subcommand(page(command("list","List visible applications"))))
- .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
+ .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(app(command("register","Register a notification type")).arg(a("type").required(true)).arg(a("description").required(true))).subcommand(app(command("update","Update a type description")).arg(a("type").required(true)).arg(a("description").required(true))))
  .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute a recipient-approved subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
  .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
  .subcommand(group("sent","Inspect and update application sent history using a Silicon Accounts app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
@@ -511,7 +511,8 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 .await;
             }
             let t = required(m, "type")?;
-            let app = type_app(t)?;
+            let prefix = type_app(t)?;
+            let app = s(m, "app").unwrap_or(prefix);
             let d = required(m, "description")?;
             if d.is_empty() || d.len() > 1000 {
                 return Err(Error::input(
@@ -630,10 +631,7 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         "preferences" => {
             let (sub, m) = m.subcommand().unwrap();
             if let Some(t) = s(m, "type") {
-                let app = type_app(t)?;
-                if s(m, "app").is_some_and(|a| a != app) {
-                    return Err(Error::input("Type must belong to the selected app."));
-                }
+                type_app(t)?;
             }
             let path = format!("{base}/preferences");
             if sub == "set" {
