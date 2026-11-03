@@ -151,39 +151,6 @@ pub fn actor_kind(s: &str) -> Option<&'static str> {
     accepted.then_some(kind)
 }
 
-#[cfg(test)]
-mod account_identity_tests {
-    use super::actor_kind;
-
-    #[test]
-    fn accepts_personal_and_work_account_identifiers() {
-        for (id, kind) in [
-            ("c:alice", "carbon"),
-            ("si:assistant", "silicon"),
-            ("c:alice.design_org", "carbon"),
-            ("si:assistant.design-org", "silicon"),
-        ] {
-            assert_eq!(actor_kind(id), Some(kind), "{id}");
-        }
-    }
-
-    #[test]
-    fn rejects_malformed_or_ambiguous_work_identifiers() {
-        for id in [
-            "c:alice.org.extra",
-            "c:.org",
-            "c:alice.",
-            "c:ab.org",
-            "si:assistant.ab",
-            "c:alice.ORG",
-            "c:alice.org/name",
-            "c:alice.org%2fother",
-            "c:alice..org",
-        ] {
-            assert_eq!(actor_kind(id), None, "{id}");
-        }
-    }
-}
 pub fn type_parts(s: &str) -> Result<(&str, &str, &str)> {
     let p: Vec<_> = s.rsplitn(3, '.').collect();
     if s.len() > 255
@@ -306,4 +273,38 @@ pub fn filters(b: &Value) -> Result<()> {
         type_parts(t)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod account_identity_tests {
+    use super::actor_kind;
+
+    #[test]
+    fn accepts_personal_and_work_account_identifiers() {
+        for (id, kind) in [
+            ("c:alice", "carbon"),
+            ("si:assistant", "silicon"),
+            ("c:alice.design_org", "carbon"),
+            ("si:assistant.design-org", "silicon"),
+        ] {
+            assert_eq!(actor_kind(id), Some(kind), "{id}");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_or_ambiguous_work_identifiers() {
+        for id in [
+            "c:alice.org.extra",
+            "c:.org",
+            "c:alice.",
+            "c:ab.org",
+            "si:assistant.ab",
+            "c:alice.ORG",
+            "c:alice.org/name",
+            "c:alice.org%2fother",
+            "c:alice..org",
+        ] {
+            assert_eq!(actor_kind(id), None, "{id}");
+        }
+    }
 }
