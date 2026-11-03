@@ -32,3 +32,9 @@ The allowlist governs HTTP, WebSocket upgrades and cookie-authenticated mutation
 ## Backups
 
 The existing systemd backup timer takes SQLite online snapshots and writes them to the stack's S3 artifact bucket. Back up the database and encrypted session store together with the preserved runtime encryption key. Do not include runtime secrets in build archives or release receipts.
+
+## Notification prefix ownership
+
+Set `TING_TYPE_PREFIX_ALIASES` in the existing runtime secret before enabling an alias. For Silicon Cells its JSON value is `{"cells":"silicon-cells"}`. This setting requires the backend version that implements aliases; it does not change Accounts credentials or the registered app ID. Stop every alias-unaware backend process before starting the new version so it validates and durably claims the prefix. Registration, proofs, subscriptions and app preferences still use `silicon-cells`.
+
+Startup refuses an alias when the SQLite registry, registered types, or current notification history record another owner. Once claimed, removing or reassigning an alias also refuses startup. Retain the setting across deploys and recovery; a rollback must preserve both the compatible binary and the database/runtime configuration pair. Never delete namespace rows or rewrite app identity to force a deployment through. [Compatibility and checks](../docs/type-prefix-aliases.md) describe the exact contract.

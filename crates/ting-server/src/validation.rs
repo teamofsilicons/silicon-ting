@@ -161,7 +161,7 @@ pub fn type_parts(s: &str) -> Result<(&str, &str, &str)> {
         || p[2].chars().any(char::is_control)
     {
         return Err(Error::invalid(
-            "A type must be {app_id}.{service}.{event}, with lowercase service/event segments.",
+            "A type must be {prefix}.{service}.{event}, with lowercase segments and a prefix owned by the app.",
         ));
     }
     Ok((p[2], p[1], p[0]))
@@ -225,14 +225,11 @@ pub fn preference(v: &Value, write: bool) -> Result<()> {
     {
         return Err(Error::invalid("Invalid service name."));
     }
-    if let Some(t) = typ
-        && type_parts(
+    if let Some(t) = typ {
+        type_parts(
             t.as_str()
                 .ok_or_else(|| Error::invalid("type must be text."))?,
-        )?
-        .0 != app
-    {
-        return Err(Error::invalid("The type must belong to app_id."));
+        )?;
     }
     if write {
         optional_bool(v, "enabled")?;

@@ -7,8 +7,8 @@ export function query(values: Record<string, string | number | boolean | undefin
 }
 export function typeError(app: string, type: string, description: string): string | undefined {
   if (!/^[a-z][a-z0-9_-]{0,79}$/.test(app)) return 'Use the Silicon Apps application ID.';
-  const suffix = type.slice(app.length + 1);
-  if (!type.startsWith(`${app}.`) || !/^[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*$/.test(suffix)) return 'Use app_id.service.event, with lowercase service and event names.';
+  // Only the server knows the operator's prefix ownership map.
+  if (!/^[a-z][a-z0-9_-]{0,79}\.[a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*$/.test(type)) return 'Use prefix.service.event, with lowercase names. Ting checks that the prefix belongs to this application.';
   if (new TextEncoder().encode(type).length > 255) return 'Type names must be at most 255 UTF-8 bytes.';
   if (!description.trim() || new TextEncoder().encode(description).length > 1000) return 'Add a description of 1–1,000 UTF-8 bytes.';
 }
