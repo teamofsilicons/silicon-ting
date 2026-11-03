@@ -138,9 +138,9 @@ pub fn actor_kind(s: &str) -> Option<&'static str> {
     };
     let valid = |part: &str, max| {
         (3..=max).contains(&part.len())
-            && part.bytes().all(|c| {
-                c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-'
-            })
+            && part
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
     };
     // Accounts owns identity. The optional work-account suffix is part of its public
     // handle; Ting still keys all access and notification storage by the account UUID.
@@ -157,16 +157,29 @@ mod account_identity_tests {
 
     #[test]
     fn accepts_personal_and_work_account_identifiers() {
-        for (id, kind) in [("c:alice", "carbon"), ("si:assistant", "silicon"),
-            ("c:alice.design_org", "carbon"), ("si:assistant.design-org", "silicon")] {
+        for (id, kind) in [
+            ("c:alice", "carbon"),
+            ("si:assistant", "silicon"),
+            ("c:alice.design_org", "carbon"),
+            ("si:assistant.design-org", "silicon"),
+        ] {
             assert_eq!(actor_kind(id), Some(kind), "{id}");
         }
     }
 
     #[test]
     fn rejects_malformed_or_ambiguous_work_identifiers() {
-        for id in ["c:alice.org.extra", "c:.org", "c:alice.", "c:ab.org", "si:assistant.ab",
-            "c:alice.ORG", "c:alice.org/name", "c:alice.org%2fother", "c:alice..org"] {
+        for id in [
+            "c:alice.org.extra",
+            "c:.org",
+            "c:alice.",
+            "c:ab.org",
+            "si:assistant.ab",
+            "c:alice.ORG",
+            "c:alice.org/name",
+            "c:alice.org%2fother",
+            "c:alice..org",
+        ] {
             assert_eq!(actor_kind(id), None, "{id}");
         }
     }
