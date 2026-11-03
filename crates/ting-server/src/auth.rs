@@ -660,6 +660,7 @@ impl Auth {
             "/v1/subscriptions/revoke" => "subscriptions.revoke",
             "/v1/sent/query" => "tings.read",
             "/v1/sent/read" => "tings.read.update",
+            "/v1/app-types/register" => "types.manage",
             _ => return Err(forbidden()),
         };
         if value["valid"] != true

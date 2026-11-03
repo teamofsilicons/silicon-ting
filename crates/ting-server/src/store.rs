@@ -123,6 +123,31 @@ impl Store {
         b: &Value,
         update: bool,
     ) -> Result<(u16, Value)> {
+        self.register_type_context(&p.context, app, b, update)
+    }
+    pub fn register_app_type(
+        &self,
+        p: &AppAuthority,
+        app: &str,
+        b: &Value,
+    ) -> Result<(u16, Value)> {
+        if app != p.app_id {
+            return Err(Error::new(
+                403,
+                "permission_denied",
+                "The app must match the verified proof issuer.",
+                "Register notification types only for the issuing app.",
+            ));
+        }
+        self.register_type_context(&p.context, app, b, false)
+    }
+    fn register_type_context(
+        &self,
+        context: &str,
+        app: &str,
+        b: &Value,
+        update: bool,
+    ) -> Result<(u16, Value)> {
         v::fields(
             b,
             if update {
@@ -150,7 +175,7 @@ impl Store {
         let old: Option<String> = db
             .query_row(
                 "SELECT description FROM types WHERE ctx=? AND name=?",
-                params![p.context, typ],
+                params![context, typ],
                 |r| r.get(0),
             )
             .optional()?;
@@ -160,7 +185,7 @@ impl Store {
             }
             db.execute(
                 "UPDATE types SET description=? WHERE ctx=? AND name=?",
-                params![description, p.context, typ],
+                params![description, context, typ],
             )?;
             200
         } else if let Some(old) = old {
@@ -174,7 +199,7 @@ impl Store {
         } else {
             db.execute(
                 "INSERT INTO types VALUES(?,?,?,?)",
-                params![p.context, app, typ, description],
+                params![context, app, typ, description],
             )?;
             201
         };
@@ -1118,4 +1143,53 @@ fn cursor_err() -> Error {
         "The cursor is invalid, expired or belongs to another query.",
         "Start a new list request without a cursor.",
     )
+}
+
+#[cfg(test)]
+mod app_type_tests {
+    use super::*;
+
+    #[test]
+    fn verified_app_registration_is_idempotent_and_cannot_cross_apps() {
+        let store = Store::open(":memory:").unwrap();
+        let authority = AppAuthority {
+            context: "accounts".into(),
+            app_id: "silicon-organizations".into(),
+            expires_at: now() + 60,
+        };
+        let body = json!({"type":"silicon-organizations.role.changed","description":"Organization role changed"});
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-organizations", &body)
+                .unwrap()
+                .0,
+            201
+        );
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-organizations", &body)
+                .unwrap()
+                .0,
+            200
+        );
+        assert!(
+            store
+                .register_app_type(
+                    &authority,
+                    "write",
+                    &json!({"type":"write.document.changed","description":"Other app"})
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .register_app_type(
+                    &authority,
+                    "silicon-organizations",
+                    &json!({"type":"write.document.changed","description":"Other app"})
+                )
+                .is_err()
+        );
+        assert!(store.register_app_type(&authority, "silicon-organizations", &json!({"type":"silicon-organizations.role.changed","description":"Different description"})).is_err());
+    }
 }

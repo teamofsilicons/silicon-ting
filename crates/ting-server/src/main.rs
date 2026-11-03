@@ -436,6 +436,21 @@ async fn http(
         );
         return Ok(r);
     }
+    if let ("POST", ["apps", aid, "types"]) = (method.as_str(), parts.as_slice())
+        && headers
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .is_some_and(|s| s.starts_with("Bearer sap_"))
+    {
+        let authority = app
+            .auth
+            .app_authority(&headers, "/v1/app-types/register", &bytes, &b)
+            .await?;
+        let _gate = app.mutations.lock().await;
+        app.auth.check_app(&authority)?;
+        let (status, body) = app.store.register_app_type(&authority, aid, &b)?;
+        return Ok(response(status, body));
+    }
     let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
     if path == "me" && method == Method::GET {
         return Ok(response(200, app.auth.me(&p)?));
