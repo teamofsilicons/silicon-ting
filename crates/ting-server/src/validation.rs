@@ -142,20 +142,49 @@ pub fn actor_kind(s: &str) -> Option<&'static str> {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-'))
     .then_some(kind)
 }
-pub fn type_parts(s: &str) -> Result<(&str, &str, &str)> {
-    let p: Vec<_> = s.rsplitn(3, '.').collect();
+pub fn type_parts(s: &str) -> Result<(&str, &str)> {
+    let (app, ting) = s.split_once('.').ok_or_else(|| {
+        Error::invalid("A type must be <app-id>.<tingid>; tingid must be alphanumeric.")
+    })?;
     if s.len() > 255
-        || p.len() != 3
-        || !app_id(p[2])
-        || !segment(p[0])
-        || !segment(p[1])
-        || p[2].chars().any(char::is_control)
+        || !app_id(app)
+        || ting.is_empty()
+        || !ting.bytes().all(|c| c.is_ascii_alphanumeric())
     {
         return Err(Error::invalid(
-            "A type must be {app_id}.{service}.{event}, with lowercase service/event segments.",
+            "A type must be <app-id>.<tingid>; tingid must be alphanumeric, without nesting.",
         ));
     }
-    Ok((p[2], p[1], p[0]))
+    Ok((app, ting))
+}
+
+pub fn schema(value: &Value) -> Result<jsonschema::Validator> {
+    if !value.is_object() && !value.is_boolean() {
+        return Err(Error::invalid(
+            "schema must be a JSON Schema object or boolean.",
+        ));
+    }
+    if value.to_string().len() > 64 * 1024 {
+        return Err(Error::invalid("schema must not exceed 64 KiB."));
+    }
+    fn local_refs(value: &Value) -> bool {
+        match value {
+            Value::Object(map) => map.iter().all(|(key, value)| {
+                (!matches!(key.as_str(), "$ref" | "$dynamicRef" | "$recursiveRef")
+                    || value.as_str().is_some_and(|s| s.starts_with('#')))
+                    && local_refs(value)
+            }),
+            Value::Array(items) => items.iter().all(local_refs),
+            _ => true,
+        }
+    }
+    if !local_refs(value) {
+        return Err(Error::invalid(
+            "Schema references must be local fragments; remote and file references are not supported.",
+        ));
+    }
+    jsonschema::validator_for(value)
+        .map_err(|error| Error::invalid(format!("Invalid JSON Schema: {error}")))
 }
 pub fn ids(v: &Value, key: &str, empty: bool) -> Result<Vec<String>> {
     let arr = v[key]
@@ -190,48 +219,69 @@ pub fn preference(v: &Value, write: bool) -> Result<()> {
     fields(
         v,
         if write {
-            &["app_id", "service", "type", "enabled"]
+            &["app_id", "type", "from", "mode", "enabled"]
         } else {
-            &["app_id", "service", "type"]
+            &["app_id", "type", "from"]
         },
-        if write {
-            &["app_id", "enabled"]
-        } else {
-            &["app_id"]
-        },
+        &[],
     )?;
-    let app = string(v, "app_id", 255)?;
-    if !app_id(app) {
-        return Err(Error::invalid(
-            "app_id must be a Silicon Apps application ID.",
-        ));
-    }
-    let service = v.get("service").filter(|v| !v.is_null());
-    let typ = v.get("type").filter(|v| !v.is_null());
-    if service.is_some() && typ.is_some() {
-        return Err(Error::invalid("Specify either service or type, not both."));
-    }
-    if let Some(s) = service
-        && !s.as_str().is_some_and(segment)
-    {
-        return Err(Error::invalid("Invalid service name."));
-    }
-    if let Some(t) = typ
-        && type_parts(
-            t.as_str()
-                .ok_or_else(|| Error::invalid("type must be text."))?,
-        )?
-        .0 != app
-    {
-        return Err(Error::invalid("The type must belong to app_id."));
+    if v.get("from").is_some() {
+        string(v, "from", 255)?;
+        if v.get("app_id").is_some() || v.get("type").is_some() {
+            return Err(Error::invalid(
+                "A sender preference cannot also specify an app or type.",
+            ));
+        }
+    } else {
+        let app = string(v, "app_id", 80)?;
+        if !app_id(app) {
+            return Err(Error::invalid(
+                "app_id must be a Silicon Apps application ID.",
+            ));
+        }
+        if let Some(typ) = v.get("type").filter(|x| !x.is_null()) {
+            let typ = typ
+                .as_str()
+                .ok_or_else(|| Error::invalid("type must be text."))?;
+            let legacy = typ.split('.').collect::<Vec<_>>();
+            let legacy_reset = !write
+                && legacy.len() == 3
+                && legacy[0] == app
+                && segment(legacy[1])
+                && segment(legacy[2]);
+            if !legacy_reset && type_parts(typ)?.0 != app {
+                return Err(Error::invalid("The type must belong to app_id."));
+            }
+        }
     }
     if write {
-        optional_bool(v, "enabled")?;
+        if v.get("mode").is_some() && v.get("enabled").is_some() {
+            return Err(Error::invalid("Specify mode, not both mode and enabled."));
+        }
+        if let Some(mode) = v.get("mode") {
+            if !mode
+                .as_str()
+                .is_some_and(|s| ["allowed", "silent", "blocked"].contains(&s))
+            {
+                return Err(Error::invalid("mode must be allowed, silent, or blocked."));
+            }
+        } else if optional_bool(v, "enabled")?.is_none() {
+            return Err(Error::invalid("mode is required."));
+        }
     }
     Ok(())
 }
 
 pub fn filters(b: &Value) -> Result<()> {
+    if let Some(mode) = b.get("mode") {
+        if !mode
+            .as_str()
+            .is_some_and(|s| ["allowed", "silent", "blocked"].contains(&s))
+        {
+            return Err(Error::invalid("mode must be allowed, silent, or blocked."));
+        }
+    }
+
     if b.get("app_id")
         .is_some_and(|v| !v.as_str().is_some_and(app_id))
     {

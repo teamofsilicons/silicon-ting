@@ -8,6 +8,7 @@ import { Button } from '@/components/silicon-ui/button/button';
 import { Dialog, DialogContent } from '@/components/silicon-ui/dialog/dialog';
 import { EmptyState } from '@/components/silicon-ui/empty-state/empty-state';
 import { Input } from '@/components/silicon-ui/input/input';
+import { JsonViewer } from '@/components/silicon-ui/json-viewer/json-viewer';
 import { Textarea } from '@/components/silicon-ui/textarea/textarea';
 import { api, type TingApp, type TingType } from '@/lib/api';
 import { routes } from '@/lib/routes';
@@ -33,10 +34,10 @@ function Applications() {
   const [editor, setEditor] = useState<{ open: boolean; editing?: TingType; key: number }>({ open: false, key: 0 });
   const edit = (editing?: TingType) => setEditor(previous => ({ open: true, editing, key: previous.key + 1 }));
 
-  async function save(type: string, description: string) {
+  async function save(type: string, description: string, schema: Record<string, unknown> | boolean) {
     const editing = editor.editing;
     const saved = await action(
-      () => api(apiPath(`apps/${enc(selected)}/types${editing ? `/${enc(editing.type)}` : ''}`), editing ? 'PATCH' : 'POST', editing ? { description } : { type, description }),
+      () => api(apiPath(`apps/${enc(selected)}/types${editing ? `/${enc(editing.type)}` : ''}`), editing ? 'PATCH' : 'POST', editing ? { description, schema } : { type, description, schema }),
       editing ? 'Type updated.' : 'Type registered.',
     );
     if (saved) setEditor(previous => ({ ...previous, open: false }));
@@ -60,15 +61,16 @@ function Applications() {
         text={selected}
         aside={active?.can_manage_tings ? <Button size="sm" onClick={() => edit()}><Plus size={15} aria-hidden="true" />Register type</Button> : undefined}
       >
-        <p className={styles.infoLine}><Zap size={16} aria-hidden="true" />New types are enabled for carbons and silicons. Recipient preferences still apply.</p>
-        <ListStatus list={types} empty={<EmptyState icon={<Bell size={24} strokeWidth={1.5} />} title="Every signal starts with a type." description="Register a service and event to give your app a notification vocabulary." />} />
+        <p className={styles.infoLine}><Zap size={16} aria-hidden="true" />New types are allowed for carbons and silicons. Recipient preferences still apply.</p>
+        <ListStatus list={types} empty={<EmptyState icon={<Bell size={24} strokeWidth={1.5} />} title="Every signal starts with a type." description="Register a notification type and its payload schema." />} />
         {types.items.map(type => <article key={type.type} className={styles.typeRow}>
           <div>
             <h3 className="mono">{type.type}</h3>
             <p>{type.description}</p>
+            <details><summary>Payload schema</summary><JsonViewer data={type.schema} searchable={false} maxHeight={240} /></details>
             <div className={styles.tags}>
-              <Badge size="sm" tone={type.defaults.carbon ? 'success' : 'neutral'}>{type.defaults.carbon ? 'Carbon' : 'Carbon off'}</Badge>
-              <Badge size="sm" tone={type.defaults.silicon ? 'success' : 'neutral'}>{type.defaults.silicon ? 'Silicon' : 'Silicon off'}</Badge>
+              <Badge size="sm" tone={type.defaults.carbon === 'allowed' ? 'success' : 'neutral'}>Carbon · {type.defaults.carbon}</Badge>
+              <Badge size="sm" tone={type.defaults.silicon === 'allowed' ? 'success' : 'neutral'}>Silicon · {type.defaults.silicon}</Badge>
             </div>
           </div>
           {active?.can_manage_tings ? <Button variant="secondary" size="sm" onClick={() => edit(type)}>Edit</Button> : null}
@@ -84,10 +86,11 @@ function Applications() {
   </>;
 }
 
-function TypeForm({ app, editing, save }: { app: string; editing?: TingType; save: (type: string, description: string) => Promise<void> }) {
+function TypeForm({ app, editing, save }: { app: string; editing?: TingType; save: (type: string, description: string, schema: Record<string, unknown> | boolean) => Promise<void> }) {
   const { busy, actionError } = useWorkspace();
   const [name, setName] = useState(editing?.type ?? `${app}.`);
   const [description, setDescription] = useState(editing?.description ?? '');
+  const [schemaText, setSchemaText] = useState(JSON.stringify(editing?.schema ?? { type: 'object' }, null, 2));
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   async function submit(event: FormEvent) {
@@ -95,13 +98,19 @@ function TypeForm({ app, editing, save }: { app: string; editing?: TingType; sav
     const problem = typeError(app, name.trim(), description);
     setError(problem ?? '');
     if (problem) return;
+    let schema: Record<string, unknown> | boolean;
+    try {
+      schema = JSON.parse(schemaText);
+      if (typeof schema !== 'boolean' && (!schema || typeof schema !== 'object' || Array.isArray(schema))) throw new Error();
+    } catch { setError('Enter a JSON Schema object or boolean.'); return; }
     setSubmitted(true);
-    await save(name.trim(), description);
+    await save(name.trim(), description, schema);
   }
   return <form className={styles.formStack} onSubmit={submit}>
-    <Input label="Type name" required value={name} disabled={!!editing} onChange={event => setName(event.currentTarget.value)} placeholder={`${app}.messages.received`} description="Use app_id.service.event. Name events in the past tense, like messages.received." />
+    <Input label="Type name" required value={name} disabled={!!editing} onChange={event => setName(event.currentTarget.value)} placeholder={`${app}.messageReceived`} description="Use app_id.tingid. The ting ID contains only letters and digits, for example messageReceived." />
     <Textarea label="Description" required rows={4} value={description} onChange={event => setDescription(event.currentTarget.value)} placeholder="What happened, and when should this ting be sent?" />
-    <p className={styles.infoLine}><UserRound size={16} aria-hidden="true" />Enabled by default for both carbons and silicons.</p>
+    <Textarea label="Payload schema" required rows={8} value={schemaText} onChange={event => setSchemaText(event.currentTarget.value)} description="JSON Schema for the data object. Updates apply to future sends." />
+    <p className={styles.infoLine}><UserRound size={16} aria-hidden="true" />Allowed by default for both carbons and silicons.</p>
     {error ? <ErrorAlert error={new Error(error)} /> : submitted && actionError ? <ErrorAlert error={actionError} /> : null}
     <Button type="submit" loading={busy}>{editing ? 'Save changes' : 'Register type'}<Check size={16} aria-hidden="true" /></Button>
   </form>;

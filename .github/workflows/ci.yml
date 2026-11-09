@@ -17,6 +17,7 @@ jobs:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      - run: cargo test --locked --workspace
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cmp udd/cli.md crates/ting-cli/docs/cli.md && cmp udd/api.md crates/ting-cli/docs/api.md
   web:

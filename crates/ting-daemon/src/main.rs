@@ -113,6 +113,10 @@ fn retention_cutoff() -> DateTime<Utc> {
         .expect("current date supports three-month subtraction")
 }
 fn retained(ting: &Value, cutoff: DateTime<Utc>) -> bool {
+    // A scheduled digest can contain old pending tings; only the server can expire those copies.
+    ting["silent_digest"] == true || created_retained(ting, cutoff)
+}
+fn created_retained(ting: &Value, cutoff: DateTime<Utc>) -> bool {
     ting["created_at"]
         .as_str()
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
@@ -265,7 +269,7 @@ impl Store {
         for row in rows {
             let (id, payload) = row.map_err(sql)?;
             let value: Value = serde_json::from_str(&payload).map_err(|_| Error::io())?;
-            if !retained(&value, cutoff) {
+            if !created_retained(&value, cutoff) {
                 ids.push(id)
             }
         }
@@ -336,7 +340,7 @@ impl Store {
             if !created.ends_with('Z') || DateTime::parse_from_rfc3339(created).is_err() {
                 return Err(Error::input("Invalid delivery timestamp."));
             }
-            if !retained(t, retention_cutoff()) {
+            if v["op"] != "silent_digest" && !retained(t, retention_cutoff()) {
                 continue;
             }
             for k in ["created_at", "type", "key", "for"] {
@@ -345,8 +349,8 @@ impl Store {
             if !t["data"].is_object() || !t["metadata"].is_object() {
                 return Err(Error::input("Invalid delivery content."));
             }
-            let local = json!({"id":t["id"],"created_at":t["created_at"],"type":t["type"],"data":t["data"],"metadata":t["metadata"],"key":t["key"]});
-            tx.execute("INSERT INTO queue(hook,id,account_id,payload,api) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(hook,id) DO UPDATE SET eligible=1",params![hook,id,account_id,local.to_string(),api]).map_err(sql)?;
+            let local = json!({"id":t["id"],"created_at":t["created_at"],"type":t["type"],"data":t["data"],"metadata":t["metadata"],"key":t["key"],"for":t["for"],"from":t["from"],"session_id":t["session_id"],"silent":t["silent"],"silent_digest":v["op"]=="silent_digest"});
+            tx.execute("INSERT INTO queue(hook,id,account_id,payload,api) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(hook,id) DO UPDATE SET eligible=1,payload=CASE WHEN queue.accepted=0 THEN excluded.payload ELSE queue.payload END",params![hook,id,account_id,local.to_string(),api]).map_err(sql)?;
             ids.push(id.into());
         }
         tx.commit().map_err(sql)?;
@@ -497,6 +501,13 @@ impl Shared {
     }
     async fn ws(&self, api: &str, mut body: Value) -> Result<Value> {
         body["request_id"] = json!(uuid::Uuid::new_v4().to_string());
+        if matches!(
+            body["op"].as_str(),
+            Some("register" | "subscribe" | "watch_inbox")
+        ) && let Some(timezone) = local_timezone()
+        {
+            body["timezone"] = timezone.into();
+        }
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(SocketCommand {
@@ -671,7 +682,7 @@ async fn socket_loop(shared: Shared, mut rx: mpsc::Receiver<SocketCommand>) {
              if c.api!=api{let pinned=!pending.is_empty()||shared.leases.lock().unwrap().0.as_deref()==Some(&api)||shared.store.hooks().unwrap_or_default().iter().any(|h|h.api==api&&h.state=="attached");if pinned{let _=c.reply.send(Err(Error::new("daemon_api_conflict","The shared socket is active on another API origin.","Use HTTP or detach the existing receivers before switching origins.",false)));continue}else{let tx=shared.tx.clone();tokio::spawn(async move{let _=tx.send(c).await;});break}}let id=c.body["request_id"].as_str().unwrap().to_owned();if ws.send(Message::Text(c.body.to_string().into())).await.is_err(){let _=c.reply.send(Err(Error::network()));break}pending.insert(id,(c.reply,std::time::Instant::now()));},
              incoming=ws.next()=>{match incoming{
               Some(Ok(Message::Text(s)))=>{if s.len()>1024*1024{break}let Ok(v)=strict_json(s.as_bytes())else{break};match v["op"].as_str().unwrap_or(""){
-               "tings"=>{match shared.store.queue(&v,&api){Ok(ids)=>{if ids.is_empty(){continue}shared.wake.notify_one();let ack=json!({"op":"ack","request_id":uuid::Uuid::new_v4().to_string(),"webhook_id":v["webhook_id"],"message_ids":ids,"kind":"delivery"});if ws.send(Message::Text(ack.to_string().into())).await.is_err(){break}},Err(_)=>{if let Some(id)=v["webhook_id"].as_str(){shared.socket.write().await.authorized.remove(id);}}}},
+               "tings"|"silent_digest"=>{if v["webhook_id"].as_str().is_none(){continue}match shared.store.queue(&v,&api){Ok(ids)=>{if ids.is_empty(){continue}shared.wake.notify_one();let ack=json!({"op":"ack","request_id":uuid::Uuid::new_v4().to_string(),"webhook_id":v["webhook_id"],"message_ids":ids,"kind":"delivery"});if ws.send(Message::Text(ack.to_string().into())).await.is_err(){break}},Err(_)=>{if let Some(id)=v["webhook_id"].as_str(){shared.socket.write().await.authorized.remove(id);}}}},
                "paused"=>{let ids:Vec<String>=v["webhook_ids"].as_array().map(|a|a.iter().filter_map(|v|v.as_str().map(str::to_owned)).collect()).unwrap_or_default();let reason=v["reason"].as_str().unwrap_or("");{let mut s=shared.socket.write().await;for id in &ids{s.authorized.remove(id);}}let _=shared.store.pause(&ids,reason);if ["preference_changed","permission_changed","authorization_unavailable"].contains(&reason){let sh=shared.clone();let a=api.clone();tokio::spawn(async move{tokio::time::sleep(Duration::from_secs(1)).await;restore(&sh,&a).await;});}},
                "subscribed"=>{if let Some(ids)=v["webhook_ids"].as_array(){let mut st=shared.socket.write().await;for id in ids.iter().filter_map(Value::as_str){if !st.blocked.contains(id){st.authorized.insert(id.into());}}shared.wake.notify_one();}},_=>{}}
                if let Some(id)=v["request_id"].as_str() && let Some((reply,_))=pending.remove(id){let r=if v["op"]=="error"{Err(serde_json::from_value(v["error"].clone()).unwrap_or_else(|_|Error::network()))}else{Ok(v)};let _=reply.send(r);}
@@ -679,7 +690,7 @@ async fn socket_loop(shared: Shared, mut rx: mpsc::Receiver<SocketCommand>) {
              _=tick.tick()=>{let n=std::time::Instant::now();if reauth_at.elapsed()>=Duration::from_secs(30){reauth_at=n;let sh=shared.clone();let a=api.clone();tokio::spawn(async move{restore(&sh,&a).await;});}
              if healthy.elapsed()>=Duration::from_secs(60){failures=0}
              if pong_deadline.is_some_and(|d|n>=d){break}
-             if n.duration_since(ping_at)>=Duration::from_secs(30){if ws.send(Message::Ping(vec![1].into())).await.is_err(){break}ping_at=n;pong_deadline=Some(n+Duration::from_secs(10));}let expired:Vec<_>=pending.iter().filter(|(_,(_,at))|at.elapsed()>=Duration::from_secs(29)).map(|(id,_)|id.clone()).collect();for id in expired{if let Some((r,_))=pending.remove(&id){let _=r.send(Err(Error::network()));}}}
+             if n.duration_since(ping_at)>=Duration::from_secs(5) && pong_deadline.is_none(){if ws.send(Message::Ping(vec![1].into())).await.is_err(){break}ping_at=n;pong_deadline=Some(n+Duration::from_secs(5));}let expired:Vec<_>=pending.iter().filter(|(_,(_,at))|at.elapsed()>=Duration::from_secs(29)).map(|(id,_)|id.clone()).collect();for id in expired{if let Some((r,_))=pending.remove(&id){let _=r.send(Err(Error::network()));}}}
             }
         }
         {
@@ -717,8 +728,8 @@ async fn read_ack(shared: &Shared, hook: &Hook, ids: &[String]) -> Result<()> {
     match shared.ack(hook, ids, "read").await {
         Ok(_) => shared.store.mark(&hook.id, ids, false),
         Err(e) if e.code == "invalid_ack" => {
-            cleanup_missing(shared, hook).await?;
-            Err(e)
+            // The destination accepted these copies, but removed authority can reject their receipt.
+            shared.store.mark(&hook.id, ids, false)
         }
         Err(e) => Err(e),
     }
@@ -754,7 +765,7 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
         }
         return Ok(());
     }
-    let mut batch = shared.store.batch(&hook.id, false)?;
+    let batch = shared.store.batch(&hook.id, false)?;
     if batch.is_empty() {
         return Ok(());
     }
@@ -788,16 +799,20 @@ async fn forward(shared: Shared, hook: Hook) -> Result<()> {
         return Ok(());
     }
     let month_cutoff = Utc::now().checked_sub_months(Months::new(1)).unwrap();
-    if batch.iter().any(|ting| !retained(ting, month_cutoff)) {
+    if batch
+        .iter()
+        .any(|ting| !created_retained(ting, month_cutoff))
+    {
         // Another destination may have read an old ting since this copy was queued.
         // Uncertain checks must not forward it; only authenticated absence permits deletion.
         cleanup_missing(&shared, &hook).await?;
-        batch = shared.store.batch(&hook.id, false)?;
     }
     if !shared.socket.read().await.authorized.contains(&hook.id) {
         return Ok(());
     }
     session_for(&hook)?;
+    // A pause and reattachment may have changed eligibility during health or history checks.
+    let mut batch = shared.store.batch(&hook.id, false)?;
     batch.retain(|ting| retained(ting, retention_cutoff()));
     if batch.is_empty() {
         return Ok(());
@@ -1382,4 +1397,72 @@ async fn run() -> Result<()> {
     #[cfg(unix)]
     let _ = fs::remove_file(daemon_socket());
     Ok(())
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+
+    fn store() -> Store {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        store.db.lock().unwrap().execute(
+            "INSERT INTO hooks(id,profile,api,account_id,token_hash,url) VALUES('hook_one','profile','https://example.com','owner','hash','http://localhost:3000')", [],
+        ).unwrap();
+        store
+    }
+
+    fn event(op: &str, created: DateTime<Utc>) -> Value {
+        json!({"op":op,"webhook_id":"hook_one","tings":[{
+            "id":"msg_one","created_at":created.to_rfc3339_opts(chrono::SecondsFormat::Secs,true),
+            "type":"dm.message","for":"owner","from":"sender","session_id":"recv_one",
+            "data":{},"metadata":{},"key":"one","silent":op=="silent_digest"
+        }]})
+    }
+
+    #[test]
+    fn scheduled_old_digests_survive_local_age_checks() {
+        let store = store();
+        let old = Utc::now().checked_sub_months(Months::new(4)).unwrap();
+        assert!(
+            store
+                .queue(&event("tings", old), "https://example.com")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .queue(&event("silent_digest", old), "https://example.com")
+                .unwrap(),
+            ["msg_one"]
+        );
+        store.prune(None).unwrap();
+        let batch = store.batch("hook_one", false).unwrap();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0]["silent_digest"], true);
+        assert_eq!(store.month_old_ids("hook_one").unwrap(), ["msg_one"]);
+    }
+
+    #[test]
+    fn pause_blocks_old_copies_and_reoffer_refreshes_the_payload() {
+        let store = store();
+        store
+            .queue(&event("tings", Utc::now()), "https://example.com")
+            .unwrap();
+        store
+            .pause(&["hook_one".into()], "preference_changed")
+            .unwrap();
+        assert!(store.batch("hook_one", false).unwrap().is_empty());
+        store
+            .queue(&event("silent_digest", Utc::now()), "https://example.com")
+            .unwrap();
+        let batch = store.batch("hook_one", false).unwrap();
+        assert_eq!(batch[0]["silent_digest"], true);
+        assert_eq!(batch[0]["from"], "sender");
+        assert_eq!(batch[0]["session_id"], "recv_one");
+        store.mark("hook_one", &["msg_one".into()], false).unwrap();
+        assert_eq!(store.batch("hook_one", false).unwrap().len(), 1);
+        store.mark("hook_one", &["msg_one".into()], true).unwrap();
+        store.mark("hook_one", &["msg_one".into()], false).unwrap();
+        assert!(store.batch("hook_one", true).unwrap().is_empty());
+    }
 }

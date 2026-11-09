@@ -58,24 +58,27 @@ fn proof(c: Command, delegated: bool) -> Command {
 }
 fn prefs(c: Command) -> Command {
     app(c)
-        .arg(a("service").conflicts_with("type"))
         .arg(a("type"))
+        .arg(a("from").conflicts_with_all(["app", "type"]))
 }
 fn cli() -> Command {
     Command::new("ting").about("Durable notifications for carbons and silicons.").disable_version_flag(true)
  .arg(flag("json").global(true)).arg(a("api-url").global(true)).arg(flag("version").global(true))
- .after_help("Receive: ting login --token-stdin → ting webhook http://localhost:8080/ting\nSend: ting send --type dm.msg.received --for si:recipient --key KEY --data '{}' --write-request send.json\nRegister the recipient once with an delegated Accounts token, then send with an app token: ting send --request-file send.json --app-token-stdin\nAll commands support --help. Documentation: ting docs")
+ .after_help("Receive: ting login --token-stdin → ting webhook http://localhost:8080/ting\nSend: ting send --type dm.messageReceived --for si:recipient --key KEY --data '{}' --write-request send.json\nRegister the recipient once with an delegated Accounts token, then send with an app token: ting send --request-file send.json --app-token-stdin\nAll commands support --help. Documentation: ting docs")
  .subcommand(command("accounts","Show Ting Silicon Accounts integration"))
  .subcommand(command("docs","Read bundled documentation offline").arg(a("topic").value_parser(["usage","development"]).default_value("usage")))
  .subcommand(command("login","Sign in with a Silicon Accounts short-lived token").arg(arg("token").conflicts_with_all(["token-stdin","slt"])).arg(a("slt").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","slt","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
  .subcommand(group("apps","Inspect Silicon Apps applications").subcommand(page(command("list","List visible applications"))))
- .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true))).subcommand(command("update","Update a type description").arg(a("type").required(true)).arg(a("description").required(true))))
- .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute a recipient-approved subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or explicitly opt in to automation delivery despite notification mute").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
- .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
+ .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true)).arg(a("schema").required(true).help("JSON Schema object or boolean, or @path to a JSON file"))).subcommand(command("update","Update a type description or schema").arg(a("type").required(true)).arg(a("description")).arg(a("schema"))))
+ .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute a recipient-approved subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or opt in to required automation delivery").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
+ .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("from")).arg(a("session-id")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
  .subcommand(group("sent","Inspect and update application sent history using a Silicon Accounts app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
  .subcommand(group("inbox","Read durable recipient notification history").subcommand(page(filters(command("list","List one page; reading output does not mark it read")).arg(flag("silent").conflicts_with("all")).arg(flag("all")))).subcommand(command("get","Get a full ting without marking it read").arg(arg("id").required(true))).subcommand(command("mark-read","Mark explicitly viewed tings as read").arg(arg("ids").required(true).num_args(1..=100))))
- .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")))).subcommand(prefs(command("set","Set an app, service or event override")).mut_arg("app",|a|a.required(true)).arg(a("enabled").required(true).value_parser(["true","false"]))).subcommand(prefs(command("reset","Remove exactly one preference override")).mut_arg("app",|a|a.required(true))))
+ .subcommand(group("preferences","Control notification preferences").subcommand(page(prefs(command("list","List explicit overrides")).arg(a("mode").value_parser(["allowed","silent","blocked"])))).subcommand(prefs(command("set","Set an app, type or sender preference")).arg(a("mode").required(true).value_parser(["allowed","silent","blocked"]))).subcommand(prefs(command("reset","Remove exactly one preference override"))))
+ .subcommand(group("silent-schedule","Configure the daily silent digest").subcommand(command("get","Show the current schedule")).subcommand(command("set","Change the digest time or turn it off").arg(a("enabled").value_parser(["true","false"])).arg(a("time").help("Daily local time, HH:MM")).arg(a("timezone").help("IANA time zone, such as Asia/Kolkata"))))
+ .subcommand(group("sessions","Inspect active receiver sessions").subcommand(page(command("list","List this account's active receiver sessions"))))
+ .subcommand(command("listen","Receive tings in this terminal until interrupted").arg(a("app").action(ArgAction::Append).help("Allow this app for an anonymous session; repeat for more apps")).arg(flag("anonymous").help("Create a receiver without attaching the saved identity")))
  .subcommand(command("webhook","Attach a local destination; URLs and secrets stay on this system").arg(arg("url")).arg(a("id")).arg(flag("secret-stdin").conflicts_with("clear-secret")).arg(flag("clear-secret").requires("id")).arg(a("health-url").conflicts_with("clear-health-url")).arg(flag("clear-health-url").requires("id")).arg(flag("takeover").requires("id")).subcommand(page(command("list","List registrations with this system's local destinations"))))
  .subcommand(command("unhook","Detach one destination while retaining its stable ID and pending history").arg(arg("id").required(true)))
  .subcommand(group("daemon","Start or inspect the local Ting receiver").subcommand(command("start","Start the local receiver if it is not running; needs no login")).subcommand(command("status","Report status without starting the daemon")).subcommand(command("reconnect","Resume this identity's attached or paused hooks for this account")))
@@ -147,6 +150,8 @@ async fn execute_proof(
         "app",
         "type",
         "for",
+        "from",
+        "session-id",
         "key",
         "data",
         "metadata",
@@ -209,6 +214,8 @@ async fn execute_proof(
         ("app", "app_id"),
         ("type", "type"),
         ("for", "for"),
+        ("from", "from"),
+        ("session-id", "session_id"),
         ("key", "key"),
         ("delivery", "delivery"),
         ("id", "id"),
@@ -498,46 +505,130 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         "types" => {
             let (sub, m) = m.subcommand().unwrap();
             if sub == "list" {
-                return recipient(
-                    &client,
-                    &profile,
-                    "GET",
-                    &query(
-                        &format!("{base}/apps/{}/types", segment(required(m, "app")?)),
-                        &list_query(m, &[]),
-                    ),
-                    None,
-                )
-                .await;
+                return client
+                    .json(
+                        "GET",
+                        &query(
+                            &format!("{base}/apps/{}/types", segment(required(m, "app")?)),
+                            &list_query(m, &[]),
+                        ),
+                        None,
+                        None,
+                    )
+                    .await;
             }
-            let t = required(m, "type")?;
-            let app = type_app(t)?;
-            let d = required(m, "description")?;
-            if d.is_empty() || d.len() > 1000 {
+            let typ = required(m, "type")?;
+            let app = type_app(typ)?;
+            let mut body = json!({});
+            if let Some(description) = s(m, "description") {
+                if description.trim().is_empty() || description.len() > 1000 {
+                    return Err(Error::input(
+                        "Description must contain 1 to 1000 UTF-8 bytes.",
+                    ));
+                }
+                body["description"] = description.into();
+            }
+            if let Some(schema) = s(m, "schema") {
+                let bytes = if let Some(path) = schema.strip_prefix('@') {
+                    fs::read(path).map_err(|_| Error::input("Could not read schema file."))?
+                } else {
+                    schema.as_bytes().to_vec()
+                };
+                let schema = strict_json(&bytes)?;
+                if !schema.is_object() && !schema.is_boolean() {
+                    return Err(Error::input("Schema must be a JSON object or boolean."));
+                }
+                body["schema"] = schema;
+            }
+            if body.as_object().unwrap().is_empty() {
+                return Err(Error::input("Supply --description or --schema."));
+            }
+            let mut path = format!("{base}/apps/{}/types", segment(app));
+            if sub == "register" {
+                body["type"] = typ.into();
+            } else {
+                path.push_str(&format!("/{}", segment(typ)));
+            }
+            recipient(
+                &client,
+                &profile,
+                if sub == "register" { "POST" } else { "PATCH" },
+                &path,
+                Some(body),
+            )
+            .await
+        }
+        "sessions" => {
+            let (_, m) = m.subcommand().unwrap();
+            recipient(
+                &client,
+                &profile,
+                "GET",
+                &query(&format!("{base}/sessions"), &list_query(m, &[])),
+                None,
+            )
+            .await
+        }
+        "silent-schedule" => {
+            let (sub, m) = m.subcommand().unwrap();
+            let mut body = json!({});
+            for key in ["time", "timezone"] {
+                if let Some(value) = s(m, key) {
+                    body[key] = value.into();
+                }
+            }
+            if let Some(value) = s(m, "enabled") {
+                body["enabled"] = (value == "true").into();
+            }
+            if sub == "set" && body.as_object().unwrap().is_empty() {
+                return Err(Error::input("Supply --time, --timezone or --enabled."));
+            }
+            recipient(
+                &client,
+                &profile,
+                if sub == "set" { "PUT" } else { "GET" },
+                &format!("{base}/silent-schedule"),
+                (sub == "set").then_some(body),
+            )
+            .await
+        }
+        "listen" => {
+            let session = if b(m, "anonymous") {
+                None
+            } else {
+                match profile.session(&api) {
+                    Ok(session) => Some(session),
+                    Err(error) if error.code == "authentication_required" => None,
+                    Err(error) => return Err(error),
+                }
+            };
+            let apps: Vec<String> = m
+                .get_many::<String>("app")
+                .map(|values| values.cloned().collect())
+                .unwrap_or_default();
+            if session.is_some() && !apps.is_empty() {
                 return Err(Error::input(
-                    "Description must contain 1 to 1000 UTF-8 bytes.",
+                    "--app registers an anonymous receiver. Use --anonymous, or omit --app to receive from your account's authorized apps.",
                 ));
             }
-            let path = format!("{base}/apps/{}/types", segment(app));
-            if sub == "register" {
-                recipient(
-                    &client,
-                    &profile,
-                    "POST",
-                    &path,
-                    Some(json!({"type":t,"description":d})),
+            let mut socket = websocket::WebSocket::connect(&client).await?;
+            let registered = socket
+                .register(
+                    &apps,
+                    session.as_ref().map(|session| session.token.as_str()),
                 )
-                .await
-            } else {
-                recipient(
-                    &client,
-                    &profile,
-                    "PATCH",
-                    &format!("{path}/{}", segment(t)),
-                    Some(json!({"description":d})),
-                )
-                .await
+                .await?;
+            println!("{registered}");
+            loop {
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => {
+                        result.map_err(|_| Error::io())?;
+                        break;
+                    },
+                    event = socket.next_event() => println!("{}", serde_json::to_string(&event?).map_err(|_| Error::io())?),
+                }
             }
+            Ok(json!({"session_id":socket.session_id(), "closed":true}))
         }
         "subscriptions" => {
             let (sub, m) = m.subcommand().unwrap();
@@ -629,22 +720,35 @@ async fn run(root: &ArgMatches) -> Result<Value> {
         }
         "preferences" => {
             let (sub, m) = m.subcommand().unwrap();
-            if let Some(t) = s(m, "type") {
-                let app = type_app(t)?;
-                if s(m, "app").is_some_and(|a| a != app) {
+            let mut body = json!({});
+            for (arg, field) in [("app", "app_id"), ("type", "type"), ("from", "from")] {
+                if let Some(value) = s(m, arg) {
+                    body[field] = value.into();
+                }
+            }
+            if let Some(typ) = s(m, "type") {
+                let app = type_app(typ)?;
+                if s(m, "app").is_some_and(|selected| selected != app) {
                     return Err(Error::input("Type must belong to the selected app."));
                 }
+                body["app_id"] = app.into();
+            }
+            if sub != "list" && body.as_object().unwrap().is_empty() {
+                return Err(Error::input("Choose --app, --type or --from."));
             }
             let path = format!("{base}/preferences");
             if sub == "set" {
-                recipient(&client,&profile,"PUT",&path,Some(json!({"app_id":required(m,"app")?,"service":s(m,"service"),"type":s(m,"type"),"enabled":required(m,"enabled")?=="true"}))).await
+                body["mode"] = required(m, "mode")?.into();
+                recipient(&client, &profile, "PUT", &path, Some(body)).await
             } else {
-                let mut q = list_query(
-                    m,
-                    &[("app", "app_id"), ("service", "service"), ("type", "type")],
-                );
-                if sub == "reset" {
-                    q.retain(|(k, _)| k != "limit" && k != "cursor")
+                let mut q: Vec<(String, String)> = body
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.as_str().unwrap().to_owned()))
+                    .collect();
+                if sub == "list" {
+                    q.extend(list_query(m, &[("mode", "mode")]));
                 }
                 recipient(
                     &client,
@@ -760,6 +864,66 @@ async fn main() {
                 eprintln!("{e}")
             }
             std::process::exit(if e.code == "invalid_input" { 2 } else { 1 })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_contract_accepts_sessions_schemas_and_modes() {
+        cli().debug_assert();
+        for args in [
+            vec!["ting", "listen", "--anonymous", "--app", "dm"],
+            vec![
+                "ting",
+                "send",
+                "--type",
+                "dm.message",
+                "--session-id",
+                "recv_one",
+                "--from",
+                "si:alice",
+                "--key",
+                "one",
+                "--data",
+                "{}",
+                "--write-request",
+                "send.json",
+            ],
+            vec![
+                "ting",
+                "types",
+                "register",
+                "--type",
+                "dm.message",
+                "--description",
+                "A message",
+                "--schema",
+                "{}",
+            ],
+            vec![
+                "ting",
+                "preferences",
+                "set",
+                "--from",
+                "si:alice",
+                "--mode",
+                "blocked",
+            ],
+            vec![
+                "ting",
+                "silent-schedule",
+                "set",
+                "--time",
+                "09:00",
+                "--timezone",
+                "Asia/Kolkata",
+            ],
+        ] {
+            assert!(cli().try_get_matches_from(args).is_ok());
         }
     }
 }

@@ -82,13 +82,13 @@ function Inbox() {
       <div className={styles.filters}>
         <Select label="Application" value={appFilter} onValueChange={value => { setAppFilter(value); setTypeQuery(''); setTypeFilter(''); }} options={appOptions} />
         <Select label="Status" value={readFilter} onValueChange={setReadFilter} options={[{ value: 'any', label: 'Any status' }, { value: 'false', label: 'Unread' }, { value: 'true', label: 'Read' }]} />
-        <SearchField label="Exact type" placeholder="app.service.event" value={typeQuery} onValueChange={setTypeQuery} />
+        <SearchField label="Exact type" placeholder="app.tingid" value={typeQuery} onValueChange={setTypeQuery} />
       </div>
       <div className={styles.list}>
         <ListStatus list={inbox} empty={<EmptyState
           icon={scope === 'silent' ? <BellOff size={24} strokeWidth={1.5} /> : <InboxIcon size={24} strokeWidth={1.5} />}
           title={scope === 'silent' ? 'A little peace and quiet.' : 'You’re all caught up.'}
-          description={scope === 'silent' ? 'Silent tings stay here for one calendar month from creation, without interrupting you.' : filtered ? 'No tings match these filters. Try another application or status.' : 'Your apps will send updates here once you connect them. In the meantime, enjoy the quiet.'}
+          description={scope === 'silent' ? 'Pending silent tings wait here until their scheduled digest reaches an active session.' : filtered ? 'No tings match these filters. Try another application or status.' : 'Your apps will send updates here once you connect them. In the meantime, enjoy the quiet.'}
           action={<TextLink href={routes.docs.href}>Connect your first app<ArrowRight size={15} aria-hidden="true" /></TextLink>}
         />} />
         {inbox.items.map(ting => <button key={ting.id} type="button" className={styles.row} data-unread={ting.read ? undefined : ''} onClick={() => detail.show(ting)}>
@@ -103,7 +103,7 @@ function Inbox() {
         <More list={inbox} />
       </div>
     </section>
-    <Footnote icon={<ShieldCheck size={14} aria-hidden="true" />}>Read or silent: one calendar month. Unread and non-silent: three. Age starts at creation; opening a ting marks it as read.</Footnote>
+    <Footnote icon={<ShieldCheck size={14} aria-hidden="true" />}>Read or delivered silent: one calendar month. Unread and non-silent: three. Pending silent tings wait for their scheduled digest. Opening a ting marks it as read.</Footnote>
     <TingDrawer detail={detail} />
   </>;
 }

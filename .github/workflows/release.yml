@@ -35,6 +35,33 @@ jobs:
           cmp udd/api.md crates/ting-cli/docs/api.md
       - name: Build release
         run: cargo build --locked --release -p silicon-ting-cli -p silicon-ting-daemon --target ${{ matrix.target }}
+      - name: Validate native Unix commands
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/ting"
+          export SILICON_HOME="$RUNNER_TEMP/ting-platform-check"
+          mkdir -p "$SILICON_HOME"
+          "$binary" --help >/dev/null
+          "$binary" accounts --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["app_id"] == "ting"'
+          "$binary" login status --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["authenticated"] is False'
+      - name: Validate native Windows commands
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = "target/${{ matrix.target }}/release/ting.exe"
+          $env:SILICON_HOME = Join-Path $env:RUNNER_TEMP 'ting-platform-check'
+          New-Item -ItemType Directory -Force -Path $env:SILICON_HOME | Out-Null
+          & $binary --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'ting --help failed.' }
+          $accountsJson = & $binary accounts --json
+          if ($LASTEXITCODE -ne 0) { throw 'ting accounts --json failed.' }
+          if (($accountsJson | ConvertFrom-Json).app_id -ne 'ting') { throw 'Unexpected Accounts app ID.' }
+          $statusJson = & $binary login status --json
+          if ($LASTEXITCODE -ne 0) { throw 'ting login status --json failed.' }
+          if (($statusJson | ConvertFrom-Json).authenticated -cne $false) { throw 'Expected an unauthenticated fresh profile.' }
       - name: Package Unix
         if: runner.os != 'Windows'
         shell: bash

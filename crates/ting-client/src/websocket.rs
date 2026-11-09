@@ -4,7 +4,7 @@
 //! Silicon Accounts app token, and retry explicitly. Reconnect with [`reconnect_delay`],
 //! resetting the failure count after one healthy minute. Restore still-authorized
 //! subscriptions using their original hook IDs; refetch after an inbox watch starts
-//! or reconnects because hints can be lost and silent arrivals produce no hint.
+//! or reconnects because hints can be lost; silent tings arrive in scheduled digests.
 //! A `Paused` event requires explicit recovery according to its reason; a connected
 //! socket does not extend session authority. This client never acknowledges events,
 //! reenrolls recipients, refreshes sessions, or retries requests automatically.
@@ -24,7 +24,7 @@
 
 use crate::{Client, Error, Prepared, ProofOperation, Result, nonempty, strict_json};
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::{
@@ -42,17 +42,29 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const FRAME_LIMIT: usize = 1024 * 1024;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-const PONG_TIMEOUT: Duration = Duration::from_secs(10);
+const PING_INTERVAL: Duration = Duration::from_secs(5);
+const PONG_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Server notifications, preserved until explicitly consumed. Receiving one sends no ACK.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Event {
     /// A hook may include multiple applications; route every accepted item. Payloads
     /// remain JSON so additional server fields, including each item's `for`, survive.
     Tings {
-        webhook_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        tings: Vec<Value>,
+    },
+    /// One scheduled batch of silent notifications for this receiver session.
+    SilentDigest {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        digest_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_id: Option<String>,
         tings: Vec<Value>,
     },
     /// Refresh hint only; contains neither content nor delivery/read authority.
@@ -113,7 +125,9 @@ impl WebSocket {
             if ready["op"] != "ready" || ready["protocol"] != "v1" {
                 return Err(protocol_error());
             }
-            let receiver_id = ready["receiver_id"]
+            let receiver_id = ready
+                .get("session_id")
+                .unwrap_or(&ready["receiver_id"])
                 .as_str()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(protocol_error)?
@@ -136,6 +150,23 @@ impl WebSocket {
     /// Temporary connection identity used when registering or reattaching a hook.
     pub fn receiver_id(&self) -> &str {
         &self.receiver_id
+    }
+
+    /// Address this live receiver session directly when sending a ting.
+    pub fn session_id(&self) -> &str {
+        &self.receiver_id
+    }
+
+    /// Register apps for anonymous receiving, or attach an authenticated account.
+    /// An attached account receives from its existing authorized applications.
+    pub async fn register(&mut self, apps: &[String], session: Option<&str>) -> Result<Value> {
+        ids(apps, true)?;
+        let mut body = json!({"op":"register", "app_ids":apps});
+        if let Some(session) = session {
+            bounded(session, "Session token", 32768)?;
+            body["session_token"] = session.into();
+        }
+        self.request(body, "registered").await
     }
 
     /// A transport snapshot only; does not attest session authority or delivery.
@@ -220,6 +251,13 @@ impl WebSocket {
 
     async fn request(&mut self, mut body: Value, expected: &'static str) -> Result<Value> {
         body["request_id"] = uuid::Uuid::new_v4().to_string().into();
+        if matches!(
+            body["op"].as_str(),
+            Some("register" | "subscribe" | "watch_inbox")
+        ) && let Some(timezone) = crate::local_timezone()
+        {
+            body["timezone"] = timezone.into();
+        }
         if body.to_string().len() > FRAME_LIMIT {
             return Err(Error::input("WebSocket request exceeds its byte limit."));
         }
@@ -320,8 +358,7 @@ async fn run(
                 if now >= next_ping {
                     if let Err(error) = write(&mut socket, Message::Ping(vec![1].into())).await { break error; }
                     next_ping = Instant::now() + PING_INTERVAL;
-                    let deadline = Instant::now() + PONG_TIMEOUT;
-                    pong_deadline = Some(if pending.is_some() { deadline.max(request_deadline) } else { deadline });
+                    pong_deadline = Some(Instant::now() + PONG_TIMEOUT);
                 }
             },
             incoming = socket.next() => {
@@ -357,9 +394,6 @@ async fn run(
                 };
                 if let Err(error) = sent { break error; }
                 request_deadline = Instant::now() + REQUEST_TIMEOUT;
-                // Ting handles requests inline and cannot read ping until that handler
-                // finishes. Keep its full request deadline, even for an earlier ping.
-                if let Some(deadline) = &mut pong_deadline { *deadline = (*deadline).max(request_deadline); }
             },
         }
     };
@@ -368,4 +402,44 @@ async fn run(
         let _ = command.reply.send(Err(error.clone()));
     }
     let _ = events.try_send(Err(error));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_session_hook_and_digest_events() {
+        let direct: Event =
+            serde_json::from_value(json!({"op":"tings", "session_id":"recv_one", "tings":[]}))
+                .unwrap();
+        assert!(matches!(
+            direct,
+            Event::Tings {
+                webhook_id: None,
+                session_id: Some(_),
+                ..
+            }
+        ));
+        let hook: Event =
+            serde_json::from_value(json!({"op":"tings", "webhook_id":"hook_one", "tings":[]}))
+                .unwrap();
+        assert!(matches!(
+            hook,
+            Event::Tings {
+                webhook_id: Some(_),
+                ..
+            }
+        ));
+        let digest: Event = serde_json::from_value(json!({"op":"silent_digest", "session_id":"recv_one", "digest_id":"digest_one", "tings":[]})).unwrap();
+        assert!(matches!(
+            digest,
+            Event::SilentDigest {
+                digest_id: Some(_),
+                webhook_id: None,
+                ..
+            }
+        ));
+        assert!(serde_json::from_value::<Event>(json!({"op":"silent_digest", "session_id":"recv_one", "webhook_id":"hook_one", "tings":[]})).is_ok());
+    }
 }

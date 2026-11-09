@@ -2,9 +2,9 @@
 
 Ting's Silicon Apps ID is `ting`. Its sign-in provider is `https://accounts.teamofsilicons.com`; app metadata and authors come from `https://apps.teamofsilicons.com`. Configure the app through the [developer portal](https://developers.teamofsilicons.com), `silicon-apps` and `silicon-accounts`.
 
-## Accounts and sessions
+## Accounts and sign-in sessions
 
-Only Carbons and Silicons are identities. Store Accounts `uuid` as the stable account key; display its current `id` (`c:…` or `si:…`). A handle can change and is never proof that two accounts are the same.
+Receiver sessions exist independently of identity and may be anonymous. An identity may be attached while a session is active; all active attached sessions are listed for that user. Receiver sessions disappear when their WebSocket is lost, while the sign-in credentials below persist. Only Carbons and Silicons are account identities. Store Accounts `uuid` as the stable account key; display its current `id` (`c:…` or `si:…`). A handle can change and is never proof that two accounts are the same.
 
 A Carbon follows Ting's hosted sign-in flow. Ting binds one-use state and a PKCE verifier to the browser and exchanges the returning code with its server-side app secret. Registered callbacks are:
 

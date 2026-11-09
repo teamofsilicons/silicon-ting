@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useToastStack } from '@/components/silicon-ui/toast-stack/toast-stack';
-import { api, ApiError, sessionChanged, type Identity } from '@/lib/api';
+import { api, ApiError, detectedTimezone, sessionChanged, type Identity } from '@/lib/api';
 import { completeAccountsPopup, openAccountsPopup } from '@/lib/accounts-popup';
 import { legacyHashRoute } from '@/lib/routes';
 import { enc, watchDelay } from '@/lib/utils';
@@ -165,7 +165,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let stopped = false, attempt = 0, socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined, healthy: ReturnType<typeof setTimeout> | undefined;
     const pulse = () => setInboxPulse(value => value + 1);
-    const watch = () => { if (socket?.readyState === WebSocket.OPEN) { setConnection('connecting'); socket.send(JSON.stringify({ op: 'watch_inbox', request_id: crypto.randomUUID() })); } };
+    const watch = () => { if (socket?.readyState === WebSocket.OPEN) { setConnection('connecting'); socket.send(JSON.stringify({ op: 'watch_inbox', request_id: crypto.randomUUID(), timezone: detectedTimezone() })); } };
     const schedule = () => { clearTimeout(retry); setConnection('reconnecting'); retry = setTimeout(connect, watchDelay(attempt++)); };
     function connect() {
       if (stopped) return;
@@ -176,7 +176,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         try { message = JSON.parse(event.data); } catch { return; }
         if (message.op === 'ready') watch();
         if (message.op === 'watching_inbox') { setConnection('live'); pulse(); clearTimeout(healthy); healthy = setTimeout(() => { attempt = 0; }, 60_000); }
-        if (message.op === 'inbox_changed' && document.visibilityState === 'visible') pulse();
+        if (['inbox_changed', 'tings', 'silent_digest'].includes(message.op) && document.visibilityState === 'visible') pulse();
         if (message.op === 'paused' || message.op === 'error') {
           const reason = message.reason || message.error?.code;
           if (reason === 'session_expired' || reason === 'authentication_required') { setIdentity(undefined); setActionError(sessionExpired()); }

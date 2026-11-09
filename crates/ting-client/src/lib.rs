@@ -17,6 +17,12 @@ use std::{
 use url::Url;
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The device's IANA zone, used only to initialize an untouched silent schedule.
+pub fn local_timezone() -> Option<String> {
+    iana_time_zone::get_timezone().ok()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Error {
     pub code: String,
@@ -169,20 +175,13 @@ pub fn type_app(s: &str) -> Result<&str> {
     if s.len() > 255 {
         return Err(Error::input("Type exceeds 255 bytes."));
     }
-    let mut p = s.rsplitn(3, '.');
-    let event = p.next().unwrap_or("");
-    let service = p.next().unwrap_or("");
-    let app = p.next().unwrap_or("");
-    for x in [service, event] {
-        if !x.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-            || !x
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
-        {
-            return Err(Error::input(
-                "Type must use app.service.event with lowercase service and event names.",
-            ));
-        }
+    let (app, ting_id) = s
+        .split_once('.')
+        .ok_or_else(|| Error::input("Type must use app.tingid."))?;
+    if ting_id.is_empty() || !ting_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(Error::input(
+            "Type must use app.tingid with one alphanumeric ting ID and no further nesting.",
+        ));
     }
     if app.len() > 80
         || !app.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
@@ -298,6 +297,9 @@ impl Client {
         let mut req = self
             .http
             .request(method, format!("{}{}", self.origin, path));
+        if let Some(timezone) = local_timezone() {
+            req = req.header("X-Ting-Timezone", timezone);
+        }
         if let Some(c) = credential {
             req = req.bearer_auth(c)
         }
@@ -393,7 +395,10 @@ impl Prepared {
             .as_object()
             .ok_or_else(|| Error::input("Request must be a JSON object."))?;
         let (required, optional): (&[&str], &[&str]) = match operation {
-            ProofOperation::Send => (&["type", "for", "key", "data"], &["metadata", "delivery"]),
+            ProofOperation::Send => (
+                &["type", "key", "data"],
+                &["for", "session_id", "from", "metadata", "delivery"],
+            ),
             ProofOperation::Register => (&["app_id"], &["for"]),
             ProofOperation::Subscriptions => (&["app_id"], &["for", "limit", "cursor"]),
             ProofOperation::Revoke => (&["id"], &["app_id"]),
@@ -411,6 +416,7 @@ impl Prepared {
                 return Err(Error::input(format!("Unknown request field {k}.")));
             }
             match k.as_str() {
+                "from" if value.is_null() => {}
                 "data" | "metadata" => {
                     if !value.is_object() {
                         return Err(Error::input(format!("{k} must be an object.")));
@@ -453,6 +459,12 @@ impl Prepared {
                     k,
                 )?,
             }
+        }
+        if operation == ProofOperation::Send
+            && !obj.contains_key("for")
+            && !obj.contains_key("session_id")
+        {
+            return Err(Error::input("A send requires for or session_id."));
         }
         if let Some(t) = v.get("type").and_then(Value::as_str) {
             let app = type_app(t)?;
@@ -814,4 +826,63 @@ pub fn unique_ids(ids: Vec<String>) -> Result<Vec<String>> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn http_reports_the_device_timezone_when_available() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let length = socket.read(&mut chunk).await.unwrap();
+                assert!(length > 0 && request.len() < 65536);
+                request.extend_from_slice(&chunk[..length]);
+            }
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+            String::from_utf8(request).unwrap().to_ascii_lowercase()
+        });
+        Client::new(&origin)
+            .unwrap()
+            .json("GET", "/v1/me", None, None)
+            .await
+            .unwrap();
+        let request = server.await.unwrap();
+        if let Some(timezone) = local_timezone() {
+            assert!(request.contains(&format!(
+                "x-ting-timezone: {}\r\n",
+                timezone.to_ascii_lowercase()
+            )));
+        } else {
+            assert!(!request.contains("x-ting-timezone:"));
+        }
+    }
+
+    #[test]
+    fn types_have_one_alphanumeric_ting_id() {
+        for value in ["dm.messageReceived", "my-app.Alert42"] {
+            assert!(type_app(value).is_ok(), "{value}");
+        }
+        for value in ["dm.msg.received", "dm.message_received", "dm.", "dm"] {
+            assert!(type_app(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn sends_can_target_an_anonymous_session() {
+        let body = json!({"type":"dm.message", "session_id":"recv_example", "from":null, "key":"one", "data":{}});
+        assert!(Prepared::new(ProofOperation::Send, serde_json::to_vec(&body).unwrap()).is_ok());
+        let mut missing = body;
+        missing.as_object_mut().unwrap().remove("session_id");
+        assert!(
+            Prepared::new(ProofOperation::Send, serde_json::to_vec(&missing).unwrap()).is_err()
+        );
+    }
 }

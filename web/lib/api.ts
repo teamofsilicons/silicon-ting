@@ -1,21 +1,30 @@
 export type List<T> = { items: T[]; next_cursor?: string };
 export type Identity = { id: string; uuid: string; kind: 'carbon' | 'silicon'; authenticated: boolean; expires_at: string };
 export type TingApp = { app_id: string; name: string; can_manage_tings: boolean };
-export type TingType = { type: string; description: string; defaults: { carbon: boolean; silicon: boolean } };
-export type Ting = { id: string; type: string; created_at: string; for: string; key: string; read: boolean; silent: boolean; data?: Record<string, unknown>; metadata?: Record<string, unknown> };
-export type Preference = { app_id: string; service: string | null; type: string | null; enabled: boolean };
+export type TingType = { type: string; description: string; schema: Record<string, unknown> | boolean; defaults: { carbon: DeliveryMode; silicon: DeliveryMode } };
+export type Ting = { id: string; type: string; created_at: string; for: string; from?: string | null; session_id?: string; key: string; read: boolean; silent: boolean; data?: Record<string, unknown>; metadata?: Record<string, unknown> };
+export type DeliveryMode = 'allowed' | 'silent' | 'blocked';
+export type Preference = { app_id: string | null; from: string | null; type: string | null; mode: DeliveryMode };
+export type SilentSchedule = { enabled: boolean; time: string; timezone: string };
+export type ReceiverSession = { session_id: string; created_at?: string; for?: string };
 export type Subscription = { id: string; app_id: string; for: string; active: boolean; required_delivery?: boolean };
 export type Hook = { id: string; for: string; state: 'connected' | 'disconnected' | 'paused' | 'detached'; pending: number; receiver_id: string | null };
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public hint?: string) { super(message); }
+}
+export function detectedTimezone(): string | undefined {
+  if (typeof window === 'undefined') return;
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; }
+  catch { return; }
 }
 let sessionGeneration = 0;
 export function sessionChanged() { sessionGeneration++; }
 // All browser credentials stay in the HttpOnly, host-only cookie.
 export async function api<T>(path: string, method = 'GET', body?: unknown, headers?: Record<string, string>): Promise<T> {
   const generation = sessionGeneration;
+  const timezone = detectedTimezone();
   let response: Response;
-  try { response = await fetch(path, { method, credentials: 'same-origin', signal: AbortSignal.timeout(25_000), headers: { Accept: 'application/json', ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); }
+  try { response = await fetch(path, { method, credentials: 'same-origin', signal: AbortSignal.timeout(25_000), headers: { Accept: 'application/json', ...(timezone ? { 'X-Ting-Timezone': timezone } : {}), ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); }
   catch { throw new ApiError(503, 'service_unavailable', 'Ting could not reach the service.', 'Check your connection and try again.'); }
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) throw new ApiError(response.status || 503, 'service_unavailable', 'Ting could not reach the service.', 'Please try again in a moment.');

@@ -1,6 +1,6 @@
 # Ting CLI
 
-Ting 0.3 uses Silicon Accounts for Carbon and Silicon identities and Silicon Apps for application discovery. Every inbox, preference and webhook belongs to an account. Applications use scoped Silicon Accounts app tokens to register recipients and send notifications.
+Ting 0.3 uses Silicon Accounts for Carbon and Silicon identities and Silicon Apps for application discovery. Account inboxes, preferences and webhooks belong to an account; live receiver sessions may also be anonymous. Applications use scoped Silicon Accounts app tokens to register recipients and send notifications.
 
 ## Install and discover
 
@@ -56,18 +56,30 @@ The daemon keeps a durable local queue. It only acknowledges delivery to Ting af
 
 The daemon uses one shared WebSocket. Active receivers pin it to one API origin; another origin returns `daemon_api_conflict`. HTTP sends can use another origin with the matching token. Local Unix sockets and Windows pipes verify the operating-system account and private profile credential.
 
+## Active receiver sessions
+
+```sh
+ting listen --anonymous --app dm
+ting listen
+ting sessions list
+```
+
+`listen --anonymous --app dm` opens an anonymous session and opts it into that app even when a login is saved. It prints the `session_id`, then incoming events until interrupted. Repeat `--app` to allow more applications. `listen` attaches the saved account when available; its existing subscriptions authorize senders. No login is needed for anonymous listening. Without `--anonymous`, a saved account is attached; combining that account with `--app` is rejected. With no saved login, `listen --app dm` also works anonymously. The command exits on transport failure; rerun it to create a new session. `sessions list` shows the signed-in account’s active receiver sessions.
+
+Every WebSocket connection has its own session ID. The server pings every five seconds, requires a pong within five seconds, and removes lost sessions. Reconnect creates a new ID. The CLI responds automatically. Sign-in credentials persist separately from these live receiver sessions.
+
 ## Applications and notification types
 
 ```sh
 ting apps list
 ting types list --app dm
-ting types register --type dm.msg.received --description 'A new message arrived'
-ting types update --type dm.msg.received --description 'A message is available'
+ting types register --type dm.messageReceived --description 'A new message arrived' --schema '{"type":"object"}'
+ting types update --type dm.messageReceived --description 'A message is available' --schema @message-schema.json
 ```
 
 Silicon Apps provides the application catalog and author identity. Reading an application's catalog entry does not grant send or management permission. Type registration and updates require a saved Ting session belonging to an authorized app author.
 
-Type names are `app.service.event`: a Silicon Apps ID followed by lowercase service and event names. Both Carbon and Silicon defaults are enabled. Recipients can mute apps, services or events using their own preferences.
+Type names are exactly `<app-id>.<tingid>`: a Silicon Apps ID followed by a nonempty ASCII alphanumeric notification name. No deeper nesting is accepted. Every definition includes a description and JSON Schema for `data`; updates may change either or both. `--schema` accepts an inline JSON Schema object or boolean, or `@FILE`. Legacy three-part types remain visible but cannot be edited or used for new sends. Type lists are public and need no login. Carbon and Silicon defaults are allowed; recipients can make a sender, app or type silent or blocked.
 
 ## Approve a sender
 
@@ -105,12 +117,14 @@ App queries require `subscriptions.read`; revocation requires `subscriptions.rev
 Prepare the request before supplying the app token:
 
 ```sh
-ting send --type dm.msg.received --for si:assistant --key message-456 \
+ting send --type dm.messageReceived --for si:assistant --key message-456 \
   --data '{"message_id":"dm_456"}' --metadata '{}' --write-request send.json
 ting send --request-file send.json --app-token-stdin
 ```
 
-The app token must come from Silicon Accounts, target Ting and include `tings.send`. Sending requires an active recipient subscription. It does not require the sender to log into the Ting CLI.
+The app token must come from Silicon Accounts, target Ting and include `tings.send`. Sending requires an active recipient subscription, or an anonymous session that registered the app. The `data` object must satisfy the current type schema. It does not require the sender to log into the Ting CLI. Use `--from c:alice` to attribute the notification to a user; omit it for an app-originated ting. User attribution is asserted by the verified sending app.
+
+`--for si:assistant` reaches all of that account’s active sessions. Add `--session-id SESSION_ID` to reach only its specified active session. To send to an anonymous receiver, supply `--session-id` without `--for`. Session-only sends resolve to the attached user if there is exactly one; multi-user sessions require `--for`. A lost or mismatched session is rejected.
 
 Use exactly one `--app-token-stdin` or `--app-token-file PRIVATE_PATH` when executing a prepared request. The request contains no token. `--write-request` creates a private file and refuses to overwrite an existing file. Execution sends its original bytes; it cannot be combined with request-building flags. Tokens are never printed or placed in URLs.
 
@@ -147,7 +161,7 @@ List output excludes `data` and `metadata`; `get` returns full content. Read-sta
 
 ```sh
 ting inbox list --all --limit 50
-ting inbox list --app dm --type dm.msg.received --read false
+ting inbox list --app dm --type dm.messageReceived --read false
 ting inbox list --silent
 ting inbox get MESSAGE_ID
 ting inbox mark-read MESSAGE_ID OTHER_MESSAGE_ID
@@ -157,13 +171,22 @@ List and get do not mark notifications read. `--all` includes silent records; it
 
 ```sh
 ting preferences list --app dm
-ting preferences set --app dm --enabled false
-ting preferences set --app dm --service msg --enabled true
-ting preferences set --app dm --type dm.msg.received --enabled false
-ting preferences reset --app dm --type dm.msg.received
+ting preferences list --mode blocked
+ting preferences set --app dm --mode silent
+ting preferences set --from c:alice --mode blocked
+ting preferences set --app dm --type dm.messageReceived --mode allowed
+ting preferences reset --app dm --type dm.messageReceived
 ```
 
-Precedence is event override, service override, app override, then enabled. Muting stores future ordinary notifications silently and pauses eligible delivery. Unmuting can resume previously non-silent pending copies; historically silent ordinary notifications are not replayed automatically. `--service` and `--type` are mutually exclusive.
+Across matching rules, blocked wins over silent, then allowed. A sender rule uses `--from` alone; a type rule uses `--type` and optionally a matching `--app` (the app is inferred from the type). Blocked tings never enter the recipient’s history or delivery queues. Silent tings wait for a daily digest.
+
+```sh
+ting silent-schedule get
+ting silent-schedule set --time 18:30 --timezone Asia/Kolkata
+ting silent-schedule set --enabled false
+```
+
+The initial default is enabled at 00:00 in the device’s detected IANA time zone. The CLI and daemon report the operating system’s time zone automatically; if detection fails, Ting falls back to 09:00 UTC. Detection initializes an untouched schedule once and preserves later manual changes. Use `silent-schedule set` to choose a different daily time or zone. Time zones are IANA names. Disabling the daily batch keeps pending silent tings on hold. If the scheduled time arrives without eligible active sessions, pending tings wait for the next schedule. Reconnecting does not immediately send a missed batch.
 
 ## Local webhooks
 
@@ -178,7 +201,7 @@ ting daemon reconnect
 
 Omitted secret and health settings preserve their current values when reattaching a hook. `--clear-secret`, `--clear-health-url` and `--takeover` require `--id`. Use `--takeover` only to explicitly replace another receiver binding.
 
-The destination receives `{"tings":[...]}` with the `Ting-Webhook-Id` header and optional bearer secret. Each notification includes `id`, immutable `created_at`, `type`, `data`, `metadata` and `key`. Return exactly HTTP 204 after durable acceptance. Forwarding is at least once; deduplicate IDs at your destination. Ting read state is not an application-specific delivery receipt.
+The destination receives `{"tings":[...]}` with the `Ting-Webhook-Id` header and optional bearer secret. Each notification includes `id`, immutable `created_at`, `type`, `data`, `metadata`, `key`, `for`, `from`, `session_id`, `silent`, and `silent_digest`. App-originated `from` and unspecified `session_id` are null. `silent_digest: true` means the daily schedule released the notification. Return exactly HTTP 204 after durable acceptance. Forwarding is at least once; deduplicate IDs at your destination. After HTTP 204, the daemon does not retransmit a copy whose read receipt is explicitly rejected because its authority was removed; that ting may remain unread on the server. Ting read state is not an application-specific delivery receipt.
 
 `unhook` detaches a destination while retaining its ID and unfinished history. New hooks include eligible unread history; reattached hooks resume their own unfinished copies. After local disk loss, list existing hooks and reattach their stable IDs with the local URL and secret.
 
@@ -188,11 +211,11 @@ Upgrading old local receiver state preserves destinations and queued history, bu
 
 ## Required delivery
 
-A recipient must explicitly enable required delivery on a subscription before its app can use `--delivery required`. This permits automation delivery despite an ordinary mute. Without that opt-in, Ting rejects the send. Subscription revocation and session authority still apply; the app token cannot opt the recipient in.
+A recipient must explicitly enable required delivery on a subscription before its app can use `--delivery required`. This legacy capability does not override silent or blocked preferences. Without that opt-in, Ting rejects the send. Subscription revocation and session authority still apply; the app token cannot opt the recipient in.
 
 ## Retention and errors
 
-Ting retains read or silent notifications for one calendar month and unread non-silent notifications for three calendar months, measured from immutable `created_at`. Read changes and retries do not restart those periods. The daemon prunes expired copies and checks older pending copies before forwarding.
+Ting normally retains read or delivered silent notifications for one calendar month and unread non-silent notifications for three calendar months, measured from immutable `created_at`. Pending unread silent tings remain on hold until a scheduled delivery even if the schedule is off or no session is active. Unread digest copies awaiting hook acknowledgement are retained too. Once those exceptions end, original creation time controls expiry. The daemon keeps old scheduled digest copies until the server confirms their removal, and rechecks eligible copies after a preference change.
 
 Ting does not collect or send telemetry.
 

@@ -16,11 +16,13 @@ Use a separate `SILICON_HOME` for each Silicon account. Account handles use `c:`
 
 ## Register your notification types
 
-The Applications page lists the Silicon Apps catalog. Ting checks the app's author list before allowing a signed-in account to register or edit types. Use `app_id.service.event`, for example `your-app.messages.received`.
+The Applications page lists the Silicon Apps catalog. Ting checks the app's author list before allowing a signed-in account to register or edit types. Use `<app-id>.<tingid>`, for example `your-app.messageReceived`.
 
 ```sh
-ting types register --type your-app.messages.received --description 'A new message arrived.'
+ting types register --type your-app.messageReceived --description 'A new message arrived.' --schema '{"type":"object"}'
 ```
+
+The notification name after the dot is ASCII alphanumeric, with no additional nesting. Every type requires a JSON Schema for its data. `GET /v1/apps/{app-id}/types` publicly exposes definitions, descriptions and schemas. Authors can update the description or schema later.
 
 ## Obtain recipient consent
 
@@ -34,7 +36,7 @@ Once a recipient has subscribed, obtain an Accounts app-verification proof for `
 
 ```json
 {
-  "type": "your-app.messages.received",
+  "type": "your-app.messageReceived",
   "data": { "text": "A little hello." },
   "metadata": {},
   "for": "si:assistant",
@@ -44,10 +46,18 @@ Once a recipient has subscribed, obtain an Accounts app-verification proof for `
 
 Submit that body to `POST /v1/tings` with the proof in the Authorization header. Preserve the exact request and its key after an uncertain response. A retry must not invent a new event key. A recipient can revoke the subscription from Connections.
 
+## Address active sessions
+
+Every WebSocket connection creates a receiver session, including without sign-in. `ting listen --anonymous --app your-app` registers an anonymous receiver and prints its session ID. The server checks liveness with five-second ping/pong and removes lost sessions.
+
+A send with `for` reaches that account’s active sessions. Add `session_id` to restrict delivery to one of them, or omit `for` for an anonymous receiver that registered your app (a session with one attached identity instead resolves to that user). Optionally add `from` to attribute the ting to a Carbon or Silicon; omitted or null means the app itself.
+
+Recipients can set allowed, silent or blocked rules for senders, apps or types. Silent notifications wait for the configurable daily digest, retaining pending work when no eligible sessions are active. Its initial time is 00:00 in the user’s detected time zone, or 09:00 UTC if detection is unavailable. Clients report the device zone automatically; saved manual schedule choices remain unchanged. Blocked tings are not stored or delivered.
+
 ## Receive durably
 
-Attach local endpoints with `ting webhook http://localhost:3000/ting`. The shared daemon saves delivery batches before acknowledging transport. A webhook must durably accept the whole `{ "tings": [...] }` batch before returning success. Deduplicate by immutable ting ID.
+Attach local endpoints with `ting webhook http://localhost:3000/ting`. The shared daemon saves delivery batches before acknowledging transport. A webhook must durably accept the whole `{ "tings": [...] }` batch before returning HTTP 204. Deduplicate by immutable ting ID.
 
-Delivery acknowledgement, read status, and completed work are different states. Each webhook gets its own delivery copy. Read or silent tings remain for one calendar month from creation; unread, non-silent tings remain for three.
+Delivery acknowledgement, read status, and completed work are different states. Each webhook gets its own delivery copy. Read or delivered silent tings normally remain for one calendar month from creation; unread, non-silent tings remain for three. Pending silent notifications and unread digest copies awaiting hook acknowledgement remain until those delivery exceptions end.
 
 See the [API reference](/docs/api.md) and [CLI reference](/docs/cli.md).

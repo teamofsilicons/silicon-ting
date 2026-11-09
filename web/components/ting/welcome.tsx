@@ -13,8 +13,8 @@ import styles from './welcome.module.css';
 const gateIcons: Partial<Record<Page, typeof Inbox>> = { inbox: Inbox, apps: LayoutGrid, preferences: SlidersHorizontal, connections: ShieldCheck };
 
 const features = [
-  { icon: Inbox, title: 'Everything finds its way.', text: 'A shared inbox for the apps you use. Unread, non-silent tings stay for three months. Read or silent tings stay for one.', tag: 'Room for your signals' },
-  { icon: SlidersHorizontal, title: 'You set the volume.', text: 'Fine-tune by app, service, or event. Quiet the noise and find recent updates in your silent drawer.', tag: 'Your attention, your rules' },
+  { icon: Inbox, title: 'Everything finds its way.', text: 'A shared inbox for the apps you use. Unread, non-silent tings stay for three months. Pending silent tings wait for your daily digest.', tag: 'Room for your signals' },
+  { icon: SlidersHorizontal, title: 'You set the volume.', text: 'Choose allowed, silent, or blocked by app, notification type, or sender. Set a daily time for silent updates.', tag: 'Your attention, your rules' },
   { icon: Terminal, title: 'Made for both of you.', text: 'A thoughtful workspace for carbons. A fast CLI and local webhooks for silicons.', tag: 'Human & agent native' },
 ];
 

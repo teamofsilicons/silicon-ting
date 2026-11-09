@@ -2,6 +2,8 @@ mod auth;
 mod error;
 mod migration;
 mod store;
+#[cfg(test)]
+mod tests;
 mod validation;
 mod ws;
 
@@ -123,6 +125,18 @@ async fn main() -> anyhow::Result<()> {
             maintenance.auth.retry_revocations().await;
         }
     });
+    let digests = app.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let _gate = digests.mutations.lock().await;
+            if let Err(error) = digests.store.queue_due_digests() {
+                tracing::error!(error=%error,"silent digest scheduling failed");
+            }
+        }
+    });
     let retention = app.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
@@ -180,7 +194,23 @@ async fn request_id(
     next: Next,
 ) -> Response {
     let browser_origin = request.headers().get("origin").cloned();
-    let allowed = origin(&app, request.headers());
+    let public_catalog = request
+        .uri()
+        .path()
+        .strip_prefix("/v1/apps/")
+        .and_then(|path| path.strip_suffix("/types"))
+        .is_some_and(v::app_id)
+        && (request.method() == Method::GET
+            || (request.method() == Method::OPTIONS
+                && request
+                    .headers()
+                    .get("access-control-request-method")
+                    .is_some_and(|method| method == "GET")));
+    let allowed = if public_catalog {
+        Ok(())
+    } else {
+        origin(&app, request.headers())
+    };
     let permitted = allowed.is_ok();
     let mut response = match allowed {
         Ok(()) => next.run(request).await,
@@ -193,13 +223,25 @@ async fn request_id(
         .headers_mut()
         .append("Vary", HeaderValue::from_static("Origin"));
     if let Some(origin) = browser_origin.filter(|_| permitted) {
-        response
-            .headers_mut()
-            .insert("Access-Control-Allow-Origin", origin);
         response.headers_mut().insert(
-            "Access-Control-Allow-Credentials",
-            HeaderValue::from_static("true"),
+            "Access-Control-Allow-Origin",
+            if public_catalog {
+                HeaderValue::from_static("*")
+            } else {
+                origin
+            },
         );
+        if public_catalog {
+            response.headers_mut().insert(
+                "Access-Control-Allow-Methods",
+                HeaderValue::from_static("GET,OPTIONS"),
+            );
+        } else {
+            response.headers_mut().insert(
+                "Access-Control-Allow-Credentials",
+                HeaderValue::from_static("true"),
+            );
+        }
         response.headers_mut().insert(
             "Access-Control-Expose-Headers",
             HeaderValue::from_static("Ting-Request-Id"),
@@ -334,7 +376,9 @@ async fn http(
             );
             r.headers_mut().insert(
                 "Access-Control-Allow-Headers",
-                HeaderValue::from_static("Content-Type,Authorization,Idempotency-Key"),
+                HeaderValue::from_static(
+                    "Content-Type,Authorization,Idempotency-Key,X-Ting-Timezone",
+                ),
             );
         }
         return Ok(r);
@@ -361,9 +405,9 @@ async fn http(
             "Make this request from a browser origin explicitly permitted by Ting.",
         ));
     }
-    let f = query(raw)?;
+    let mut f = query(raw)?;
     let parts: Vec<_> = path.split('/').collect();
-    let b = if bytes.is_empty() {
+    let mut b = if bytes.is_empty() {
         json!({})
     } else {
         v::parse(
@@ -389,6 +433,18 @@ async fn http(
     }
     if path == "session" && method == Method::POST {
         v::fields(&b, &["slt"], &["slt"])?;
+        let timezone = headers
+            .get("x-ting-timezone")
+            .map(|value| {
+                let timezone = value
+                    .to_str()
+                    .map_err(|_| Error::invalid("Invalid time zone header."))?;
+                timezone
+                    .parse::<chrono_tz::Tz>()
+                    .map_err(|_| Error::invalid("Time zone must be an IANA name."))?;
+                Ok::<_, Error>(timezone)
+            })
+            .transpose()?;
         let (status, result) = app
             .auth
             .login(
@@ -397,12 +453,36 @@ async fn http(
                 &headers,
             )
             .await?;
+        if let Some(timezone) = timezone {
+            let _gate = app.mutations.lock().await;
+            app.store.initialize_timezone(
+                "accounts",
+                v::string(&result["identity"], "uuid", 255)?,
+                timezone,
+            )?;
+        }
         let mut r = response(status, result.clone());
         r.headers_mut()
             .insert("Set-Cookie", session_cookie(&result)?);
         r.headers_mut()
             .insert("Cache-Control", HeaderValue::from_static("no-store"));
         return Ok(r);
+    }
+    if let ("GET", ["apps", aid, "types"]) = (method.as_str(), parts.as_slice()) {
+        if !v::app_id(aid) {
+            return Err(Error::invalid("Invalid app ID."));
+        }
+        v::fields(&f, &["limit", "cursor"], &[])?;
+        v::filters(&f)?;
+        return Ok(response(
+            200,
+            app.store.page(
+                app.store.types_for_app(aid)?,
+                &format!("public:types:{aid}"),
+                &f,
+                false,
+            )?,
+        ));
     }
     if method == Method::POST
         && [
@@ -437,15 +517,31 @@ async fn http(
         return Ok(r);
     }
     let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
+    if let Some(timezone) = headers.get("x-ting-timezone") {
+        let timezone = timezone
+            .to_str()
+            .map_err(|_| Error::invalid("Invalid time zone header."))?;
+        let _gate = app.mutations.lock().await;
+        app.auth.check_session(&p)?;
+        app.store.initialize_timezone(&p.context, &p.id, timezone)?;
+    }
     if path == "me" && method == Method::GET {
         return Ok(response(200, app.auth.me(&p)?));
     }
+    if path == "preferences" {
+        for value in [&mut f, &mut b] {
+            if let Some(sender) = value.get("from").and_then(Value::as_str) {
+                // Stored sender rules remain editable after that account becomes inactive.
+                value["from"] = match uuid::Uuid::parse_str(sender) {
+                    Ok(id) => id.to_string(),
+                    Err(_) => app.auth.resolve_account(sender).await?,
+                }
+                .into();
+            }
+        }
+    }
     let apps = match (method.as_str(), parts.as_slice()) {
         ("GET", ["apps"]) => Some(app.auth.apps(&p).await?),
-        ("GET", ["apps", aid, "types"]) => {
-            app.auth.permission(&p, aid, false).await?;
-            None
-        }
         ("POST", ["apps", aid, "types"]) | ("PATCH", ["apps", aid, "types", _]) => {
             app.auth.permission(&p, aid, true).await?;
             None
@@ -462,14 +558,6 @@ async fn http(
             let value = apps.unwrap();
             let rows = value["items"].as_array().cloned().unwrap_or_default();
             Ok(response(200, app.store.page(rows, &binding, &f, false)?))
-        }
-        ("GET", ["apps", aid, "types"]) => {
-            v::fields(&f, &["limit", "cursor"], &[])?;
-            Ok(response(
-                200,
-                app.store
-                    .page(app.store.types(&p, aid)?, &binding, &f, false)?,
-            ))
         }
         ("POST", ["apps", aid, "types"]) => {
             let (s, b) = app.store.register_type(&p, aid, &b, false)?;
@@ -555,10 +643,12 @@ async fn http(
             Ok(response(200, out))
         }
         ("GET", ["preferences"]) => {
-            v::fields(&f, &["app_id", "service", "type", "limit", "cursor"], &[])?;
-            if !f["service"].is_null() && !f["type"].is_null() {
-                return Err(Error::invalid("Specify either service or type."));
-            }
+            v::fields(
+                &f,
+                &["app_id", "type", "from", "mode", "limit", "cursor"],
+                &[],
+            )?;
+            v::filters(&f)?;
             Ok(response(
                 200,
                 app.store
@@ -576,6 +666,20 @@ async fn http(
                 .await?;
             Ok(response(200, out))
         }
+        ("GET", ["sessions"]) => {
+            v::fields(&f, &["limit", "cursor"], &[])?;
+            v::filters(&f)?;
+            Ok(response(
+                200,
+                app.store
+                    .page(app.store.receiver_sessions(&p)?, &binding, &f, false)?,
+            ))
+        }
+        ("GET", ["silent-schedule"]) => {
+            v::fields(&f, &[], &[])?;
+            Ok(response(200, app.store.silent_schedule(&p)?))
+        }
+        ("PUT", ["silent-schedule"]) => Ok(response(200, app.store.set_silent_schedule(&p, &b)?)),
         ("GET", ["webhooks"]) => {
             v::fields(&f, &["limit", "cursor"], &[])?;
             Ok(response(
@@ -636,6 +740,9 @@ pub async fn app_call(
     if let Some(recipient) = b.get("for").and_then(Value::as_str) {
         body["for"] = app.auth.resolve_account(recipient).await?.into();
     }
+    if let Some(sender) = b.get("from").and_then(Value::as_str) {
+        body["from"] = app.auth.resolve_account(sender).await?.into();
+    }
     let b = &body;
     if path == "/v1/subscriptions" {
         let proof = app.auth.proof(headers, path, bytes).await?;
@@ -651,10 +758,12 @@ pub async fn app_call(
     match path {
         "/v1/tings" => {
             let result = app.store.send(&p, b)?;
-            if result.0 == 202 && !result.1["silent"].as_bool().unwrap_or(true) {
-                app.hub
-                    .inbox_changed(&p.context, v::string(b, "for", 255)?)
-                    .await;
+            if result.0 == 202
+                && result.1["status"] == "accepted"
+                && !result.1["silent"].as_bool().unwrap_or(true)
+                && let Some(recipient) = result.1["for"].as_str().or_else(|| b["for"].as_str())
+            {
+                app.hub.inbox_changed(&p.context, recipient).await;
             }
             app.changed.notify_waiters();
             Ok(result)
@@ -924,11 +1033,12 @@ async fn upgrade(
         )
         .details(json!({"supported_protocols":["v1"]})));
     }
-    let browser = if headers.contains_key("origin") {
-        Some(app.auth.authenticate(&token(&headers)?, &headers).await?)
-    } else {
-        None
-    };
+    let browser =
+        if headers.contains_key("authorization") || cookie(&headers, "ting_session").is_some() {
+            Some(app.auth.authenticate(&token(&headers)?, &headers).await?)
+        } else {
+            None
+        };
     Ok(ws
         .max_message_size(1024 * 1024)
         .max_frame_size(1024 * 1024)

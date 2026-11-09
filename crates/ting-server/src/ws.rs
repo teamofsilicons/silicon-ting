@@ -9,14 +9,12 @@ use axum::{
     http::{HeaderMap, HeaderValue},
 };
 use serde_json::{Value, json};
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::{RwLock, mpsc, watch};
 
 const CONTROL_QUEUE_CAPACITY: usize = 64;
 const WRITE_DEADLINE: Duration = Duration::from_secs(5);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct Hub {
@@ -110,6 +108,7 @@ impl Hub {
                     r.send(json!({"op":"paused","webhook_ids":chunk,"reason":reason}));
                 }
             }
+            app.store.remove_receiver_identity(rid, session)?;
             r.auth.retain(|p| p.session != session);
             if r.watch.as_ref().is_some_and(|p| p.session == session) {
                 r.watch = None;
@@ -158,10 +157,81 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             result["op"] = "accepted".into();
             result
         }
+        "register" => {
+            v::fields(
+                b,
+                &["op", "request_id", "session_token", "app_ids", "timezone"],
+                &["op", "request_id"],
+            )?;
+            let apps = if b.get("app_ids").is_some() {
+                v::ids(b, "app_ids", true)?
+            } else {
+                Vec::new()
+            };
+            if apps.iter().any(|id| !v::app_id(id)) {
+                return Err(Error::invalid(
+                    "app_ids must contain Silicon Apps application IDs.",
+                ));
+            }
+            let principal = if b.get("session_token").is_some() {
+                Some(
+                    app.auth
+                        .authenticate(v::string(b, "session_token", 32768)?, &HeaderMap::new())
+                        .await?,
+                )
+            } else if let Some(p) = browser {
+                Some(app.auth.revalidate(p).await?)
+            } else {
+                None
+            };
+            if principal.is_some() && !apps.is_empty() {
+                return Err(Error::invalid(
+                    "Identified users authorize apps through subscriptions; omit app_ids when attaching an identity.",
+                ));
+            }
+            let _gate = app.mutations.lock().await;
+            let mut map = app.hub.receivers.write().await;
+            let r = map.get_mut(rid).ok_or_else(Error::not_found)?;
+            if let Some(p) = &principal {
+                app.auth.check_session(p)?;
+                if b.get("timezone").is_some() {
+                    app.store.initialize_timezone(
+                        &p.context,
+                        &p.id,
+                        v::string(b, "timezone", 100)?,
+                    )?;
+                }
+                app.store.attach_receiver_session(rid, p)?;
+                r.auth.retain(|q| !(q.context == p.context && q.id == p.id));
+                r.auth.push(p.clone());
+            } else {
+                if !r.auth.is_empty() {
+                    return Err(Error::invalid(
+                        "Identified sessions authorize apps through subscriptions.",
+                    ));
+                }
+                if b.get("timezone").is_some() {
+                    app.store.initialize_timezone(
+                        "accounts",
+                        &format!("session:{rid}"),
+                        v::string(b, "timezone", 100)?,
+                    )?;
+                }
+                app.store.register_receiver_apps(rid, &apps)?;
+            }
+            app.changed.notify_waiters();
+            json!({"op":"registered","session_id":rid,"for":principal.map(|p| p.id),"app_ids":apps})
+        }
         "subscribe" => {
             v::fields(
                 b,
-                &["op", "request_id", "session_token", "webhook_ids"],
+                &[
+                    "op",
+                    "request_id",
+                    "session_token",
+                    "webhook_ids",
+                    "timezone",
+                ],
                 &["op", "request_id", "session_token", "webhook_ids"],
             )?;
             let p = app
@@ -171,19 +241,24 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             let ids = v::ids(b, "webhook_ids", true)?;
             let _gate = app.mutations.lock().await;
             app.auth.check_session(&p)?;
+            if b.get("timezone").is_some() {
+                app.store
+                    .initialize_timezone(&p.context, &p.id, v::string(b, "timezone", 100)?)?;
+            }
             let replaced = app.store.bind(&p, rid, &ids, false, false)?;
+            app.store.attach_receiver_session(rid, &p)?;
             app.hub.pause_replaced(replaced, "binding_replaced").await;
             let mut map = app.hub.receivers.write().await;
             let r = map.get_mut(rid).ok_or_else(Error::not_found)?;
             r.auth.retain(|q| !(q.context == p.context && q.id == p.id));
             r.auth.push(p.clone());
             app.changed.notify_waiters();
-            json!({"op":"subscribed","for":p.id,"webhook_ids":ids})
+            json!({"op":"subscribed","session_id":rid,"for":p.id,"webhook_ids":ids})
         }
         "watch_inbox" => {
             v::fields(
                 b,
-                &["op", "request_id", "session_token"],
+                &["op", "request_id", "session_token", "timezone"],
                 &["op", "request_id"],
             )?;
             let p = if let Some(p) = browser {
@@ -195,10 +270,17 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
             };
             let _gate = app.mutations.lock().await;
             app.auth.check_session(&p)?;
+            if b.get("timezone").is_some() {
+                app.store
+                    .initialize_timezone(&p.context, &p.id, v::string(b, "timezone", 100)?)?;
+            }
             let mut map = app.hub.receivers.write().await;
             let r = map.get_mut(rid).ok_or_else(Error::not_found)?;
+            app.store.attach_receiver_session(rid, &p)?;
+            r.auth.retain(|q| !(q.context == p.context && q.id == p.id));
+            r.auth.push(p.clone());
             r.watch = Some(p);
-            json!({"op":"watching_inbox"})
+            json!({"op":"watching_inbox","session_id":rid})
         }
         "unsubscribe" | "ack" => {
             if op == "ack" {
@@ -262,12 +344,12 @@ async fn handle(app: &Shared, rid: &str, b: &Value, browser: Option<&Principal>)
     Ok(response)
 }
 async fn validate_authority(app: &Shared, rid: &str) -> Result<()> {
-    let (auth, watch) = {
+    let auth = {
         let map = app.hub.receivers.read().await;
         let Some(r) = map.get(rid) else { return Ok(()) };
-        (r.auth.clone(), r.watch.clone())
+        r.auth.clone()
     };
-    for p in auth.iter().chain(watch.iter()) {
+    for p in &auth {
         let valid = app.auth.revalidate(p).await;
         if let Err(e) = valid {
             let reason = if e.status == 401 {
@@ -294,6 +376,7 @@ async fn validate_authority(app: &Shared, rid: &str) -> Result<()> {
                     )
                     .await;
             }
+            app.store.remove_receiver_identity(rid, &p.session)?;
             let mut map = app.hub.receivers.write().await;
             if let Some(r) = map.get_mut(rid) {
                 r.auth.retain(|q| q.session != p.session);
@@ -308,7 +391,28 @@ async fn validate_authority(app: &Shared, rid: &str) -> Result<()> {
 }
 async fn offer(app: &Shared, rid: &str) -> Result<Vec<Value>> {
     let _gate = app.mutations.lock().await;
+    let principals = app
+        .hub
+        .receivers
+        .read()
+        .await
+        .get(rid)
+        .map(|r| r.auth.clone())
+        .unwrap_or_default();
+    for p in principals {
+        if let Err(error) = app.auth.check_session(&p) {
+            if error.status != 401 {
+                return Err(error);
+            }
+            app.hub
+                .invalidate_session(app, &p.session, "session_expired")
+                .await?;
+        }
+    }
     let mut out = vec![];
+    if let Some(event) = app.store.offer_session(rid)? {
+        out.push(event);
+    }
     for (h, _, _, session) in app.store.active_hooks(rid)? {
         if let Err(error) = app.auth.check_session_id(&session) {
             if error.status != 401 {
@@ -333,105 +437,190 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
         Ok(Ok(()))
     )
 }
+
+struct Heartbeat {
+    pending: Option<Vec<u8>>,
+    sequence: u64,
+}
+impl Heartbeat {
+    fn new() -> Self {
+        Self {
+            pending: None,
+            sequence: 0,
+        }
+    }
+    fn ping(&mut self) -> Option<Vec<u8>> {
+        if self.pending.is_some() {
+            return None;
+        }
+        self.sequence += 1;
+        let payload = self.sequence.to_be_bytes().to_vec();
+        self.pending = Some(payload.clone());
+        Some(payload)
+    }
+    fn pong(&mut self, payload: &[u8]) {
+        if self.pending.as_deref() == Some(payload) {
+            self.pending = None;
+        }
+    }
+}
+
+// Requests and Accounts calls run separately so a slow authorization check cannot suspend liveness.
+async fn receiver_work(
+    app: Shared,
+    rid: String,
+    browser: Option<Principal>,
+    mut requests: mpsc::Receiver<Value>,
+    output: mpsc::Sender<Value>,
+) -> Result<()> {
+    let mut delivery = tokio::time::interval(Duration::from_secs(1));
+    delivery.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut revalidate = tokio::time::interval(Duration::from_secs(30));
+    revalidate.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    revalidate.tick().await;
+    let changed = app.changed.notified();
+    tokio::pin!(changed);
+    loop {
+        let values = tokio::select! {
+            request = requests.recv() => {
+                let Some(body) = request else { return Ok(()) };
+                let id = body["request_id"].as_str();
+                let reply = match tokio::time::timeout(Duration::from_secs(30), handle(&app, &rid, &body, browser.as_ref())).await {
+                    Ok(Ok(reply)) => reply,
+                    Ok(Err(error)) => err(id, error),
+                    Err(_) => err(id, Error::unavailable("The operation timed out; its result may be uncertain.")),
+                };
+                vec![reply]
+            }
+            _ = &mut changed => {
+                changed.set(app.changed.notified());
+                offer(&app, &rid).await?
+            }
+            _ = delivery.tick() => offer(&app, &rid).await?,
+            _ = revalidate.tick() => {
+                validate_authority(&app, &rid).await?;
+                Vec::new()
+            }
+        };
+        for value in values {
+            output
+                .try_send(value)
+                .map_err(|_| Error::unavailable("The receiver is not consuming notifications."))?;
+        }
+    }
+}
+
 pub async fn connection(app: Shared, mut socket: WebSocket, browser: Option<Principal>) {
     let rid = store::id("recv");
     let (tx, mut rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
     let (disconnect, mut disconnected) = watch::channel(false);
-    app.hub.receivers.write().await.insert(
-        rid.clone(),
-        Receiver {
-            tx,
-            disconnect,
-            auth: vec![],
-            watch: None,
-        },
-    );
-    tokio::select! {
-        biased;
-        _ = disconnected.changed() => {},
-        _ = async {
-            let greeting = json!({"op":"ready","receiver_id":rid,"protocol":"v1"});
-            if !send(&mut socket, Message::Text(greeting.to_string().into())).await {
-                return;
+    {
+        let _gate = app.mutations.lock().await;
+        let initialized = app.store.create_receiver_session(&rid).and_then(|()| {
+            if let Some(p) = &browser {
+                app.auth.check_session(p)?;
+                app.store.attach_receiver_session(&rid, p)?;
             }
-            let mut delivery = tokio::time::interval(Duration::from_secs(1));
-            delivery.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut revalidate = tokio::time::interval(Duration::from_secs(30));
-            revalidate.tick().await;
-            let mut ping = tokio::time::interval(Duration::from_secs(1));
-            let mut last_ping = Instant::now();
-            let mut awaiting: Option<Instant> = None;
-            // Retain notifications received while another selected branch awaits Accounts or I/O.
-            let changed = app.changed.notified();
-            tokio::pin!(changed);
-            'connected: loop {
-                tokio::select! {
-                    incoming = socket.recv() => match incoming {
-                        Some(Ok(Message::Text(text))) => {
-                            let reply = match v::parse(text.as_bytes(), 1024 * 1024) {
-                                Ok(b) => {
-                                    let request = b["request_id"].as_str();
-                                    match tokio::time::timeout(Duration::from_secs(30), handle(&app, &rid, &b, browser.as_ref())).await {
-                                        Ok(Ok(reply)) => reply,
-                                        Ok(Err(e)) => err(request, e),
-                                        Err(_) => err(request, Error::unavailable("The operation timed out; its result may be uncertain.")),
-                                    }
-                                }
-                                Err(e) => err(None, e),
-                            };
-                            if !send(&mut socket, Message::Text(reply.to_string().into())).await { break; }
-                        }
-                        Some(Ok(Message::Ping(b))) => {
-                            if !send(&mut socket, Message::Pong(b)).await { break; }
-                        }
-                        Some(Ok(Message::Pong(_))) => awaiting = None,
-                        Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                        Some(Ok(Message::Binary(_))) => {
-                            send(&mut socket, Message::Close(Some(axum::extract::ws::CloseFrame {
-                                code: 1003, reason: "JSON text frames required".into(),
-                            }))).await;
-                            break;
-                        }
-                    },
-                    Some(value) = rx.recv() => {
-                        if !send(&mut socket, Message::Text(value.to_string().into())).await { break; }
-                    }
-                    _ = &mut changed => {
-                        changed.set(app.changed.notified());
-                        match offer(&app, &rid).await {
-                            Ok(values) => for value in values {
-                                if !send(&mut socket, Message::Text(value.to_string().into())).await { break 'connected; }
-                            },
-                            Err(_) => break,
-                        }
-                    }
-                    _ = delivery.tick() => {
-                        match offer(&app, &rid).await {
-                            Ok(values) => for value in values {
-                                if !send(&mut socket, Message::Text(value.to_string().into())).await { break 'connected; }
-                            },
-                            Err(_) => break,
+            Ok(())
+        });
+        if let Err(error) = initialized {
+            tracing::warn!(error=%error, "receiver session initialization failed");
+            let _ = app.store.remove_receiver_session(&rid);
+            return;
+        }
+        app.hub.receivers.write().await.insert(
+            rid.clone(),
+            Receiver {
+                tx: tx.clone(),
+                disconnect: disconnect.clone(),
+                auth: browser.iter().cloned().collect(),
+                watch: None,
+            },
+        );
+    }
+    let (requests, incoming_requests) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
+    let work_app = app.clone();
+    let work_rid = rid.clone();
+    let worker = tokio::spawn(async move {
+        if let Err(error) = receiver_work(work_app, work_rid, browser, incoming_requests, tx).await
+        {
+            tracing::debug!(error=%error, "receiver worker closed");
+        }
+        disconnect.send_replace(true);
+    });
+    let greeting = json!({"op":"ready","session_id":rid,"receiver_id":rid,"protocol":"v1"});
+    if send(&mut socket, Message::Text(greeting.to_string().into())).await {
+        let mut heartbeat = Heartbeat::new();
+        let mut ping = tokio::time::interval_at(
+            tokio::time::Instant::now() + HEARTBEAT_INTERVAL,
+            HEARTBEAT_INTERVAL,
+        );
+        ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                biased;
+                _ = disconnected.changed() => break,
+                _ = ping.tick() => {
+                    let Some(payload) = heartbeat.ping() else { break };
+                    if !send(&mut socket, Message::Ping(payload.into())).await { break; }
+                }
+                incoming = socket.recv() => match incoming {
+                    Some(Ok(Message::Text(text))) => {
+                        match v::parse(text.as_bytes(), 1024 * 1024) {
+                            Ok(body) => if requests.try_send(body).is_err() { break; },
+                            Err(error) => {
+                                if !send(&mut socket, Message::Text(err(None, error).to_string().into())).await { break; }
+                            }
                         }
                     }
-                    _ = revalidate.tick() => {
-                        if validate_authority(&app, &rid).await.is_err() { break; }
+                    Some(Ok(Message::Ping(payload))) => {
+                        if !send(&mut socket, Message::Pong(payload)).await { break; }
                     }
-                    _ = ping.tick() => {
-                        if awaiting.is_some_and(|t| t.elapsed() > Duration::from_secs(10)) { break; }
-                        if last_ping.elapsed() >= Duration::from_secs(30) && awaiting.is_none() {
-                            if !send(&mut socket, Message::Ping(vec![1].into())).await { break; }
-                            let now = Instant::now();
-                            last_ping = now;
-                            awaiting = Some(now);
-                        }
+                    Some(Ok(Message::Pong(payload))) => heartbeat.pong(&payload),
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(Message::Binary(_))) => {
+                        send(&mut socket, Message::Close(Some(axum::extract::ws::CloseFrame {
+                            code: 1003, reason: "JSON text frames required".into(),
+                        }))).await;
+                        break;
                     }
+                },
+                Some(value) = rx.recv() => {
+                    if !send(&mut socket, Message::Text(value.to_string().into())).await { break; }
                 }
             }
-        } => {},
+        }
     }
-    // Drop transport before waiting on shared state; a lost pause closes promptly.
+    // Stop in-flight work before removing its session and detaching durable webhook deliveries.
     drop(socket);
+    worker.abort();
+    let _ = worker.await;
     let _gate = app.mutations.lock().await;
     app.hub.receivers.write().await.remove(&rid);
-    let _ = app.store.release_receiver(&rid);
+    if let Err(error) = app.store.release_receiver(&rid) {
+        tracing::error!(error=%error, "receiver webhook cleanup failed");
+    }
+    if let Err(error) = app.store.remove_receiver_session(&rid) {
+        tracing::error!(error=%error, "receiver session cleanup failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_matching_pong_keeps_session_alive() {
+        let mut heartbeat = Heartbeat::new();
+        let first = heartbeat.ping().unwrap();
+        heartbeat.pong(b"unsolicited");
+        assert!(heartbeat.ping().is_none());
+        heartbeat.pong(&first);
+        let second = heartbeat.ping().unwrap();
+        assert_ne!(first, second);
+        heartbeat.pong(&first);
+        assert!(heartbeat.ping().is_none());
+        heartbeat.pong(&second);
+        assert!(heartbeat.ping().is_some());
+    }
 }

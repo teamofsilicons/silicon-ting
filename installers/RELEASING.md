@@ -6,6 +6,7 @@ Keep the workspace, four Cargo package versions, `apps.yaml` and frontend packag
 cp udd/cli.md crates/ting-cli/docs/cli.md
 cp udd/api.md crates/ting-cli/docs/api.md
 cargo check --locked --workspace
+cargo test --locked --workspace
 cargo fmt --all --check
 ```
 
@@ -16,7 +17,7 @@ cargo publish -p silicon-ting-client --locked
 cargo publish -p silicon-ting-cli --locked
 ```
 
-Push a version tag such as `v0.3.1` after committing to main. `.github/workflows/release.yml` builds x86_64 and ARM64 packages on Linux, macOS and Windows and publishes six archives plus `SHA256SUMS`. The version tag must match the binary version. Each archive contains `ting` and its companion `ting-daemon`.
+Push a version tag such as `v0.4.0` after committing to main. `.github/workflows/release.yml` builds x86_64 and ARM64 packages on Linux, macOS and Windows and publishes six archives plus `SHA256SUMS`. The version tag must match the binary version. Each archive contains `ting` and its companion `ting-daemon`. Before packaging, every native CI runner executes the built target’s `--help`, `accounts --json`, and `login status --json` commands with a fresh local profile. Command failures or invalid Accounts/session JSON fail the job. Both packaging paths also check the binary version against the release tag.
 
 ## Silicon Apps
 
@@ -24,16 +25,23 @@ Sign in to `silicon-apps` as an author of `ting`. Current publication uses `si:t
 
 ```sh
 mkdir -p target/release-assets
-gh release download v0.3.1 --repo teamofsilicons/silicon-ting --dir target/release-assets --pattern 'ting-v0.3.1-*' --pattern SHA256SUMS
-python3 scripts/package-apps.py --assets target/release-assets --output target/ting-apps-0.3.1.tar.gz
-silicon-apps upload ting --target linux-x86_64 target/ting-apps-0.3.1.tar.gz --json
+gh release download v0.4.0 --repo teamofsilicons/silicon-ting --dir target/release-assets --pattern 'ting-v0.4.0-*' --pattern SHA256SUMS
+python3 scripts/package-apps.py --assets target/release-assets --output target/ting-apps-0.4.0.tar.gz
+silicon-apps upload ting --target linux-x86_64 target/ting-apps-0.4.0.tar.gz --json
 ```
 
-Repeat upload for each available target. `silicon-apps targets --json` reports configured validation runners; the Apps capabilities endpoint checks whether they are live. Each upload validates the target's `--help`, `accounts --json` and `login status --json` commands. A target without a runner cannot currently be uploaded through the public API; keep its native GitHub archive available through the optional installer. Record each accepted package ID, then create and promote the release:
+Repeat upload for both Linux targets; Silicon Apps validates these on its server-side runners. With Silicon Apps CLI 0.3.3 or newer, macOS and Windows uploads require `--confirm-platform-checks`. Use that flag only after the matching native release CI job passed its three command checks for the exact archive being uploaded:
 
 ```sh
-silicon-apps release ting --version 0.3.1 --package PACKAGE_ID --package ANOTHER_PACKAGE_ID
-silicon-apps promote ting DEVELOPMENT_RELEASE_ID --version 0.3.1
+silicon-apps upload ting --target macos-aarch64 target/ting-apps-0.4.0.tar.gz --confirm-platform-checks --json
+silicon-apps upload ting --target windows-x86_64 target/ting-apps-0.4.0.tar.gz --confirm-platform-checks --json
+```
+
+Upload the remaining macOS and Windows targets with the same confirmation after their native CI checks pass. `silicon-apps targets --json` reports supported targets. Keep the six native GitHub archives available through the optional installer as well. Record each accepted package ID, then create and promote the release:
+
+```sh
+silicon-apps release ting --version 0.4.0 --package PACKAGE_ID --package ANOTHER_PACKAGE_ID
+silicon-apps promote ting DEVELOPMENT_RELEASE_ID --version 0.4.0
 silicon-apps readiness ting
 silicon-apps publish ting
 ```
