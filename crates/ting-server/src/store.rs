@@ -49,16 +49,18 @@ fn conflict(code: &str, msg: &str) -> Error {
 }
 
 pub struct Store {
+    prefixes: crate::namespaces::Prefixes,
     db: Mutex<Connection>,
 }
 impl Store {
-    pub fn open(path: &str) -> anyhow::Result<Self> {
+    pub fn open(path: &str, prefixes: &crate::namespaces::Prefixes) -> anyhow::Result<Self> {
         let c = Connection::open(path)?;
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         crate::migration::ensure_current(&c)?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS types(ctx TEXT,app TEXT,name TEXT,description TEXT,PRIMARY KEY(ctx,name));
  CREATE INDEX IF NOT EXISTS accounts_types_app ON types(ctx,app,name);
+ CREATE TABLE IF NOT EXISTS type_namespaces(ctx TEXT NOT NULL,prefix TEXT NOT NULL,owner_app TEXT NOT NULL,PRIMARY KEY(ctx,prefix));
  CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,active INTEGER,UNIQUE(ctx,app,recipient));
  CREATE TABLE IF NOT EXISTS preferences(ctx TEXT,recipient TEXT,app TEXT,scope TEXT,enabled INTEGER,PRIMARY KEY(ctx,recipient,app,scope));
  CREATE TABLE IF NOT EXISTS tings(id TEXT PRIMARY KEY,ctx TEXT,app TEXT,recipient TEXT,type TEXT,created TEXT,body TEXT,silent INTEGER,read INTEGER DEFAULT 0);
@@ -74,10 +76,11 @@ impl Store {
  UPDATE hooks SET receiver=NULL,session=NULL,state=CASE WHEN state='connected' THEN 'disconnected' ELSE state END;
  UPDATE deliveries SET delivery=0,offer_receiver=NULL,last_offer=0 WHERE read=0;")?;
         crate::migration::copy_types(&c)?;
+        Self::initialize_namespaces(&c, prefixes)?;
         c.execute_batch("CREATE TABLE IF NOT EXISTS type_schemas(ctx TEXT,name TEXT,schema TEXT NOT NULL,PRIMARY KEY(ctx,name));
  CREATE TABLE IF NOT EXISTS ting_preferences(ctx TEXT,recipient TEXT,app TEXT,scope TEXT,mode TEXT NOT NULL,PRIMARY KEY(ctx,recipient,app,scope));
  INSERT OR IGNORE INTO ting_preferences SELECT ctx,recipient,app,scope,CASE enabled WHEN 1 THEN 'allowed' ELSE 'silent' END FROM preferences WHERE scope<>'delivery:required' AND scope NOT LIKE 'service:%';
- INSERT OR IGNORE INTO ting_preferences SELECT p.ctx,p.recipient,p.app,'type:'||t.name,CASE p.enabled WHEN 1 THEN 'allowed' ELSE 'silent' END FROM preferences p JOIN types t ON t.ctx=p.ctx AND t.app=p.app AND t.name LIKE p.app||'.'||substr(p.scope,9)||'.%' WHERE p.scope LIKE 'service:%';
+ INSERT OR IGNORE INTO ting_preferences SELECT p.ctx,p.recipient,p.app,'type:'||t.name,CASE p.enabled WHEN 1 THEN 'allowed' ELSE 'silent' END FROM preferences p JOIN types t ON t.ctx=p.ctx AND t.app=p.app AND substr(t.name,instr(t.name,'.')+1) LIKE substr(p.scope,9)||'.%' WHERE p.scope LIKE 'service:%';
  DELETE FROM preferences WHERE scope LIKE 'service:%';
  CREATE TABLE IF NOT EXISTS receiver_sessions(id TEXT PRIMARY KEY,created TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS receiver_accounts(receiver TEXT,ctx TEXT,recipient TEXT,auth_session TEXT,PRIMARY KEY(receiver,ctx,recipient),FOREIGN KEY(receiver) REFERENCES receiver_sessions(id) ON DELETE CASCADE);
@@ -112,7 +115,10 @@ impl Store {
             // Existing schedules may be intentional, including 09:00 UTC.
             c.execute_batch("ALTER TABLE silent_schedules ADD COLUMN default_pending INTEGER NOT NULL DEFAULT 0;")?;
         }
-        let store = Self { db: Mutex::new(c) };
+        let store = Self {
+            db: Mutex::new(c),
+            prefixes: prefixes.clone(),
+        };
         store.prune()?;
         Ok(store)
     }
@@ -122,14 +128,92 @@ impl Store {
             .lock()
             .map_err(|_| Error::unavailable("Database writer lock is unavailable."))
     }
+    fn initialize_namespaces(
+        db: &Connection,
+        prefixes: &crate::namespaces::Prefixes,
+    ) -> anyhow::Result<()> {
+        let tx = db.unchecked_transaction()?;
+        let mut claims = std::collections::BTreeMap::<(String, String), String>::new();
+        {
+            let mut query=tx.prepare("SELECT ctx,prefix,owner_app FROM type_namespaces UNION SELECT ctx,name,app FROM types UNION SELECT DISTINCT ctx,type,app FROM tings")?;
+            let rows = query.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (ctx, name, owner) = row?;
+                // Legacy three-part names still establish immutable prefix ownership.
+                let prefix = name
+                    .split_once('.')
+                    .map_or(name.as_str(), |(prefix, _)| prefix);
+                anyhow::ensure!(
+                    v::app_id(prefix) && v::app_id(&owner),
+                    "Stored type namespace identity is invalid"
+                );
+                anyhow::ensure!(
+                    prefixes.owner(prefix) == owner,
+                    "Type prefix {prefix} is already owned by {owner}; aliases cannot transfer existing ownership"
+                );
+                if let Some(previous) = claims.insert((ctx, prefix.to_owned()), owner.clone()) {
+                    anyhow::ensure!(
+                        previous == owner,
+                        "Conflicting stored type namespace owners"
+                    );
+                }
+            }
+        }
+        for (prefix, owner) in prefixes.aliases() {
+            let key = ("accounts".to_owned(), prefix.to_owned());
+            if let Some(old) = claims.insert(key, owner.to_owned()) {
+                anyhow::ensure!(
+                    old == owner,
+                    "Configured type alias conflicts with existing ownership"
+                );
+            }
+        }
+        for ((ctx, prefix), owner) in claims {
+            tx.execute(
+                "INSERT OR IGNORE INTO type_namespaces(ctx,prefix,owner_app) VALUES(?,?,?)",
+                params![ctx, prefix, owner],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    fn claim_namespace(&self, db: &Connection, ctx: &str, app: &str, typ: &str) -> Result<()> {
+        let prefix = v::type_parts(typ)?.0;
+        if self.prefixes.owner(prefix) != app {
+            return Err(v_err("The type prefix is not owned by this app."));
+        }
+        db.execute(
+            "INSERT OR IGNORE INTO type_namespaces(ctx,prefix,owner_app) VALUES(?,?,?)",
+            params![ctx, prefix, app],
+        )?;
+        let owner: String = db.query_row(
+            "SELECT owner_app FROM type_namespaces WHERE ctx=? AND prefix=?",
+            params![ctx, prefix],
+            |r| r.get(0),
+        )?;
+        if owner != app {
+            return Err(conflict(
+                "type_prefix_owned",
+                "This type prefix is already owned by another app.",
+            ));
+        }
+        Ok(())
+    }
     fn mode(
         db: &Connection,
         ctx: &str,
         recipient: &str,
+        app: &str,
         typ: &str,
         sender: Option<&str>,
     ) -> Result<&'static str> {
-        let (app, tail) = typ
+        let (_, tail) = typ
             .split_once('.')
             .ok_or_else(|| v_err("Invalid stored notification type."))?;
         let service = tail
@@ -183,31 +267,54 @@ impl Store {
         p: &Principal,
         app: &str,
         b: &Value,
-        update: bool,
+        update: Option<&str>,
+    ) -> Result<(u16, Value)> {
+        self.register_type_context(&p.context, app, b, update)
+    }
+    pub fn register_app_type(
+        &self,
+        p: &AppAuthority,
+        app: &str,
+        b: &Value,
+    ) -> Result<(u16, Value)> {
+        if app != p.app_id {
+            return Err(Error::new(
+                403,
+                "permission_denied",
+                "The app must match the verified proof issuer.",
+                "Register notification types only for the issuing app.",
+            ));
+        }
+        self.register_type_context(&p.context, app, b, None)
+    }
+    fn register_type_context(
+        &self,
+        context: &str,
+        app: &str,
+        b: &Value,
+        update: Option<&str>,
     ) -> Result<(u16, Value)> {
         v::fields(
             b,
-            if update {
+            if update.is_some() {
                 &["description", "schema"]
             } else {
                 &["type", "description", "schema"]
             },
-            if update {
+            if update.is_some() {
                 &[]
             } else {
                 &["type", "description", "schema"]
             },
         )?;
-        if update && b.as_object().is_none_or(|m| m.is_empty()) {
+        if update.is_some() && b.as_object().is_none_or(|m| m.is_empty()) {
             return Err(v_err("Supply description or schema."));
         }
-        let typ = if update {
-            app
-        } else {
-            v::string(b, "type", 255)?
+        let typ = match update {
+            Some(typ) => typ,
+            None => v::string(b, "type", 255)?,
         };
-        let (owner, _) = v::type_parts(typ)?;
-        if !update && owner != app {
+        if !self.prefixes.owns(app, typ)? {
             return Err(v_err("The type must belong to the app in the URL."));
         }
         if b.get("description").is_some() {
@@ -217,25 +324,32 @@ impl Store {
             v::schema(schema)?;
         }
         let mut db = self.lock()?;
-        let tx = db.transaction()?;
-        let old: Option<(String, String)> = tx.query_row("SELECT t.description,COALESCE(s.schema,'{}') FROM types t LEFT JOIN type_schemas s ON s.ctx=t.ctx AND s.name=t.name WHERE t.ctx=? AND t.name=?",params![p.context,typ],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if update && old.is_none() {
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        self.claim_namespace(&tx, context, app, typ)?;
+        let old:Option<(String,String,String)>=tx.query_row("SELECT t.app,t.description,COALESCE(s.schema,'{}') FROM types t LEFT JOIN type_schemas s ON s.ctx=t.ctx AND s.name=t.name WHERE t.ctx=? AND t.name=?",params![context,typ],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        if old.as_ref().is_some_and(|(owner, _, _)| owner != app) {
+            return Err(conflict(
+                "type_prefix_owned",
+                "This type already belongs to another app.",
+            ));
+        }
+        if update.is_some() && old.is_none() {
             return Err(Error::not_found());
         }
         let description = b
             .get("description")
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .or_else(|| old.as_ref().map(|r| r.0.clone()))
+            .or_else(|| old.as_ref().map(|r| r.1.clone()))
             .unwrap();
         let schema = b.get("schema").cloned().unwrap_or(decode(
             old.as_ref()
-                .map(|r| r.1.clone())
+                .map(|r| r.2.clone())
                 .unwrap_or_else(|| "{}".into()),
         )?);
-        let status = if update {
+        let status = if update.is_some() {
             200
-        } else if let Some((old_description, old_schema)) = &old {
+        } else if let Some((_, old_description, old_schema)) = &old {
             if old_description != &description || decode(old_schema.clone())? != schema {
                 return Err(conflict(
                     "type_exists",
@@ -248,11 +362,11 @@ impl Store {
         };
         tx.execute(
             "INSERT OR REPLACE INTO types VALUES(?,?,?,?)",
-            params![p.context, owner, typ, description],
+            params![context, app, typ, description],
         )?;
         tx.execute(
             "INSERT OR REPLACE INTO type_schemas VALUES(?,?,?)",
-            params![p.context, typ, schema.to_string()],
+            params![context, typ, schema.to_string()],
         )?;
         tx.commit()?;
         Ok((
@@ -396,8 +510,8 @@ impl Store {
             &["type", "data", "key"],
         )?;
         let typ = v::string(b, "type", 255)?;
-        let (app, _) = v::type_parts(typ)?;
-        if app != p.app_id {
+        let app = p.app_id.as_str();
+        if !self.prefixes.owns(app, typ)? {
             return Err(Error::new(
                 403,
                 "permission_denied",
@@ -493,7 +607,7 @@ impl Store {
                 "The recipient must explicitly enable required delivery on their subscription.",
             ));
         }
-        let mode = Self::mode(&tx, &p.context, &recipient, typ, sender)?;
+        let mode = Self::mode(&tx, &p.context, &recipient, app, typ, sender)?;
         let silent = mode == "silent";
         let mid = id("msg");
         let created = stamp();
@@ -745,6 +859,12 @@ impl Store {
     pub fn preference(&self, p: &Principal, b: &Value, reset: bool) -> Result<Value> {
         v::preference(b, !reset)?;
         let app = b["app_id"].as_str().unwrap_or("");
+        if !reset
+            && let Some(typ) = b["type"].as_str()
+            && !self.prefixes.owns(app, typ)?
+        {
+            return Err(v_err("The type must belong to app_id."));
+        }
         let scope = if let Some(sender) = b["from"].as_str() {
             format!("from:{sender}")
         } else if let Some(typ) = b["type"].as_str() {
@@ -778,19 +898,27 @@ impl Store {
             )?;
         }
         let pending = {
-            let mut q=tx.prepare("SELECT id,type,body FROM tings WHERE ctx=? AND recipient=? AND read=0 AND silent=0")?;
+            let mut q=tx.prepare("SELECT id,app,type,body FROM tings WHERE ctx=? AND recipient=? AND read=0 AND silent=0")?;
             q.query_map(params![p.context, p.id], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
         };
-        for (mid, typ, body) in pending {
+        for (mid, message_app, typ, body) in pending {
             let body = decode(body)?;
-            match Self::mode(&tx, &p.context, &p.id, &typ, body["from"].as_str())? {
+            match Self::mode(
+                &tx,
+                &p.context,
+                &p.id,
+                &message_app,
+                &typ,
+                body["from"].as_str(),
+            )? {
                 "silent" => {
                     tx.execute("UPDATE tings SET silent=1 WHERE id=?", [&mid])?;
                     tx.execute(
@@ -1120,7 +1248,8 @@ impl Store {
             for (mid, app, typ, body) in pending {
                 let body = decode(body)?;
                 if !Self::grant(&tx, &ctx, &app, &owner)?
-                    || Self::mode(&tx, &ctx, &owner, &typ, body["from"].as_str())? == "blocked"
+                    || Self::mode(&tx, &ctx, &owner, &app, &typ, body["from"].as_str())?
+                        == "blocked"
                 {
                     continue;
                 }
@@ -1165,7 +1294,7 @@ impl Store {
         let mut bytes = 256;
         for (mid, ctx, app, owner, typ, body, row_batch) in rows {
             let mut body = current_body(body, typ.clone(), owner.clone())?;
-            let mode = Self::mode(&tx, &ctx, &owner, &typ, body["from"].as_str())?;
+            let mode = Self::mode(&tx, &ctx, &owner, &app, &typ, body["from"].as_str())?;
             let digest_enabled:bool=tx.query_row("SELECT COALESCE((SELECT enabled FROM silent_schedules WHERE ctx=? AND recipient=?),1)",params![ctx,owner],|r|r.get(0))?;
             let eligible = Self::grant(&tx, &ctx, &app, &owner)?
                 && Self::target_receivers(&tx, &ctx, &owner, Some(receiver))?
@@ -1250,7 +1379,7 @@ impl Store {
             params![hid, p.context, p.id, receiver, p.session],
         )?;
         let backlog = {
-            let mut q=tx.prepare("SELECT id,type,body FROM tings WHERE ctx=? AND recipient=? AND read=0 AND silent=0 AND created>=? AND (json_extract(body,'$.session_id') IS NULL OR json_extract(body,'$.session_id')=?)")?;
+            let mut q=tx.prepare("SELECT id,app,type,body FROM tings WHERE ctx=? AND recipient=? AND read=0 AND silent=0 AND created>=? AND (json_extract(body,'$.session_id') IS NULL OR json_extract(body,'$.session_id')=?)")?;
             q.query_map(
                 params![p.context, p.id, retention_cutoff(3), receiver],
                 |r| {
@@ -1258,18 +1387,19 @@ impl Store {
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
                     ))
                 },
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?
         };
-        for (mid, typ, body) in backlog {
+        for (mid, app, typ, body) in backlog {
             let body = decode(body)?;
-            let app = typ.split_once('.').map(|p| p.0).unwrap_or("");
-            if Self::grant(&tx, &p.context, app, &p.id)?
-                && Self::mode(&tx, &p.context, &p.id, &typ, body["from"].as_str())? == "allowed"
+            if Self::grant(&tx, &p.context, &app, &p.id)?
+                && Self::mode(&tx, &p.context, &p.id, &app, &typ, body["from"].as_str())?
+                    == "allowed"
                 && (body["delivery"] != "required"
-                    || Self::required_delivery_enabled(&tx, &p.context, app, &p.id)?)
+                    || Self::required_delivery_enabled(&tx, &p.context, &app, &p.id)?)
             {
                 tx.execute(
                     "INSERT INTO deliveries(hook,message) VALUES(?,?)",
@@ -1459,7 +1589,7 @@ impl Store {
         let mut digest = false;
         for (mid, app, typ, body, row_digest) in rows {
             let mut body = current_body(body, typ.clone(), owner.clone())?;
-            let mode = Self::mode(&tx, &ctx, &owner, &typ, body["from"].as_str())?;
+            let mode = Self::mode(&tx, &ctx, &owner, &app, &typ, body["from"].as_str())?;
             let digest_enabled:bool=tx.query_row("SELECT COALESCE((SELECT enabled FROM silent_schedules WHERE ctx=? AND recipient=?),1)",params![ctx,owner],|r|r.get(0))?;
             if (row_digest && !digest_enabled)
                 || !Self::grant(&tx, &ctx, &app, &owner)?
@@ -1692,9 +1822,9 @@ mod tests {
         }
     }
     fn fixture() -> (Store, Principal, String) {
-        let store = Store::open(":memory:").unwrap();
+        let store = Store::open(":memory:", &crate::namespaces::Prefixes::default()).unwrap();
         let p = principal("alice");
-        store.register_type(&p,"demo",&json!({"type":"demo.buildDone","description":"Build completed","schema":{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"],"additionalProperties":false}}),false).unwrap();
+        store.register_type(&p,"demo",&json!({"type":"demo.buildDone","description":"Build completed","schema":{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"],"additionalProperties":false}}), None).unwrap();
         let proof = Proof {
             context: p.context.clone(),
             app_id: "demo".into(),
@@ -1740,9 +1870,9 @@ mod tests {
         store
             .register_type(
                 &p,
-                "demo.buildDone",
+                "demo",
                 &json!({"schema":{"type":"object","required":["changed"]}}),
-                true,
+                Some("demo.buildDone"),
             )
             .unwrap();
         assert_eq!(
@@ -1756,12 +1886,12 @@ mod tests {
                     &p,
                     "demo",
                     &json!({"type":"demo.nested.event","description":"Old","schema":{}}),
-                    false
+                    None
                 )
                 .is_err()
         );
-        assert!(store.register_type(&p,"demo",&json!({"type":"demo.remote","description":"Bad","schema":{"$ref":"https://example.com/schema"}}),false).is_err());
-        assert!(store.register_type(&p,"demo",&json!({"type":"demo.invalid","description":"Bad","schema":{"type":"nonsense"}}),false).is_err());
+        assert!(store.register_type(&p,"demo",&json!({"type":"demo.remote","description":"Bad","schema":{"$ref":"https://example.com/schema"}}), None).is_err());
+        assert!(store.register_type(&p,"demo",&json!({"type":"demo.invalid","description":"Bad","schema":{"type":"nonsense"}}), None).is_err());
     }
 
     #[test]
@@ -2128,7 +2258,7 @@ mod tests {
         let filename = path.to_str().unwrap();
         let p = principal("alice");
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             let db = store.lock().unwrap();
             db.execute(
                 "INSERT INTO types VALUES('accounts','demo','demo.build.finished','Legacy')",
@@ -2147,7 +2277,7 @@ mod tests {
             .unwrap();
         }
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             let prefs = store.preferences(&p, &json!({})).unwrap();
             assert_eq!(prefs.len(), 2);
             assert!(prefs.iter().all(|x| x["service"].is_null()));
@@ -2163,7 +2293,7 @@ mod tests {
                 .unwrap();
         }
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             assert!(store.preferences(&p, &json!({})).unwrap().is_empty());
             assert_eq!(
                 store.types_for_app("demo").unwrap()[0]["type"],
@@ -2230,20 +2360,20 @@ mod tests {
         let filename = path.to_str().unwrap();
         let p = principal("alice");
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             let fallback = store.silent_schedule(&p).unwrap();
             assert_eq!(fallback["time"], "09:00");
             assert_eq!(fallback["timezone"], "UTC");
         }
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             store
                 .initialize_timezone(&p.context, &p.id, "Asia/Kolkata")
                 .unwrap();
             assert_eq!(store.silent_schedule(&p).unwrap()["time"], "00:00");
         }
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             store
                 .initialize_timezone(&p.context, &p.id, "Europe/London")
                 .unwrap();
@@ -2264,7 +2394,7 @@ mod tests {
             db.execute_batch("CREATE TABLE silent_schedules(ctx TEXT,recipient TEXT,enabled INTEGER NOT NULL DEFAULT 1,time TEXT NOT NULL DEFAULT '09:00',timezone TEXT NOT NULL DEFAULT 'UTC',next_at INTEGER NOT NULL,PRIMARY KEY(ctx,recipient)); INSERT INTO silent_schedules VALUES('accounts','alice',0,'18:45','Europe/London',1234); INSERT INTO silent_schedules VALUES('accounts','bob',1,'09:00','UTC',5678);").unwrap();
         }
         {
-            let store = Store::open(filename).unwrap();
+            let store = Store::open(filename, &crate::namespaces::Prefixes::default()).unwrap();
             for user in ["alice", "bob"] {
                 let p = principal(user);
                 let before = store.silent_schedule(&p).unwrap();
@@ -2299,5 +2429,86 @@ mod tests {
         assert!(next_schedule("25:00", "UTC", after).is_err());
         assert!(next_schedule("9:00", "UTC", after).is_err());
         assert!(next_schedule("09:00", "not/a-zone", after).is_err());
+    }
+}
+
+#[cfg(test)]
+mod app_type_tests {
+    use super::*;
+
+    #[test]
+    fn verified_app_registration_respects_configured_prefix_ownership() {
+        let prefixes = crate::namespaces::Prefixes::parse(r#"{"cells":"silicon-cells"}"#).unwrap();
+        let store = Store::open(":memory:", &prefixes).unwrap();
+        let authority = AppAuthority {
+            context: "accounts".into(),
+            app_id: "silicon-cells".into(),
+            expires_at: now() + 60,
+        };
+        let body =
+            json!({"type":"cells.databaseFailing","description":"Database failing","schema":{}});
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-cells", &body)
+                .unwrap()
+                .0,
+            201
+        );
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-cells", &body)
+                .unwrap()
+                .0,
+            200
+        );
+        let other = AppAuthority {
+            app_id: "cells".into(),
+            ..authority
+        };
+        assert!(store.register_app_type(&other, "cells", &body).is_err());
+    }
+
+    #[test]
+    fn verified_app_registration_is_idempotent_and_cannot_cross_apps() {
+        let store = Store::open(":memory:", &crate::namespaces::Prefixes::default()).unwrap();
+        let authority = AppAuthority {
+            context: "accounts".into(),
+            app_id: "silicon-organizations".into(),
+            expires_at: now() + 60,
+        };
+        let body = json!({"type":"silicon-organizations.roleChanged","description":"Organization role changed","schema":{}});
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-organizations", &body)
+                .unwrap()
+                .0,
+            201
+        );
+        assert_eq!(
+            store
+                .register_app_type(&authority, "silicon-organizations", &body)
+                .unwrap()
+                .0,
+            200
+        );
+        assert!(
+            store
+                .register_app_type(
+                    &authority,
+                    "write",
+                    &json!({"type":"write.documentChanged","description":"Other app","schema":{}})
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .register_app_type(
+                    &authority,
+                    "silicon-organizations",
+                    &json!({"type":"write.documentChanged","description":"Other app","schema":{}})
+                )
+                .is_err()
+        );
+        assert!(store.register_app_type(&authority, "silicon-organizations", &json!({"type":"silicon-organizations.roleChanged","description":"Different description","schema":{}})).is_err());
     }
 }

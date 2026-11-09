@@ -48,6 +48,7 @@ struct Session {
     expires: i64,
 }
 pub struct Auth {
+    prefixes: crate::namespaces::Prefixes,
     db: Mutex<Connection>,
     cipher: Aes256Gcm,
     accounts: String,
@@ -138,6 +139,7 @@ impl Auth {
           CREATE UNIQUE INDEX IF NOT EXISTS account_login_credential ON account_logins(credential_hash);
           CREATE TABLE IF NOT EXISTS account_exchanges(id TEXT PRIMARY KEY,credential_hash TEXT NOT NULL UNIQUE);")?;
         Ok(Self {
+            prefixes: config.type_prefix_aliases.clone(),
             db: Mutex::new(db),
             cipher: Aes256Gcm::new_from_slice(&key)
                 .map_err(|_| anyhow::anyhow!("Invalid encryption key"))?,
@@ -660,6 +662,7 @@ impl Auth {
             "/v1/subscriptions/revoke" => "subscriptions.revoke",
             "/v1/sent/query" => "tings.read",
             "/v1/sent/read" => "tings.read.update",
+            "/v1/app-types/register" => "types.manage",
             _ => return Err(forbidden()),
         };
         if value["valid"] != true
@@ -705,7 +708,7 @@ impl Auth {
             || body
                 .get("type")
                 .and_then(Value::as_str)
-                .is_some_and(|t| v::type_parts(t).map_or(true, |p| p.0 != app))
+                .is_some_and(|t| !self.prefixes.owns(app, t).unwrap_or(false))
         {
             return Err(forbidden());
         }

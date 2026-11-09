@@ -171,6 +171,8 @@ pub fn nonempty(s: &str, name: &str) -> Result<()> {
         Ok(())
     }
 }
+/// Parse a type label and return its prefix. The server resolves operator aliases;
+/// this prefix is not necessarily the canonical sending application ID.
 pub fn type_app(s: &str) -> Result<&str> {
     if s.len() > 255 {
         return Err(Error::input("Type exceeds 255 bytes."));
@@ -467,12 +469,8 @@ impl Prepared {
             return Err(Error::input("A send requires for or session_id."));
         }
         if let Some(t) = v.get("type").and_then(Value::as_str) {
-            let app = type_app(t)?;
-            if let Some(a) = v.get("app_id").and_then(Value::as_str)
-                && a != app
-            {
-                return Err(Error::input("Type does not belong to the selected app."));
-            }
+            // Alias ownership is operator configuration, available only at the server.
+            type_app(t)?;
         }
         if v.get("key")
             .and_then(Value::as_str)
@@ -863,6 +861,22 @@ mod notification_tests {
         } else {
             assert!(!request.contains("x-ting-timezone:"));
         }
+    }
+
+    #[test]
+    fn prepared_alias_queries_preserve_canonical_app_and_exact_body() {
+        let body = br#"{"app_id":"silicon-cells","type":"cells.databaseFailing"}"#.to_vec();
+        let request = Prepared::new(ProofOperation::SentList, body.clone()).unwrap();
+        assert_eq!(request.body, body);
+        assert_eq!(request.value["app_id"], "silicon-cells");
+        assert_eq!(type_app("cells.databaseFailing").unwrap(), "cells");
+        assert!(
+            Prepared::new(
+                ProofOperation::SentList,
+                br#"{"app_id":"silicon-cells","type":"cells.database.failing"}"#.to_vec()
+            )
+            .is_err()
+        );
     }
 
     #[test]

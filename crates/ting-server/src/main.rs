@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod migration;
+mod namespaces;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,7 @@ use validation as v;
 
 #[derive(Clone)]
 pub struct Config {
+    pub type_prefix_aliases: namespaces::Prefixes,
     pub database_path: String,
     pub encryption_key: String,
     pub accounts_url: String,
@@ -51,6 +53,9 @@ impl Config {
         let browser_origins =
             browser_origins(&env::var("TING_BROWSER_ORIGINS").unwrap_or_default())?;
         Ok(Self {
+            type_prefix_aliases: namespaces::Prefixes::parse(
+                &env::var("TING_TYPE_PREFIX_ALIASES").unwrap_or_else(|_| "{}".into()),
+            )?,
             database_path: env::var("TING_DATABASE_PATH").unwrap_or("ting.sqlite".into()),
             encryption_key: required("TING_ENCRYPTION_KEY")?,
             accounts_url: env::var("TING_ACCOUNTS_URL")
@@ -108,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let config = Config::env()?;
     let auth = auth::Auth::new(&config)?;
-    let store = store::Store::open(&config.database_path)?;
+    let store = store::Store::open(&config.database_path, &config.type_prefix_aliases)?;
     let app = Arc::new(App {
         config,
         auth,
@@ -516,6 +521,21 @@ async fn http(
         );
         return Ok(r);
     }
+    if let ("POST", ["apps", aid, "types"]) = (method.as_str(), parts.as_slice())
+        && headers
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .is_some_and(|s| s.starts_with("Bearer sap_"))
+    {
+        let authority = app
+            .auth
+            .app_authority(&headers, "/v1/app-types/register", &bytes, &b)
+            .await?;
+        let _gate = app.mutations.lock().await;
+        app.auth.check_app(&authority)?;
+        let (status, body) = app.store.register_app_type(&authority, aid, &b)?;
+        return Ok(response(status, body));
+    }
     let p = app.auth.authenticate(&token(&headers)?, &headers).await?;
     if let Some(timezone) = headers.get("x-ting-timezone") {
         let timezone = timezone
@@ -560,14 +580,14 @@ async fn http(
             Ok(response(200, app.store.page(rows, &binding, &f, false)?))
         }
         ("POST", ["apps", aid, "types"]) => {
-            let (s, b) = app.store.register_type(&p, aid, &b, false)?;
+            let (s, b) = app.store.register_type(&p, aid, &b, None)?;
             Ok(response(s, b))
         }
         ("PATCH", ["apps", aid, "types", typ]) => {
-            if v::type_parts(typ)?.0 != *aid {
+            if !app.config.type_prefix_aliases.owns(aid, typ)? {
                 return Err(Error::not_found());
             }
-            let (s, b) = app.store.register_type(&p, typ, &b, true)?;
+            let (s, b) = app.store.register_type(&p, aid, &b, Some(typ))?;
             Ok(response(s, b))
         }
         ("GET", ["subscriptions"]) => {
@@ -1044,3 +1064,6 @@ async fn upgrade(
         .max_frame_size(1024 * 1024)
         .on_upgrade(move |socket| ws::connection(app, socket, browser)))
 }
+
+#[cfg(test)]
+mod namespace_tests;

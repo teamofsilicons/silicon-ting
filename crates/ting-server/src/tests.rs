@@ -67,6 +67,7 @@ impl Server {
         let directory = std::env::temp_dir().join(format!("ting-tests-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let config = Config {
+            type_prefix_aliases: namespaces::Prefixes::default(),
             database_path: directory.join("ting.sqlite").to_str().unwrap().into(),
             encryption_key: "00".repeat(32),
             accounts_url,
@@ -82,7 +83,7 @@ impl Server {
         };
         let app = Arc::new(App {
             auth: auth::Auth::new(&config).unwrap(),
-            store: store::Store::open(&config.database_path).unwrap(),
+            store: store::Store::open(&config.database_path, &config.type_prefix_aliases).unwrap(),
             config,
             hub: ws::Hub::default(),
             changed: Notify::new(),
@@ -94,7 +95,7 @@ impl Server {
         }, "demo", &json!({
             "type": "demo.finished", "description": "A task finished",
             "schema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"], "additionalProperties": false}
-        }), false).unwrap();
+        }), None).unwrap();
         let service = router(app.clone());
         let server_task =
             tokio::spawn(async move { axum::serve(listener, service).await.unwrap() });
@@ -346,4 +347,66 @@ async fn identity_sessions_fan_out_target_and_honor_sender_blocks() {
         .unwrap();
     assert_eq!(schedule["enabled"], false);
     assert_eq!(schedule["time"], "18:30");
+}
+
+#[tokio::test]
+async fn timezone_detection_initializes_midnight_without_overwriting_saved_choices() {
+    let server = Server::start().await;
+    let http = reqwest::Client::new();
+    let login: Value = http
+        .post(format!("{}/v1/session", server.client.origin))
+        .header("Idempotency-Key", "timezone-login-operation")
+        .json(&json!({"slt":"slt_timezone"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = login["session_token"].as_str().unwrap();
+    let path = format!("{}/v1/silent-schedule", server.client.origin);
+    let fallback: Value = http
+        .get(&path)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fallback["time"], "09:00");
+    assert_eq!(fallback["timezone"], "UTC");
+    let detected: Value = http
+        .get(&path)
+        .bearer_auth(token)
+        .header("X-Ting-Timezone", "Asia/Kolkata")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detected["time"], "00:00");
+    assert_eq!(detected["timezone"], "Asia/Kolkata");
+    http.put(&path)
+        .bearer_auth(token)
+        .json(&json!({"time":"18:30","enabled":false}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let saved: Value = http
+        .get(&path)
+        .bearer_auth(token)
+        .header("X-Ting-Timezone", "America/New_York")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(saved["time"], "18:30");
+    assert_eq!(saved["timezone"], "Asia/Kolkata");
+    assert_eq!(saved["enabled"], false);
 }

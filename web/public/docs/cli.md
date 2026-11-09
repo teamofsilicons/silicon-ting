@@ -75,11 +75,13 @@ ting apps list
 ting types list --app dm
 ting types register --type dm.messageReceived --description 'A new message arrived' --schema '{"type":"object"}'
 ting types update --type dm.messageReceived --description 'A message is available' --schema @message-schema.json
+# An operator-assigned prefix uses the canonical app explicitly.
+ting types register --app silicon-cells --type cells.databaseFailing --description 'A database operation failed' --schema '{"type":"object"}'
 ```
 
-Silicon Apps provides the application catalog and author identity. Reading an application's catalog entry does not grant send or management permission. Type registration and updates require a saved Ting session belonging to an authorized app author.
+Silicon Apps provides the application catalog and author identity. Reading an application's catalog entry does not grant send or management permission. Type registration and updates normally use a saved Ting session belonging to an authorized app author. Registration also accepts `--app-token-stdin` or `--app-token-file PRIVATE_PATH` with a `types.manage` App verification proof; that path needs no Ting login. Supply `--type`, `--description`, and `--schema` directly with either credential option.
 
-Type names are exactly `<app-id>.<tingid>`: a Silicon Apps ID followed by a nonempty ASCII alphanumeric notification name. No deeper nesting is accepted. Every definition includes a description and JSON Schema for `data`; updates may change either or both. `--schema` accepts an inline JSON Schema object or boolean, or `@FILE`. Legacy three-part types remain visible but cannot be edited or used for new sends. Type lists are public and need no login. Carbon and Silicon defaults are allowed; recipients can make a sender, app or type silent or blocked.
+Type names are exactly `<app-id>.<tingid>`: a Silicon Apps ID (or its operator-assigned prefix) followed by a nonempty ASCII alphanumeric notification name. Use `--app` with the canonical app ID when registering or updating a type under an assigned prefix. No deeper nesting is accepted. Every definition includes a description and JSON Schema for `data`; updates may change either or both. `--schema` accepts an inline JSON Schema object or boolean, or `@FILE`. Legacy three-part types remain visible but cannot be edited or used for new sends. Type lists are public and need no login. Carbon and Silicon defaults are allowed; recipients can make a sender, app or type silent or blocked.
 
 ## Approve a sender
 
@@ -178,7 +180,7 @@ ting preferences set --app dm --type dm.messageReceived --mode allowed
 ting preferences reset --app dm --type dm.messageReceived
 ```
 
-Across matching rules, blocked wins over silent, then allowed. A sender rule uses `--from` alone; a type rule uses `--type` and optionally a matching `--app` (the app is inferred from the type). Blocked tings never enter the recipient’s history or delivery queues. Silent tings wait for a daily digest.
+Across matching rules, blocked wins over silent, then allowed. A sender rule uses `--from` alone; a type rule uses `--type` and optionally the canonical `--app` (the prefix is used when omitted). Operator-assigned prefixes require the canonical app explicitly. Blocked tings never enter the recipient’s history or delivery queues. Silent tings wait for a daily digest.
 
 ```sh
 ting silent-schedule get

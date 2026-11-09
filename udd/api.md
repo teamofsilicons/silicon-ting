@@ -45,8 +45,9 @@ App calls use a scoped Accounts app token targeted at Ting. Registration also re
 | `/v1/subscriptions/revoke` | POST | `subscriptions.revoke` |
 | `/v1/sent/query` | POST | `tings.read` |
 | `/v1/sent/read` | POST | `tings.read.update` |
+| `/v1/apps/{app_id}/types` | POST | `types.manage` (or an authorized author session) |
 
-Ting verifies these tokens with Silicon Accounts. It checks the source application against the type prefix or `app_id`, checks the target audience and required scope, and checks the delegated account when one is needed. Recipient ownership and active grants are enforced independently of app-token authority.
+Ting verifies these tokens with Silicon Accounts. It checks the source application against the configured owner of the type prefix or the canonical `app_id`, checks the target audience and required scope, and checks the delegated account when one is needed. Recipient ownership and active grants are enforced independently of app-token authority.
 
 Register a recipient:
 
@@ -72,7 +73,7 @@ Content-Type: application/json
 {"type":"dm.messageReceived","for":"si:assistant","key":"message-456","data":{"message_id":"dm_456"},"metadata":{}}
 ```
 
-A type is exactly `<app-id>.<tingid>`. The app prefix is a Silicon Apps ID; `tingid` is a nonempty ASCII alphanumeric name describing the notification. Dots, hyphens and underscores are not allowed in `tingid`, and deeper nesting is rejected. The recipient may be a canonical Carbon/Silicon ID or immutable account UUID. `data` and `metadata` must be JSON objects; metadata defaults to `{}`. A key is nonempty and at most 200 bytes. The complete send request is at most 256 KiB. Duplicate object keys and unknown fields are rejected.
+A type is exactly `<app-id>.<tingid>`. The app prefix defaults to its Silicon Apps ID. An operator may assign another prefix, such as `cells` to `silicon-cells`; proofs, subscriptions, sent-history queries, and preference `app_id` still use the canonical `silicon-cells` ID. `tingid` is a nonempty ASCII alphanumeric name describing the notification. Dots, hyphens and underscores are not allowed in `tingid`, and deeper nesting is rejected. The recipient may be a canonical Carbon/Silicon ID or immutable account UUID. `data` and `metadata` must be JSON objects; metadata defaults to `{}`. A key is nonempty and at most 200 bytes. The complete send request is at most 256 KiB. Duplicate object keys and unknown fields are rejected.
 
 A registered type and either an active account subscription or an anonymous session registration for the app are required. `data` must validate against the type’s current JSON Schema. Preferences determine whether a notification is allowed, silent, or blocked. `"delivery":"required"` is available only after the recipient explicitly opts that subscription in to required delivery.
 
@@ -93,7 +94,7 @@ An app may supply `from` as a Carbon/Silicon handle or account UUID for notifica
 | `/v1/apps/{app_id}/types` | POST | Register `{ "type": "dm.messageReceived", "description": "...", "schema": {"type":"object"} }`. |
 | `/v1/apps/{app_id}/types/{type}` | PATCH | Update `description`, `schema`, or both. |
 
-The public type catalog supports cross-origin GET requests without credentials so other browser apps can consume it. Type writes require a Ting sign-in session and verified application authorship. A public catalog entry gives no management or send authority. Type names are immutable; descriptions contain 1 to 1000 UTF-8 bytes. Each type requires a JSON Schema object or boolean of at most 64 KiB. Schema updates validate future sends; existing history and completed idempotent receipts stay unchanged. Schemas must be self-contained; external references cannot load files or fetch URLs. Carbon and Silicon defaults are allowed.
+The public type catalog supports cross-origin GET requests without credentials so other browser apps can consume it. Type registration accepts either an authorized app-author Ting session or an App verification proof scoped to `types.manage`; updates require an authorized author session. A public catalog entry gives no management or send authority. Type names are immutable; descriptions contain 1 to 1000 UTF-8 bytes. Each type requires a JSON Schema object or boolean of at most 64 KiB. Schema updates validate future sends; existing history and completed idempotent receipts stay unchanged. Schemas must be self-contained; external references cannot load files or fetch URLs. Carbon and Silicon defaults are allowed.
 
 Existing three-part type definitions and history are preserved for inspection. New registrations, edits, and sends require two-part names; legacy three-part definitions cannot be edited or used for new sends. Apps must register replacement types and update callers.
 

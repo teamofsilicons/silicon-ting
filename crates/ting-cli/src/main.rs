@@ -70,7 +70,7 @@ fn cli() -> Command {
  .subcommand(command("login","Sign in with a Silicon Accounts short-lived token").arg(arg("token").conflicts_with_all(["token-stdin","slt"])).arg(a("slt").conflicts_with("token-stdin")).arg(flag("token-stdin")).arg(flag("recover").conflicts_with_all(["token","slt","token-stdin"])).subcommand(command("status","Check this profile's saved session")))
  .subcommand(command("logout","Revoke this profile's session and stop its local forwarding"))
  .subcommand(group("apps","Inspect Silicon Apps applications").subcommand(page(command("list","List visible applications"))))
- .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(command("register","Register a notification type").arg(a("type").required(true)).arg(a("description").required(true)).arg(a("schema").required(true).help("JSON Schema object or boolean, or @path to a JSON file"))).subcommand(command("update","Update a type description or schema").arg(a("type").required(true)).arg(a("description")).arg(a("schema"))))
+ .subcommand(group("types","Manage application notification types").subcommand(page(app(command("list","List application types")).mut_arg("app",|a|a.required(true)))).subcommand(app(command("register","Register a notification type")).arg(a("type").required(true)).arg(a("description").required(true)).arg(a("schema").required(true).help("JSON Schema object or boolean, or @path to a JSON file")).arg(flag("app-token-stdin").conflicts_with("app-token-file").help("Register with a types.manage App verification proof from stdin")).arg(a("app-token-file").help("Register with a types.manage App verification proof from a private file"))).subcommand(app(command("update","Update a type description or schema")).arg(a("type").required(true)).arg(a("description")).arg(a("schema"))))
  .subcommand(group("subscriptions","Manage permission to receive from an application").subcommand(proof(app(command("register","Prepare or execute a recipient-approved subscription registration")).arg(a("for")),true)).subcommand(proof(page(app(command("list","List recipient grants or prepare an app query")).arg(a("for"))),false)).subcommand(proof(app(command("revoke","Revoke a grant as recipient or authorized app")).arg(arg("id")),false)).subcommand(command("required-delivery","Inspect or opt in to required automation delivery").arg(arg("id").required(true)).arg(a("enabled").value_parser(["true","false"]))))
  .subcommand(proof(command("send","Prepare or submit one independently authorized notification").arg(a("type")).arg(a("for")).arg(a("from")).arg(a("session-id")).arg(a("key")).arg(a("data")).arg(a("metadata")).arg(a("delivery").value_parser(["required"])).arg(a("transport").value_parser(["http","websocket"]).default_value("http")),false))
  .subcommand(group("sent","Inspect and update application sent history using a Silicon Accounts app token").subcommand(proof(page(filters(command("list","Prepare or execute a sent query")).arg(a("for"))),false)).subcommand(proof(app(command("get","Prepare or execute a full sent-record query")).arg(arg("id")).arg(a("deliveries-cursor")),false)).subcommands(["mark-read","mark-unread"].map(|name|proof(app(command(name,"Prepare or execute a read-state change for this app's sent tings")).arg(arg("ids").num_args(1..=100)).arg(a("key").help("Unique operation key; use a new key for each new state change")),false))))
@@ -518,7 +518,8 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                     .await;
             }
             let typ = required(m, "type")?;
-            let app = type_app(typ)?;
+            let prefix = type_app(typ)?;
+            let app = s(m, "app").unwrap_or(prefix);
             let mut body = json!({});
             if let Some(description) = s(m, "description") {
                 if description.trim().is_empty() || description.len() > 1000 {
@@ -548,6 +549,10 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 body["type"] = typ.into();
             } else {
                 path.push_str(&format!("/{}", segment(typ)));
+            }
+            if sub == "register" && (b(m, "app-token-stdin") || s(m, "app-token-file").is_some()) {
+                let proof = secret(s(m, "app-token-file"))?;
+                return client.json("POST", &path, Some(body), Some(&proof)).await;
             }
             recipient(
                 &client,
@@ -727,11 +732,8 @@ async fn run(root: &ArgMatches) -> Result<Value> {
                 }
             }
             if let Some(typ) = s(m, "type") {
-                let app = type_app(typ)?;
-                if s(m, "app").is_some_and(|selected| selected != app) {
-                    return Err(Error::input("Type must belong to the selected app."));
-                }
-                body["app_id"] = app.into();
+                let prefix = type_app(typ)?;
+                body["app_id"] = s(m, "app").unwrap_or(prefix).into();
             }
             if sub != "list" && body.as_object().unwrap().is_empty() {
                 return Err(Error::input("Choose --app, --type or --from."));
@@ -876,6 +878,31 @@ mod tests {
     fn command_contract_accepts_sessions_schemas_and_modes() {
         cli().debug_assert();
         for args in [
+            vec![
+                "ting",
+                "types",
+                "register",
+                "--app",
+                "silicon-cells",
+                "--type",
+                "cells.databaseFailing",
+                "--description",
+                "Database failure",
+                "--schema",
+                "{}",
+                "--app-token-stdin",
+            ],
+            vec![
+                "ting",
+                "preferences",
+                "set",
+                "--app",
+                "silicon-cells",
+                "--type",
+                "cells.databaseFailing",
+                "--mode",
+                "silent",
+            ],
             vec!["ting", "listen", "--anonymous", "--app", "dm"],
             vec![
                 "ting",

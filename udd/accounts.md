@@ -27,7 +27,9 @@ If an integration separately uses the token exchange refresh grant, refresh toke
 
 An app obtains a proof addressed to `ting` from Accounts. Use App verification for actions performed by the application and User verification for actions requiring a user's identity. Ting verifies proofs server-side with its own app credentials through `POST /v1/proofs/verify`.
 
-A valid proof identifies its issuing app, receiving app, expiry, scopes, and—for User verification—the account UUID. Ting checks the proof's kind and action scope, and then its own subscription and ownership rules. A proof is not a blanket permission to notify any account. Current app authorship from Silicon Apps controls management of that app's notification types.
+A valid proof identifies its issuing app, receiving app, expiry, scopes, and—for User verification—the account UUID. Ting checks the proof's kind and action scope, and then its own subscription and ownership rules. A proof is not a blanket permission to notify any account. Current app authorship from Silicon Apps controls user management of that app's notification types.
+
+Backend services can register their own types with `POST /v1/apps/{app_id}/types`, using an App verification proof addressed to `ting` with scope `types.manage`. The URL app must match the verified issuing app, which must own the type prefix under the operator’s alias configuration. Send `type`, `description`, and `schema`; an identical repeat succeeds without creating another type. A different description or schema conflicts and must be changed through the author management flow. This proof does not register recipients or grant notification subscriptions.
 
 Recipient subscriptions and notification preferences remain under the recipient account's control. Application authors are Carbons or Silicons; there is no organization owner, organization membership, or organization context.
 

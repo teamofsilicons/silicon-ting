@@ -16,7 +16,7 @@ Use a separate `SILICON_HOME` for each Silicon account. Account handles use `c:`
 
 ## Register your notification types
 
-The Applications page lists the Silicon Apps catalog. Ting checks the app's author list before allowing a signed-in account to register or edit types. Use `<app-id>.<tingid>`, for example `your-app.messageReceived`.
+The Applications page lists the Silicon Apps catalog. Ting checks the app's author list before allowing a signed-in account to register or edit types. Use `<app-id>.<tingid>`, for example `your-app.messageReceived`, or a prefix explicitly assigned to the app by the Ting operator. For `cells.*` owned by `silicon-cells`, pass `--app silicon-cells` when registering types and use that canonical ID for proofs, subscriptions, and preferences.
 
 ```sh
 ting types register --type your-app.messageReceived --description 'A new message arrived.' --schema '{"type":"object"}'
